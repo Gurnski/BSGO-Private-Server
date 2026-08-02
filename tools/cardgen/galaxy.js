@@ -207,8 +207,13 @@ const SHARED_REGULATION = 310000;
 const CONTROL = {
   CR:   { colJump: true,  cylJump: false, colOutpost: true,  cylOutpost: false },
   KR:   { colJump: false, cylJump: true,  colOutpost: false, cylOutpost: true  },
-  Cc:   { colJump: true,  cylJump: true,  colOutpost: true,  cylOutpost: false },
-  Kc:   { colJump: true,  cylJump: true,  colOutpost: false, cylOutpost: true  },
+  /* Cc/Kc were one-faction outpost space; both flags are now true so every system both sides
+   * can reach is also a system both sides can HOLD. The cost: patch 0013's seeding rule keys
+   * off single-flag systems, so Cc/Kc now boot contested (empty) instead of pre-held by their
+   * historical owner - reclaiming them is gameplay. Home space (CR/KR) keeps single-faction
+   * outposts because the enemy cannot jump there at all. */
+  Cc:   { colJump: true,  cylJump: true,  colOutpost: true,  cylOutpost: true  },
+  Kc:   { colJump: true,  cylJump: true,  colOutpost: true,  cylOutpost: true  },
   '--': { colJump: true,  cylJump: true,  colOutpost: true,  cylOutpost: true  },
 };
 
