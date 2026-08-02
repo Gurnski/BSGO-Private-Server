@@ -9,6 +9,7 @@ import io.github.luigeneric.core.community.party.PartyRegistry;
 import io.github.luigeneric.core.database.DbProvider;
 import io.github.luigeneric.core.galaxy.Galaxy;
 import io.github.luigeneric.core.gameplayalgorithms.ExperienceToLevelAlgo;
+import io.github.luigeneric.core.player.Player;
 import io.github.luigeneric.core.player.login.SessionRegistry;
 import io.github.luigeneric.core.protocols.ProtocolID;
 import io.github.luigeneric.core.protocols.debug.RefundProcessor;
@@ -22,6 +23,8 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.spi.CDI;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.Set;
@@ -146,22 +149,55 @@ public class GameServer implements IServerListenerSubscriber, UserDisconnectedSu
                 final BgoProtocolWriter disconnectBw = sceneProtocol.writeDisconnect();
                 user.send(disconnectBw);
             }
-            catch (NoSuchElementException noSuchElementException)
+            catch (final Exception ex)
             {
-                noSuchElementException.printStackTrace();
+                // was: NoSuchElementException only, so any other exception aborted the loop and
+                // every remaining user went undisconnected and unsaved
+                log.warn("Could not send Disconnect to a user: {}", ex.toString());
             }
         }
 
         final Set<User> stillOnline = this.usersContainer.userSet(User::isConnected);
         for (final User onlineUser : stillOnline)
         {
-            onlineUser.getConnection().ifPresent(connection -> connection.closeConnection("Shutdown process, user was still online"));
+            try
+            {
+                onlineUser.getConnection().ifPresent(connection -> connection.closeConnection("Shutdown process, user was still online"));
+            }
+            catch (final Exception ex)
+            {
+                log.warn("Could not close a connection during shutdown: {}", ex.toString());
+            }
         }
         log.warn("All onlineusers disconnected");
 
         log.warn("SectorRegistry stopping...");
         this.sectorRegistry.shutdown();
         log.warn("SectorRegistry stopped");
+
+        // THE actual save. This method previously wrote guilds and nothing else - players were only
+        // ever persisted as a side effect of closeConnection() -> onDisconnect(), which loses every
+        // user whose client closed the socket first, and everything since the last periodic
+        // snapshot. That is the main reason characters kept disappearing across restarts.
+        // Snapshot EVERY cached user, not just connected ones: a user who dropped inside the
+        // inactive-kicker window is still in the map and may have missed its disconnect write.
+        try
+        {
+            final List<User> allCached = this.usersContainer.userList(user -> true);
+            final List<Player> toWrite = new ArrayList<>();
+            for (final User u : allCached)
+            {
+                try { toWrite.add(u.getPlayer()); }
+                catch (final Exception ex) { log.warn("Skipping a user during shutdown save: {}", ex.toString()); }
+            }
+            log.warn("Writing {} players to db before shutdown...", toWrite.size());
+            this.dbProviderProvider.bulkWritePlayerToDb(toWrite);
+            log.warn("Player shutdown save finished");
+        }
+        catch (final Exception ex)
+        {
+            log.error("Player shutdown save FAILED - progress may be lost", ex);
+        }
 
         log.info("Writing guilds....");
         this.dbProviderProvider.writeGuilds(guildRegistry);
