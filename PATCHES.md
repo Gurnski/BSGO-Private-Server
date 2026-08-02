@@ -1,5 +1,10 @@
 # Server patches
 
+These changes also live as one commit each on the
+[`private-server` branch of our fork](https://github.com/Gurnski/BSGOCore/tree/private-server),
+which is what you actually clone and run. This file is the annotated changelog; the `patches/`
+files are the same changes as standalone diffs against pristine upstream, for review or reapply.
+
 Thirteen patches against [BSGOCore](https://github.com/luigeneric/BSGOCore) at baseline
 **`23bad98a`** ("Fix PulseManeuver, fix DynamicMovementController", #10).
 

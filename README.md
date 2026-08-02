@@ -12,6 +12,11 @@ Everything here runs on [BSGOCore](https://github.com/luigeneric/BSGOCore) by
 in Java (AGPL-3.0). The protocol, the sector simulation, movement, combat, persistence: all of
 that is his work. This project is a layer on top of his server, not a replacement for it.
 
+The server we actually run is the
+[`private-server` branch of our fork](https://github.com/Gurnski/BSGOCore/tree/private-server):
+luigeneric's tree with every change of ours as a documented commit on top, so upstream history
+and credit stay intact and his future fixes stay mergeable.
+
 The one thing BSGOCore cannot provide is game data. The BSGO client ships with none: no ship
 stats, no items, no sector layouts. Every "card" is fetched from the server at runtime, and the
 card database was never published, so a fresh BSGOCore install has nothing to serve. That gap is
@@ -26,9 +31,10 @@ against BSGOCore's own source and fails the build rather than emit a bad one, be
 handles a bad card by hanging on the loading screen forever. It also writes a sector template
 for each system.
 
-`patches/` holds 13 patches against BSGOCore, documented one by one in
-[PATCHES.md](PATCHES.md) with the symptom each fixes. About half are bug fixes we intend to
-offer upstream; the rest are choices that suit a small private server:
+Our server changes live as commits on [the fork](https://github.com/Gurnski/BSGOCore/tree/private-server);
+`patches/` keeps the same changes as standalone patch files against pristine upstream, documented
+one by one in [PATCHES.md](PATCHES.md) with the symptom each fixes. About half are bug fixes we
+intend to offer upstream; the rest are choices that suit a small private server:
 
 - the protocol-revision handshake the final client demands (without it, the client exits to
   desktop the moment it connects)
@@ -61,15 +67,16 @@ Login through undocking into space works end to end at full framerate.
 | Area | State |
 |---|---|
 | Login, reconnects, persistence | working |
-| Catalogue streaming (1,260 cards) | working |
+| Catalogue streaming (1,372 cards) | working |
 | Character creation | working |
 | Hangar / CIC / shop | working |
 | Space: undock, fly, boost, FTL | working |
-| Galaxy (58 systems, 26 outposts at boot) | working |
+| Galaxy (58 systems, every reachable one contestable) | working |
+| Outpost rings scaling with control level | working |
 | Mining | working |
 | Ship roster (14 hulls per faction, 4 tiers) | working |
 | Combat | partial: weapons fire, untested end to end |
-| NPCs | partial: spawn and fly, aggro untested |
+| NPCs | partial: strikes, escorts, lines and the two event bosses roam by threat level; return fire untested |
 | Missions | partial: templates load, completion untested |
 | Guilds, tournaments, ship upgrading | not started |
 
@@ -79,36 +86,32 @@ You need JDK 21, Node.js, and your own BSGO client (protocol revision 4578, the 
 build). QUICKSTART.md walks through every step with the expected output; the short version:
 
 ```powershell
-# 1. This repo, with BSGOCore cloned inside it (BSGOCore/ is gitignored here)
+# 1. This repo, with our BSGOCore fork cloned inside it (BSGOCore/ is gitignored here)
 git clone https://github.com/Gurnski/BSGO-Private-Server.git
 cd BSGO-Private-Server
-git clone https://github.com/luigeneric/BSGOCore.git
+git clone -b private-server https://github.com/Gurnski/BSGOCore.git
 cd BSGOCore
-git checkout 23bad98a
 
-# 2. Apply the patch set
-Get-ChildItem ..\patches\*.patch | ForEach-Object { git apply --ignore-whitespace $_.FullName }
-
-# 3. Server config
+# 2. Server config
 Copy-Item .env.example .env       # then edit: CLIENT_PATH, GAMESERVER_IGNORE_HASHES=true
 New-Item -ItemType Directory -Force sqlite
 bash certs/generate-certs.sh      # or generate cert.pem / key.pem however you like
 Copy-Item -Recurse ServerConfigurationUtils_public ServerConfigurationUtils
-Copy-Item -Recurse -Force ..\config\ColliderTemplates,..\config\LootTemplates ServerConfigurationUtils\global\
+Copy-Item -Recurse -Force ..\config\ColliderTemplates,..\config\LootTemplates,..\config\ShipConfigTemplates ServerConfigurationUtils\global\
 
-# 4. Generate the card data (loca keys come from YOUR client and are never committed)
+# 3. Generate the card data (loca keys come from YOUR client and are never committed)
 cd ..
 node tools\cardgen\extract-loca-keys.js "<your-client>\assetbundles\locale.lang_en"
 node tools\cardgen\emit-sector-templates.js
 node tools\cardgen\cards.js
 
-# 5. Run
+# 4. Run
 cd BSGOCore
 $env:JAVA_HOME = "C:\path\to\jdk-21"
 .\mvnw.cmd quarkus:dev
 ```
 
-A healthy startup logs `size: 1260` (the card count) and `LoginServerEndpoint waiting for new
+A healthy startup logs `size: 1372` (the card count) and `LoginServerEndpoint waiting for new
 connections`. Anything else, see the troubleshooting table in QUICKSTART.md.
 
 ## Editing the data

@@ -16,35 +16,25 @@ You need:
 ## 1. Get the code
 
 BSGOCore is cloned *inside* this repo's checkout — the directory is gitignored, and the tools
-look for it there by default (`BSGOCORE_PATH` overrides).
+look for it there by default (`BSGOCORE_PATH` overrides). The `private-server` branch of
+[our fork](https://github.com/Gurnski/BSGOCore) is upstream plus every server change as a
+documented commit; `PATCHES.md` explains each one.
 
 ```powershell
 git clone https://github.com/Gurnski/BSGO-Private-Server.git
 cd BSGO-Private-Server
-git clone https://github.com/luigeneric/BSGOCore.git
+git clone -b private-server https://github.com/Gurnski/BSGOCore.git
 cd BSGOCore
-git checkout 23bad98a
 ```
 
-`23bad98a` is the verified baseline the patch set applies to.
-
-## 2. Apply the patches
-
-```powershell
-Get-ChildItem ..\patches\*.patch | ForEach-Object { git apply --ignore-whitespace $_.FullName }
-```
-
-`--ignore-whitespace` is not optional: the checkout mixes LF and CRLF files, so a strict apply
-fails on line endings alone. Each patch and why it exists is documented in `PATCHES.md`.
-
-## 3. Server configuration
+## 2. Server configuration
 
 ```powershell
 Copy-Item .env.example .env
 New-Item -ItemType Directory -Force sqlite
 bash certs\generate-certs.sh      # or generate certs\cert.pem + key.pem however you like
 Copy-Item -Recurse ServerConfigurationUtils_public ServerConfigurationUtils
-Copy-Item -Recurse -Force ..\config\ColliderTemplates,..\config\LootTemplates ServerConfigurationUtils\global\
+Copy-Item -Recurse -Force ..\config\ColliderTemplates,..\config\LootTemplates,..\config\ShipConfigTemplates ServerConfigurationUtils\global\
 ```
 
 Then edit `.env`:
@@ -54,10 +44,11 @@ Then edit `.env`:
 
 Why each step exists: every template reader hardcodes `ServerConfigurationUtils/` (without the
 `_public` suffix); Flyway cannot create the DB in a directory that does not exist; the HTTPS
-listener needs the certs; and the `config/` overlay holds the collider and loot templates the
-server needs but upstream cannot ship (see `config/README.md`).
+listener needs the certs; and the `config/` overlay holds the collider, loot and NPC arming
+templates the server needs but upstream cannot ship (see `config/README.md`). Copy
+`ShipConfigTemplates` in that same overlay step alongside the other two directories.
 
-## 4. Generate the card data
+## 3. Generate the card data
 
 The catalogue is generated, not shipped as JSON. One input comes from **your client** — the
 localisation key list — because it is client-derived and is never committed to this repo.
@@ -69,11 +60,11 @@ node tools\cardgen\emit-sector-templates.js
 node tools\cardgen\cards.js
 ```
 
-`cards.js` must end with `validation passed - 1260 cards`. It fails the build rather than let a
+`cards.js` must end with `validation passed - 1372 cards`. It fails the build rather than let a
 bad card reach a client, because the client has no timeout on card loads — a single malformed
 card is an infinite loading screen with nothing in any log.
 
-## 5. Run the server
+## 4. Run the server
 
 ```powershell
 cd BSGOCore
@@ -84,7 +75,7 @@ $env:JAVA_HOME = "C:\path\to\jdk-21"     # must be a JDK 21, not the system-defa
 Healthy startup looks like:
 
 ```
-size: 1260
+size: 1372
 INFO [io.gi.lu.ne.LegacyTcpLoginServerListener] LoginServerListener successfully started
 INFO [io.gi.lu.ne.LegacyTcpLoginServerListener] LoginServerEndpoint waiting for new connections
 INFO [io.quarkus] bsgo-core 1.0.0-SNAPSHOT ... started in 4.131s
@@ -100,7 +91,7 @@ ERROR [io.gi.lu.ch.ChatServerClient] Failed to connect to chat server: Connectio
 
 The chat server is a separate component upstream does not provide. It is not needed to play.
 
-## 6. Connect the client
+## 5. Connect the client
 
 ```powershell
 .\runclient.bat 127.0.0.1 en
@@ -129,6 +120,6 @@ loading screen → read the client's `output_log.txt`.** They almost never both 
 | Abrupt disconnect, server log shows `Cannot invoke "java.lang.Float.floatValue()"` | A ship card is missing a stat — patch `0006` turns the crash into a default, and `cards.js` validates the full flight-stat set |
 | `roll is NaN` every tick in the server log | Incomplete flight stats on a ship card — regenerate with `cards.js`, which validates this |
 | Progress lost after a server restart | Patch `0007` not applied — upstream's clean shutdown wrote guilds only |
-| A patch fails to apply | Wrong baseline (`git checkout 23bad98a`) or missing `--ignore-whitespace` |
+| A `patches/` file fails to apply to pristine upstream | Wrong baseline (`git checkout 23bad98a`) or missing `--ignore-whitespace` — only relevant when reviewing, the fork already carries them |
 | Server does not boot, exception does not name a sector | A star in `galaxy.js` has no sector template on disk — run `emit-sector-templates.js`; validator V2a in `cards.js` catches this first and lists every missing id |
 | Client build fails under `mvnw` | `JAVA_HOME` points at the wrong Java — it must be a JDK 21 |
