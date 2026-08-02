@@ -157,3 +157,5 @@ clone it yourself. The patches in `patches/` modify AGPL-3.0 code and carry that
 **This project is not affiliated with or endorsed by Bigpoint.** It contains no game client, no
 game assets, and no decompiled client code. Battlestar Galactica Online and its assets remain
 the property of their respective owners. You must own a copy of the client to use any of this.
+
+Proudly open source ~ Daniel Rea
