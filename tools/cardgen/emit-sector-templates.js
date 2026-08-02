@@ -65,8 +65,16 @@ const PLATFORM_GUID = {
   medium: { Colonial: 1783473191, Cylon: 1783473197 },
   heavy:  { Colonial: 1783473192, Cylon: 1783473198 },
 };
-const NPCS = { Colonial: [51, 54, 57], Cylon: [75, 78, 81] };
-const NPC_LOOT = 111;                                                 // exists in LootTemplates
+/* NPC wings by ship class. Strikes fly everywhere; escorts join at threat 8, lines at 14, and
+ * the two event capitals (C5-07 Poseidon / Kraken) prowl only systems where their faction's
+ * threat is 18+. Guids: strikes are the original three per faction, escorts/lines/bosses are the
+ * NPC_HEAVIES block in cards.js. Loot ladders with class - 111/114/116 exist in LootTemplates,
+ * 121 is the boss jackpot authored alongside this. */
+const NPCS = {
+  Colonial: { strike: [51, 54, 57], escort: [60, 61, 62], line: [63, 64, 65], boss: 90 },
+  Cylon:    { strike: [75, 78, 81], escort: [84, 85, 86], line: [87, 88, 89], boss: 91 },
+};
+const NPC_LOOT = 111, ESCORT_LOOT = 114, LINE_LOOT = 116, BOSS_LOOT = 121;
 
 /* Loot ids upstream puts on its own outposts and platforms. BOTH TEMPLATES NOW EXIST - they were
  * authored alongside arming the stations, in LootTemplates/5_outpost.json and
@@ -380,12 +388,32 @@ function buildSector(s) {
     min: vec(sign * half * 0.18, -100.0, -half * 0.62),
     max: vec(sign * half * 0.70, 100.0, half * 0.16),
   });
+  const wing = (f) => {
+    const t = NPCS[f];
+    const e = t.strike.map(g => ({ guid: g, lootId: NPC_LOOT, count: perEntry }));
+    if (lvl >= 8) e.push(...t.escort.map(g => ({ guid: g, lootId: ESCORT_LOOT, count: Math.max(1, perEntry - 1) })));
+    if (lvl >= 14) e.push(...t.line.map(g => ({ guid: g, lootId: LINE_LOOT, count: 1 })));
+    return e;
+  };
   const botSpawnTemplates = ['Colonial', 'Cylon'].map(f => ({
     spawnArea: box(f === 'Colonial' ? 1 : -1),          // opposite the faction's own spawn side
     lifeTimeSeconds: 3600, respawnTimeSeconds: 30, respawnTimeDeath: 600,
     faction: f,
-    npcSpawnEntries: NPCS[f].map(g => ({ guid: g, lootId: NPC_LOOT, count: perEntry })),
+    npcSpawnEntries: wing(f),
   }));
+  /* The bosses. One per faction, only where that faction's OWN threat is 18+ (so the Kraken
+   * haunts deep Cylon space and the Poseidon deep Colonial space, matching where the events put
+   * them), two-hour respawn after a kill, and they keep the faction's spawn side - a boss is an
+   * anchor, not an ambush. 255 is the "may not enter" sentinel, not a threat level. */
+  for (const f of ['Colonial', 'Cylon']) {
+    const own = f === 'Colonial' ? s.colThreat : s.cylThreat;
+    if (own >= 18 && own !== 255) botSpawnTemplates.push({
+      spawnArea: box(f === 'Colonial' ? -1 : 1),
+      lifeTimeSeconds: 3600, respawnTimeSeconds: 300, respawnTimeDeath: 7200,
+      faction: f,
+      npcSpawnEntries: [{ guid: NPCS[f].boss, lootId: BOSS_LOOT, count: 1 }],
+    });
+  }
 
   const out = {
     sectorID: s.id,

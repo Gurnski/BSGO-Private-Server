@@ -460,6 +460,32 @@ const NPC_HULLS = [50, 51, 52, 54, 55, 74, 75, 76, 78, 79].map(g => {
   });
 });
 
+/* Escort- and line-class NPCs, plus the two event capitals. Same parking rules as the strikes
+ * above (HangarID 12, out of every ShipList). Tier is REAL here, unlike the strikes' forced 1:
+ * weapons now exist at every tier, and NpcBehaviourTemplates.createTemplateForTier scales the
+ * brain by the ship card's tier. Stats ride along from the roster entry for the same prefab, so
+ * an NPC Scythe flies like the player's Scythe.
+ * The two capitals are the original event bosses: the Colonial C5-07 Poseidon and its "fearsome
+ * cylon counterpart" the Kraken (10,290 HP, level 120, all cannons, per the wiki page). Ours sit
+ * at 20,000 HP because they also field their carrier hull's missile pods - the wiki's Kraken had
+ * no launchers. Their ShipConfigTemplates arm the launcher slots, which only carriers and the
+ * stealth hulls actually have. */
+const NPC_HEAVIES = [
+  // [guid, prefab, name override, hp override]
+  [60, 'humant2fighter'], [61, 'humant2command'], [62, 'humant2defender'],
+  [63, 'humant3fighter'], [64, 'humant3command'], [65, 'humant3defender'],
+  [84, 'cylont2fighter'], [85, 'cylont2command'], [86, 'cylont2defender'],
+  [87, 'cylont3fighter'], [88, 'cylont3command'], [89, 'cylont3defender'],
+  [90, 'humant4carrier', 'C5-07 Poseidon', 20000],
+  [91, 'cylont4carrier', 'Kraken', 20000],
+].map(([g, prefab, name, hp]) => {
+  const src = HULLS.find(h => h.prefab === prefab);
+  return Object.assign({}, src, {
+    g, hangar: 12, starter: false, npcOnly: true, lvl: 1,
+    name: name || src.name,
+  }, hp ? { hp } : {});
+});
+
 // Slot ids come straight from the shipped configs: 0,1 always; 2 = missile launcher;
 // 12 = Colonial/Raider third weapon; 9 = Heavy Raider third weapon.
 /* ================================================================ HARDPOINTS
@@ -5206,7 +5232,7 @@ const boot = bootstrapCards();
 const starters = HULLS.filter(h => h.starter).flatMap(shipCards);
 const world = [...roomCards(), ...sectorCards(), ...sectorObjectCards(), ...sectorFurnitureCards(), ...resourceCards(), ...lootExtraCards()];
 const weapons = [...weaponCards(), ...equipmentCards(), ...missileObjectCards(), ...moduleCards(), ...cometCards()];
-const ships = [...HULLS.filter(h => !h.starter), ...NPC_HULLS].flatMap(shipCards);
+const ships = [...HULLS.filter(h => !h.starter), ...NPC_HULLS, ...NPC_HEAVIES].flatMap(shipCards);
 const progression = progressionCards();
 const all = [...boot, ...starters, ...world, ...ships, ...weapons, ...progression];
 
