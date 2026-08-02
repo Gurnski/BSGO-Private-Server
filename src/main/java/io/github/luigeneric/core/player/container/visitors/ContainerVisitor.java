@@ -663,8 +663,17 @@ public abstract class ContainerVisitor
             return false;
         }
 
+        // Ships are stocked only so ShipQueue.UpdateShipCards can see them - it filters the ShipList
+        // by shop.GetByGUID. They are never buyable as inventory items; the real path is
+        // PlayerProtocol.addShip, which checks level and faction. Without this, a hand-crafted
+        // MoveItem shop->hold buys a StoreShip straight into cargo and skips both checks.
+        if (itemToBuy.getItemType() == ItemType.Ship) return false;
+
         //check prices
         final Price tmpPrice = optShopItemCard.get().getBuyPrice();
+        // An empty BuyPrice means NOT FOR SALE - isEnoughInContainer would otherwise loop over zero
+        // entries and return true, handing the item out for free.
+        if (tmpPrice.isEmpty()) return false;
         boolean isEnoughInContainer = isEnoughInContainer(tmpPrice, buyContainer, buyCount);
         if (!isEnoughInContainer) return false;
         buyPrice.addPrice(tmpPrice);

@@ -191,9 +191,9 @@ public class ShopProtocol extends BgoProtocol
 
         items.add(ShipSystem.fromGUID(227));
         items.add(ShipSystem.fromGUID(226));
-        items.add(ItemCountable.fromGUID(ResourceType.YellowBox, 1));
-        items.add(ItemCountable.fromGUID(ResourceType.GreenBox, 1));
-        items.add(ItemCountable.fromGUID(ResourceType.RedBox, 1));
+        // The boxes are deliberately NOT stocked. The trade-in window uses them as *currency*
+        // (eventRessources: [11,12,13]), not as goods, and they ship with an empty BuyPrice - so
+        // stocking them used to mean unlimited free boxes for anyone who clicked buy.
 
         eventShop.addShipItems(items);
     }

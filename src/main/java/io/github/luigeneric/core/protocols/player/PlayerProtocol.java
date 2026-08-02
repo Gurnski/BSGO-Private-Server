@@ -218,6 +218,20 @@ public class PlayerProtocol extends BgoProtocol implements StatsProtocolSubscrib
                     final AvatarDescription avatarDescription = br.readDesc(AvatarDescription.class);
                     final Player player = this.user().getPlayer();
 
+                    // Everything below re-grants the starter resources and re-sends the hangar, so
+                    // replaying CreateAvatar from in-flight is a free-resource exploit as well as
+                    // a desync. Deliberately an ALLOW-list of the two character-creation
+                    // locations rather than a single == check: SetFaction switches to Avatar
+                    // (:161) and a mid-creation reconnect resumes into Starter or Avatar
+                    // (SqLiteProvider:539), and blocking a legitimate creation would be far worse
+                    // than the exploit. Every actual play location is rejected.
+                    final GameLocation createLoc = player.getLocation().getGameLocation();
+                    if (createLoc != GameLocation.Avatar && createLoc != GameLocation.Starter)
+                    {
+                        log.warn("{} CHEAT! CreateAvatar from a play location: {}",
+                                user().getUserLog(), createLoc);
+                        return;
+                    }
 
                     if (avatarDescription != null)
                     {
