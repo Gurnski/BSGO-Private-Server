@@ -1,0 +1,33 @@
+diff --git a/src/main/resources/application.properties b/src/main/resources/application.properties
+index 91ba453..3f1f726 100644
+--- a/src/main/resources/application.properties
++++ b/src/main/resources/application.properties
+@@ -40,17 +40,23 @@ gameserver.allowed-hashes=-1
+ 
+ ## faction change params
+ gameserver.faction-change-params.cooldown-faction-switch=10
+-gameserver.faction-change-params.cubits-price-faction=75000
++gameserver.faction-change-params.cubits-price-faction=5000
+ 
+ ## permissions
+ gameserver.permission-params.dev-account-ids=1
+ 
+ 
+-gameserver.starter-params.start-tylium=400000
+-gameserver.starter-params.start-cubits=40000
+-gameserver.starter-params.start-titanium=30000
++# Starting grant. At our own peg (1 cubit = 32 tylium, 1 titanium = 2 tylium) the old
++# 400000/40000/30000 was 1,740,000 tylium-equivalent against ~197,000 of buyable content in the
++# whole game - 8.8x. This is 45,000 T-equivalent, which clears a full tier-1 loadout (8,500 T)
++# with room to spare. It has to clear one, because Player.setupBasicHangar hands out the starter
++# ship with EMPTY slots and Reward card 1 has shipItems: [].
++gameserver.starter-params.start-tylium=25000
++gameserver.starter-params.start-cubits=500
++gameserver.starter-params.start-titanium=2000
++# start-token stays 0: ItemList.java:77-98 drops zero-count stacks, so no dead Merits row appears.
+ gameserver.starter-params.start-token=0
+-gameserver.starter-params.daily-token-cap=900000
++gameserver.starter-params.daily-token-cap=5000
+ gameserver.starter-params.testing-mode=false
+ 
+ %test.gameserver.starter-params.start-tylium=99999999

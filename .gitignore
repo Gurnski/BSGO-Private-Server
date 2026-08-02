@@ -1,0 +1,68 @@
+# ---------------------------------------------------------------------------
+# NEVER COMMIT: game client material.
+# The BSGO client and any decompilation of it are Bigpoint copyright. This
+# project ships tooling and original data only - it does not redistribute the
+# game. Anyone using it must supply their own client.
+# ---------------------------------------------------------------------------
+_decomp/
+decomp/
+**/Assembly-CSharp*
+**/assetbundles/
+**/*_Data/
+client/
+Launcher/
+*.assets
+*.resource
+*.prefab
+*.unity3d
+locale_*.xml
+
+# ---------------------------------------------------------------------------
+# Upstream server. BSGOCore is a separate AGPL-3.0 project by luigeneric and is
+# NOT vendored here - clone it yourself (see README). Our source changes to it
+# live in patches/ instead.
+# ---------------------------------------------------------------------------
+BSGOCore/
+
+# ---------------------------------------------------------------------------
+# Local research material: third-party sources, client-derived datasets and
+# private working notes. Never commit - see the client-material rule above.
+# ---------------------------------------------------------------------------
+research/
+
+# ---------------------------------------------------------------------------
+# Local runtime state and secrets
+# ---------------------------------------------------------------------------
+.env
+*.env
+!.env.example
+certs/*.pem
+certs/*.key
+sqlite/
+*.db
+*.db-shm
+*.db-wal
+server.log
+*.log
+observability/logs/
+
+# Build output
+target/
+node_modules/
+*.class
+*.jar
+
+# Editor / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Derived from the Bigpoint client - never commit client-derived content.
+# Regenerate with: node tools/cardgen/extract-loca-keys.js <client>/assetbundles/locale.lang_en
+tools/cardgen/loca-keys.txt
+
+# Extracted from the client's resources.assets - client-derived content, same rule as loca-keys.
+# Regenerate with: node tools/cardgen/extract-paperdolls.js
+tools/cardgen/paperdolls/

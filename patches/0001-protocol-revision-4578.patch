@@ -1,0 +1,18 @@
+diff --git a/src/main/java/io/github/luigeneric/core/protocols/login/LoginProtocolWriteOnly.java b/src/main/java/io/github/luigeneric/core/protocols/login/LoginProtocolWriteOnly.java
+index 46c1f86..45aad1b 100644
+--- a/src/main/java/io/github/luigeneric/core/protocols/login/LoginProtocolWriteOnly.java
++++ b/src/main/java/io/github/luigeneric/core/protocols/login/LoginProtocolWriteOnly.java
+@@ -57,8 +57,11 @@ public class LoginProtocolWriteOnly extends WriteOnlyProtocol
+     {
+         BgoProtocolWriter bw = newMessage();
+         bw.writeMsgType(ServerMessage.Init.value);
+-        //bw.writeUInt32(4578);
+-        bw.writeUInt32(3);
++        // Must match the client's hardcoded LoginLevel.SERVER_REVISION exactly - the client does
++        // `return 4578 == Game.ServerRevision`, and on mismatch it closes the socket AND calls
++        // Application.Quit(), so it hard-exits at the handshake with no useful error.
++        // Upstream ships 3, which targets a different client build.
++        bw.writeUInt32(4578);
+         return bw;
+     }
+ 

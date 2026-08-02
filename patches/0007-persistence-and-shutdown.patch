@@ -1,0 +1,288 @@
+diff --git a/src/main/java/io/github/luigeneric/core/GameServer.java b/src/main/java/io/github/luigeneric/core/GameServer.java
+index a0a0820..f3a7e0d 100644
+--- a/src/main/java/io/github/luigeneric/core/GameServer.java
++++ b/src/main/java/io/github/luigeneric/core/GameServer.java
+@@ -9,6 +9,7 @@ import io.github.luigeneric.core.community.party.PartyRegistry;
+ import io.github.luigeneric.core.database.DbProvider;
+ import io.github.luigeneric.core.galaxy.Galaxy;
+ import io.github.luigeneric.core.gameplayalgorithms.ExperienceToLevelAlgo;
++import io.github.luigeneric.core.player.Player;
+ import io.github.luigeneric.core.player.login.SessionRegistry;
+ import io.github.luigeneric.core.protocols.ProtocolID;
+ import io.github.luigeneric.core.protocols.debug.RefundProcessor;
+@@ -22,6 +23,8 @@ import jakarta.enterprise.context.ApplicationScoped;
+ import jakarta.enterprise.inject.spi.CDI;
+ import lombok.extern.slf4j.Slf4j;
+ 
++import java.util.ArrayList;
++import java.util.List;
+ import java.util.NoSuchElementException;
+ import java.util.Optional;
+ import java.util.Set;
+@@ -146,16 +149,25 @@ public class GameServer implements IServerListenerSubscriber, UserDisconnectedSu
+                 final BgoProtocolWriter disconnectBw = sceneProtocol.writeDisconnect();
+                 user.send(disconnectBw);
+             }
+-            catch (NoSuchElementException noSuchElementException)
++            catch (final Exception ex)
+             {
+-                noSuchElementException.printStackTrace();
++                // was: NoSuchElementException only, so any other exception aborted the loop and
++                // every remaining user went undisconnected and unsaved
++                log.warn("Could not send Disconnect to a user: {}", ex.toString());
+             }
+         }
+ 
+         final Set<User> stillOnline = this.usersContainer.userSet(User::isConnected);
+         for (final User onlineUser : stillOnline)
+         {
+-            onlineUser.getConnection().ifPresent(connection -> connection.closeConnection("Shutdown process, user was still online"));
++            try
++            {
++                onlineUser.getConnection().ifPresent(connection -> connection.closeConnection("Shutdown process, user was still online"));
++            }
++            catch (final Exception ex)
++            {
++                log.warn("Could not close a connection during shutdown: {}", ex.toString());
++            }
+         }
+         log.warn("All onlineusers disconnected");
+ 
+@@ -163,6 +175,30 @@ public class GameServer implements IServerListenerSubscriber, UserDisconnectedSu
+         this.sectorRegistry.shutdown();
+         log.warn("SectorRegistry stopped");
+ 
++        // THE actual save. This method previously wrote guilds and nothing else - players were only
++        // ever persisted as a side effect of closeConnection() -> onDisconnect(), which loses every
++        // user whose client closed the socket first, and everything since the last periodic
++        // snapshot. That is the main reason characters kept disappearing across restarts.
++        // Snapshot EVERY cached user, not just connected ones: a user who dropped inside the
++        // inactive-kicker window is still in the map and may have missed its disconnect write.
++        try
++        {
++            final List<User> allCached = this.usersContainer.userList(user -> true);
++            final List<Player> toWrite = new ArrayList<>();
++            for (final User u : allCached)
++            {
++                try { toWrite.add(u.getPlayer()); }
++                catch (final Exception ex) { log.warn("Skipping a user during shutdown save: {}", ex.toString()); }
++            }
++            log.warn("Writing {} players to db before shutdown...", toWrite.size());
++            this.dbProviderProvider.bulkWritePlayerToDb(toWrite);
++            log.warn("Player shutdown save finished");
++        }
++        catch (final Exception ex)
++        {
++            log.error("Player shutdown save FAILED - progress may be lost", ex);
++        }
++
+         log.info("Writing guilds....");
+         this.dbProviderProvider.writeGuilds(guildRegistry);
+         log.info("Writing guilds finished");
+diff --git a/src/main/java/io/github/luigeneric/database/SqLiteProvider.java b/src/main/java/io/github/luigeneric/database/SqLiteProvider.java
+index 0dfb77d..42ddf90 100644
+--- a/src/main/java/io/github/luigeneric/database/SqLiteProvider.java
++++ b/src/main/java/io/github/luigeneric/database/SqLiteProvider.java
+@@ -55,6 +55,7 @@ public class SqLiteProvider implements DbProvider
+     private final SqLiteGuildProcessor sqLiteGuildProcessor;
+     private final GameServerParamsConfig gameServerParamsConfig;
+     private final GalaxyMapCard galaxyMapCard;
++    private final Catalogue catalogue;
+     private final SqLiteMissions sqLiteMissions;
+     protected final ReadWriteLock readWriteLock;
+     private final MissionUpdater missionUpdater;
+@@ -73,6 +74,7 @@ public class SqLiteProvider implements DbProvider
+         this.missionUpdater = missionUpdater;
+         this.gameServerParamsConfig = gameServerParamsConfig;
+         this.galaxyMapCard = catalogue.galaxyMapCard();
++        this.catalogue = catalogue;
+         this.readWriteLock = new ReentrantReadWriteLock();
+ 
+         this.containers = containers;
+@@ -151,13 +153,29 @@ public class SqLiteProvider implements DbProvider
+             }
+             else
+             {
+-                final GameLocation locationToSet = existingLocation.previousLocation();
++                // WAS: previousLocation() applied as the CURRENT location, while gameLocation() -
++                // the persisted current location - was read and thrown away. Location's
++                // previousLocation is also never seeded from persistence, so it stays Starter for
++                // the whole first session after a login. The periodic snapshot therefore wrote
++                // previous_game_locations_id = Starter, and the next restart restored the character
++                // INTO the faction-select screen - where picking a faction calls setupBasicHangar()
++                // and re-rolls a finished character. Worse, the writer refuses to save at all while
++                // the location is Starter or Avatar, so the mangled character could never be
++                // persisted again either. That is why characters kept vanishing.
++                final GameLocation resumeLocation = resumableLocation(
++                        existingLocation.gameLocation(), existingLocation.previousLocation(), userId);
++
+                 MapStarDesc star = galaxyMapCard.getStars().get(existingLocation.sectorID());
+                 if (star == null)
+                 {
+                     star = galaxyMapCard.getStarterSectorForFaction(player.getFaction());
+                 }
+-                player.getLocation().setLocation(locationToSet, star.getId(), star.getSectorGuid());
++                // Set twice on purpose: Location.set() copies the OUTGOING state into
++                // previousLocation, so assigning the resume location twice leaves both the current
++                // and the previous location correct without adding a setter. Otherwise
++                // previousLocation stays Starter and the next write persists Starter all over again.
++                player.getLocation().setLocation(resumeLocation, star.getId(), star.getSectorGuid());
++                player.getLocation().setLocation(resumeLocation, star.getId(), star.getSectorGuid());
+             }
+ 
+             final HangarInfoFetchResult hangarInfo = hangars.fetchHangar(player.getUserID());
+@@ -372,6 +390,36 @@ public class SqLiteProvider implements DbProvider
+         return null;
+     }
+ 
++    /**
++     * Picks a GameLocation a character can actually be rebuilt into from the two columns the
++     * locations table stores. setLocation only implements Room, Space, Starter, Avatar and Zone and
++     * throws for anything else, so an unfiltered DB value can kill the login outright. Beyond that:
++     * <ul>
++     *   <li>Disconnect is what the disconnect path writes, and it serialises to zero bytes.</li>
++     *   <li>Space needs a live sector join that only the normal undock flow performs.</li>
++     *   <li>Zone needs a zoneGUID that is never persisted.</li>
++     *   <li>Starter and Avatar are character-creation screens - restoring a finished character
++     *       into Starter lets the faction handler re-roll its hangar.</li>
++     * </ul>
++     * So everything resumes docked, which is what the retail server did after a restart.
++     */
++    private static GameLocation resumableLocation(final GameLocation persistedCurrent,
++                                                  final GameLocation persistedPrevious,
++                                                  final long userId)
++    {
++        final GameLocation candidate =
++                (persistedCurrent == null || persistedCurrent == GameLocation.Disconnect)
++                        ? persistedPrevious
++                        : persistedCurrent;
++
++        if (candidate == GameLocation.Room)
++            return GameLocation.Room;
++
++        log.info("userID={} persisted location current={} previous={} is not resumable, docking instead",
++                userId, persistedCurrent, persistedPrevious);
++        return GameLocation.Room;
++    }
++
+     @Override
+     @SneakyThrows
+     public boolean checkIfUserExists(final long userId)
+@@ -438,24 +486,39 @@ public class SqLiteProvider implements DbProvider
+     @Transactional
+     public void bulkWritePlayerToDb(final Collection<Player> players)
+     {
+-        lockWrite();
+-        try
++        log.info("Bulk writeup started, size: " + players.size());
++        int written = 0;
++        int failed = 0;
++        for (final Player player : players)
+         {
+-            log.info("Bulk writeup started, size: " + players.size());
+-            for (final Player player : players)
++            try
+             {
+-                internalWritePlayer(player);
++                // One transaction PER PLAYER. This used to be a single transaction spanning the
++                // whole loop, so ANY RuntimeException - including one from the participating
++                // @Transactional writeHangar, which marks the shared transaction rollback-only -
++                // silently discarded the writes of every other player in the batch. One bad
++                // character could wipe an entire server's worth of progress.
++                io.quarkus.narayana.jta.QuarkusTransaction.requiringNew()
++                        .run(() -> writeSinglePlayerLocked(player));
++                written++;
++            }
++            catch (final RuntimeException ex)
++            {
++                failed++;
++                log.error("Bulk writeup failed for userID={} - continuing with the rest",
++                        player == null ? -1L : player.getUserID(), ex);
+             }
+-            log.info("Bulk writeup finished");
+-        }
+-        finally
+-        {
+-            releaseWrite();
+         }
++        log.info("Bulk writeup finished, written={} failed={}", written, failed);
+     }
+     @Override
+     @Transactional
+     public void writePlayerToDb(final Player player)
++    {
++        writeSinglePlayerLocked(player);
++    }
++
++    private void writeSinglePlayerLocked(final Player player)
+     {
+         lockWrite();
+         try
+@@ -715,13 +778,36 @@ public class SqLiteProvider implements DbProvider
+             skillsStatement.setLong(1, player.getUserID());
+             try(final ResultSet resultSet = skillsStatement.executeQuery();)
+             {
+-                final List<Long> skillCardGuids = new ArrayList<>();
+                 while (resultSet.next())
+                 {
+                     final long cardGUID = resultSet.getLong("card_guid");
+                     final int serverID = resultSet.getInt("server_id");
+-                    final PlayerSkill skill = emptySkillBook.getAllSkills().get(serverID);
+-                    skill.injectSkillCard(cardGUID);
++
++                    // server_id is NOT a stable identity. setupStarterSkills assigns 0..N-1 in
++                    // Catalogue HashMap iteration order, which permutes whenever ANY card is added,
++                    // and the writer always stores server_id contiguously - so adding a skill line
++                    // silently reassigns trained levels to the wrong lines, and removing one makes
++                    // this lookup return null. That NPE is not a SQLException, so it escapes the
++                    // catch below, reaches the protocol loop's generic handler, and closes the
++                    // socket: the account could never log in again.
++                    // The skill LINE hash is stable, so restore by hash instead.
++                    final java.util.Optional<io.github.luigeneric.templates.cards.SkillCard> optSaved =
++                            catalogue.fetchCard(cardGUID, io.github.luigeneric.templates.cards.CardView.Skill);
++                    if (optSaved.isEmpty())
++                    {
++                        log.warn("player {} saved skill card {} (server_id {}) is no longer in the catalogue - dropped",
++                                player.getUserID(), cardGUID, serverID);
++                        continue;
++                    }
++                    final java.util.Optional<PlayerSkill> optSlot =
++                            emptySkillBook.getSkillByHash(optSaved.get().getHash());
++                    if (optSlot.isEmpty())
++                    {
++                        log.warn("player {} saved skill line hash {} (card {}) has no level-0 slot - dropped",
++                                player.getUserID(), optSaved.get().getHash(), cardGUID);
++                        continue;
++                    }
++                    optSlot.get().injectSkillCard(cardGUID);
+                 }
+             }
+         }
+@@ -776,10 +862,25 @@ public class SqLiteProvider implements DbProvider
+                 "(players_id, sector_id, game_locations_id, previous_game_locations_id)" +
+                 " VALUES (?, ?, ?, ?)");)
+         {
++            // Never persist the Disconnect sentinel as the current location. It is a transient
++            // state installed on socket close, it serialises to zero bytes, and storing it means
++            // the loader has to guess. Store the last REAL location instead, so the row always
++            // describes somewhere a character can actually be rebuilt into.
++            // getPreviousLocation() can also be null (nothing has transitioned yet), which used to
++            // NPE here and abort the rest of the save - skillbook, missions, hangar, containers.
++            final io.github.luigeneric.enums.GameLocation current =
++                    player.getLocation().getNonDisconnectLocation() != null
++                            ? player.getLocation().getNonDisconnectLocation()
++                            : io.github.luigeneric.enums.GameLocation.Room;
++            final io.github.luigeneric.enums.GameLocation previous =
++                    player.getLocation().getPreviousLocation() != null
++                            ? player.getLocation().getPreviousLocation()
++                            : current;
++
+             locationsStatement.setLong(1, player.getUserID());
+             locationsStatement.setLong(2, player.getLocation().getSectorID());
+-            locationsStatement.setByte(3, player.getLocation().getGameLocation().getValue());
+-            locationsStatement.setByte(4, player.getLocation().getPreviousLocation().getValue());
++            locationsStatement.setByte(3, current.getValue());
++            locationsStatement.setByte(4, previous.getValue());
+ 
+             locationsStatement.executeUpdate();
+         }

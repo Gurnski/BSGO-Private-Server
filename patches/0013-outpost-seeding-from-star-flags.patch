@@ -1,0 +1,59 @@
+diff --git a/src/main/java/io/github/luigeneric/core/sector/creation/SectorFactory.java b/src/main/java/io/github/luigeneric/core/sector/creation/SectorFactory.java
+index 6bd4908..9991a65 100644
+--- a/src/main/java/io/github/luigeneric/core/sector/creation/SectorFactory.java
++++ b/src/main/java/io/github/luigeneric/core/sector/creation/SectorFactory.java
+@@ -114,20 +114,44 @@ public class SectorFactory
+     }
+ 
+     /**
+-     * WIP guess lEgAcY cOdE
++     * Seed each faction's outpost points, i.e. decide who already holds this system when the
++     * server comes up.
++     * <p>
++     * This replaces two hardcoded sector ids - 27 seeded 3000 Cylon points and 47 seeded 3000
++     * Colonial - with the rule those two are instances of: a system only ONE faction may hold an
++     * outpost in is held by that faction from the start, and a system both may hold starts empty
++     * and has to be taken. Nothing else changes; the whole conquest mechanic
++     * (SectorOutpostProgress, OutpostDecreaseTimer, the 900-point spawn threshold, the 60-minute
++     * block after a death) still runs exactly as before, and a seeded outpost can be destroyed and
++     * lost like any other.
++     * <p>
++     * The reason to generalise rather than extend the list: with the galaxy at three sectors the
++     * two ids were most of the data, and with 58 they are 3% of it. A map where 24 faction-held
++     * systems show no owner is not a neutral default - the client draws outpost ownership on every
++     * galaxy tile (GalaxyMapSector.cs:146-160), so an unseeded galaxy actively displays "nobody
++     * holds anything anywhere", which is not what the map looked like.
++     * <p>
++     * The eligibility flags come from the star, so this stays in sync with the GalaxyMap card and
++     * with what the sector template can actually honour - a seeded faction with no Outpost entry in
++     * its template would just log the warning in OutpostSpawnTimer.spawnOp rather than spawn.
++     * <p>
++     * NOTE on sector 47. The rule reproduces upstream's 27 (Spectris is cylon_controlled) but NOT
++     * its 47: our sources put Vidofnir in the contested group, so it starts unheld and its
++     * CanColonialOutpost flag is true only because contested systems allow either side. If the
++     * literal 47 was load-bearing for some reason we have not found, this is where it went.
++     *
+      * @return wrapper object OutPostStates hard wired two states (there is only one op each faction)
+      */
+     private OutPostStates setupOutpostStates(final SectorBlueprint sectorBlueprint, final MapStarDesc starDesc, final Tick tick)
+     {
+-        int coloOpPts = 0;
+-        int cyloOpPts = 0;
+-        if (sectorBlueprint.sectorDesc().getSectorID() == 27)
+-        {
+-            cyloOpPts = 3000;
+-        } else if (sectorBlueprint.sectorDesc().getSectorID() == 47)
+-        {
+-            coloOpPts = 3000;
+-        }
++        final boolean colonialMayHold = starDesc.isCanColonialOutpost();
++        final boolean cylonMayHold = starDesc.isCanCylonOutpost();
++
++        /* 3000 is the clamp ceiling (OutpostState.increasePoints), well above the 900 the spawn
++         * needs, so a held system survives a spell of enemy activity before it flips - the same
++         * head start upstream gave its two. */
++        final int coloOpPts = (colonialMayHold && !cylonMayHold) ? 3000 : 0;
++        final int cyloOpPts = (cylonMayHold && !colonialMayHold) ? 3000 : 0;
+ 
+         return new OutPostStates(
+                 new OutpostState(Faction.Colonial, coloOpPts, 3600, starDesc.isCanColonialOutpost(), tick),

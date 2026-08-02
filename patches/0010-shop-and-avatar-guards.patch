@@ -1,0 +1,64 @@
+diff --git a/src/main/java/io/github/luigeneric/core/player/container/visitors/ContainerVisitor.java b/src/main/java/io/github/luigeneric/core/player/container/visitors/ContainerVisitor.java
+index a46d26b..1a26ca3 100644
+--- a/src/main/java/io/github/luigeneric/core/player/container/visitors/ContainerVisitor.java
++++ b/src/main/java/io/github/luigeneric/core/player/container/visitors/ContainerVisitor.java
+@@ -663,8 +663,17 @@ public abstract class ContainerVisitor
+             return false;
+         }
+ 
++        // Ships are stocked only so ShipQueue.UpdateShipCards can see them - it filters the ShipList
++        // by shop.GetByGUID. They are never buyable as inventory items; the real path is
++        // PlayerProtocol.addShip, which checks level and faction. Without this, a hand-crafted
++        // MoveItem shop->hold buys a StoreShip straight into cargo and skips both checks.
++        if (itemToBuy.getItemType() == ItemType.Ship) return false;
++
+         //check prices
+         final Price tmpPrice = optShopItemCard.get().getBuyPrice();
++        // An empty BuyPrice means NOT FOR SALE - isEnoughInContainer would otherwise loop over zero
++        // entries and return true, handing the item out for free.
++        if (tmpPrice.isEmpty()) return false;
+         boolean isEnoughInContainer = isEnoughInContainer(tmpPrice, buyContainer, buyCount);
+         if (!isEnoughInContainer) return false;
+         buyPrice.addPrice(tmpPrice);
+diff --git a/src/main/java/io/github/luigeneric/core/protocols/player/PlayerProtocol.java b/src/main/java/io/github/luigeneric/core/protocols/player/PlayerProtocol.java
+index 29669b4..4101449 100644
+--- a/src/main/java/io/github/luigeneric/core/protocols/player/PlayerProtocol.java
++++ b/src/main/java/io/github/luigeneric/core/protocols/player/PlayerProtocol.java
+@@ -218,6 +218,20 @@ public class PlayerProtocol extends BgoProtocol implements StatsProtocolSubscrib
+                     final AvatarDescription avatarDescription = br.readDesc(AvatarDescription.class);
+                     final Player player = this.user().getPlayer();
+ 
++                    // Everything below re-grants the starter resources and re-sends the hangar, so
++                    // replaying CreateAvatar from in-flight is a free-resource exploit as well as
++                    // a desync. Deliberately an ALLOW-list of the two character-creation
++                    // locations rather than a single == check: SetFaction switches to Avatar
++                    // (:161) and a mid-creation reconnect resumes into Starter or Avatar
++                    // (SqLiteProvider:539), and blocking a legitimate creation would be far worse
++                    // than the exploit. Every actual play location is rejected.
++                    final GameLocation createLoc = player.getLocation().getGameLocation();
++                    if (createLoc != GameLocation.Avatar && createLoc != GameLocation.Starter)
++                    {
++                        log.warn("{} CHEAT! CreateAvatar from a play location: {}",
++                                user().getUserLog(), createLoc);
++                        return;
++                    }
+ 
+                     if (avatarDescription != null)
+                     {
+diff --git a/src/main/java/io/github/luigeneric/core/protocols/shop/ShopProtocol.java b/src/main/java/io/github/luigeneric/core/protocols/shop/ShopProtocol.java
+index 79dcfa7..3288f37 100644
+--- a/src/main/java/io/github/luigeneric/core/protocols/shop/ShopProtocol.java
++++ b/src/main/java/io/github/luigeneric/core/protocols/shop/ShopProtocol.java
+@@ -191,9 +191,9 @@ public class ShopProtocol extends BgoProtocol
+ 
+         items.add(ShipSystem.fromGUID(227));
+         items.add(ShipSystem.fromGUID(226));
+-        items.add(ItemCountable.fromGUID(ResourceType.YellowBox, 1));
+-        items.add(ItemCountable.fromGUID(ResourceType.GreenBox, 1));
+-        items.add(ItemCountable.fromGUID(ResourceType.RedBox, 1));
++        // The boxes are deliberately NOT stocked. The trade-in window uses them as *currency*
++        // (eventRessources: [11,12,13]), not as goods, and they ship with an empty BuyPrice - so
++        // stocking them used to mean unlimited free boxes for anyone who clicked buy.
+ 
+         eventShop.addShipItems(items);
+     }
