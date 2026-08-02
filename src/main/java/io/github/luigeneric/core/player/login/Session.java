@@ -20,9 +20,26 @@ public class Session implements ISessionClosedNotifier
     private final Lock lock;
     @Getter
     private SessionState sessionState;
+    /**
+     * A reusable session survives disconnect and never times out.
+     * <p>
+     * Sessions normally model one-shot codes issued by a login server: notifyClosed() expires
+     * them and the registry reaps them, because the login server would mint a fresh code next
+     * time. The preconfigured sessions in application.properties have no such issuer - they are
+     * created once at boot and never reissued - so expiring one permanently locks that account
+     * out until the server restarts. The symptom is "User session is not present for registry"
+     * server-side and a client stuck on "Loading... please wait".
+     */
+    @Getter
+    private final boolean reusable;
 
 
     protected Session(final long userId, final String sessionCode)
+    {
+        this(userId, sessionCode, false);
+    }
+
+    protected Session(final long userId, final String sessionCode, final boolean reusable)
     {
         Objects.requireNonNull(sessionCode, "SessionCode cannot be null!");
         if (userId < 0) throw new IllegalArgumentException("userid cannot be less than 0!");
@@ -32,6 +49,7 @@ public class Session implements ISessionClosedNotifier
         this.sessionCode = sessionCode;
         this.createDateTime = new BgoTimeStamp(LocalDateTime.now());
         this.sessionState = SessionState.Created;
+        this.reusable = reusable;
     }
 
     /**
@@ -46,6 +64,11 @@ public class Session implements ISessionClosedNotifier
             //fast out
             if (sessionState == SessionState.Expired)
                 return true;
+
+            // Preconfigured sessions have no issuer to mint a replacement, so they must never be
+            // reaped on age either.
+            if (reusable)
+                return false;
 
             if (this.sessionState != SessionState.InUse && !this.isValid(SessionRegistry.TIME_SESSION_VALID))
             {
@@ -137,9 +160,11 @@ public class Session implements ISessionClosedNotifier
     @Override
     public void notifyClosed()
     {
-        //log.info("Session expired, close notification");
         log.info("Session for userId={} closing onNotifyClosed, oldState={}", userId, sessionState);
-        this.setSessionState(SessionState.Expired);
+        // A reusable (preconfigured) session goes back to Created so the same code can be used
+        // again next login. Expiring it would be a one-way door: nothing reissues these codes,
+        // so the account could never log in again until the server restarted.
+        this.setSessionState(reusable ? SessionState.Created : SessionState.Expired);
     }
 
 
