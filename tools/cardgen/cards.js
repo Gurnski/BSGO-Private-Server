@@ -460,6 +460,7 @@ const HULLS = [
  * ShipConfigTemplates pin all of them (shipGUID there IS ShipCard.cardGuid), but deliberately OUT
  * of every ShipList and parked on HangarID 12 - no icon, no queue position. Their stats scale with
  * tier because these are the bots you actually fight. */
+const ADVANCED_OFFSET = 300000;   // level-2 hull guid = level-1 guid + this
 const NPC_HULLS = [50, 51, 52, 54, 55, 74, 75, 76, 78, 79].map(g => {
   const base = { 50: 'humant1fighter', 51: 'humant1fighter', 52: 'humant1fighter',
                  54: 'humant1command', 55: 'humant1command',
@@ -541,6 +542,7 @@ const NPC_HEAVIES = [
  * See hulls-real.js for what each one replaced and why. Generated - regenerate with
  * `py tools/cardgen/gen-hulls-real.py` against a fresh card dump. */
 const { HULLS_REAL, LAYOUTS_REAL } = require('./hulls-real');
+const { EQUIPMENT_REAL } = require('./equipment-real.js');
 
 const HARDPOINTS = {
   humant1fighter: {    // Viper Mk II
@@ -1288,8 +1290,34 @@ function detection(roleDep, tier) {
   return { DetectionVisualRadius: row[0], DetectionInnerRadius: row[1], DetectionOuterRadius: row[2] };
 }
 
+/* An Advanced hull flies the same real stat block, scaled. Derived, not recovered: the dump's
+ * own Advanced cards carry obfuscated stats and the wiki covers only part of the roster, so the
+ * honest thing is one visible rule - +18% hull, +15% power, +5% speed - applied in one place. */
+function advScale(st, adv) {
+  if (!adv) return st;
+  const out = Object.assign({}, st);
+  if (out.MaxHullPoints) out.MaxHullPoints = Math.round(out.MaxHullPoints * 1.18);
+  if (out.MaxPowerPoints) out.MaxPowerPoints = Math.round(out.MaxPowerPoints * 1.15);
+  if (out.Speed) out.Speed = +(out.Speed * 1.05).toFixed(2);
+  if (out.BoostSpeed) out.BoostSpeed = +(out.BoostSpeed * 1.05).toFixed(2);
+  return out;
+}
+
 function shipCards(hull) {
   const guid = hull.g;
+  /* SHIP ADVANCEMENT. Every buyable hull has an Advanced form, exactly as the original did:
+   * a second Ship card at guid+ADVANCED_OFFSET with Level 2, which is what unlocks the hull's
+   * level-2 slots (HangarShip instantiates a slot only when shipCard.Level >= slot.Level, and
+   * the real layouts carry a full level-2 slot set that was unreachable while every hull was
+   * pinned at MaxLevel 1). PlayerProtocol.UpgradeShip does the rest - it charges UpgradePrice,
+   * carries the fitted systems across and swaps the hangar entry - and needed only the cards.
+   *
+   * Stat gain is +18% hull, +15% power, +5% speed, applied here rather than dumped: the dump
+   * holds the Advanced cards but with obfuscated stats, and the wiki's Advanced pages cover
+   * only part of the roster. Slots are the real prize and those ARE real.
+   * The Advanced card is deliberately NOT in any ShipList: addShip refuses Level > 1 silently,
+   * and the validator enforces it. */
+  const adv = hull.advanced;
   const a = hull.agility;
   /* The per-ship portrait. GUI/Slots/<prefab> - what this used to be - does not exist: that
    * folder holds exactly 11 chrome textures (bar_blue, dockbutton_*, player_slot_ver2, ...) and
@@ -1320,7 +1348,7 @@ function shipCards(hull) {
       // 107966800 -> rhinos_killed, 163729272 -> viper_mk7_killed, 163729268 -> viper_mk3s_killed),
       // so setting it to the card guid made those five counters permanently unreachable. NPC_HULLS
       // inherits objKey through Object.assign, which is what makes them actually increment.
-      ShipObjectKey: hull.objKey || guid, Level: 1, MaxLevel: 1, LevelRequirement: hull.lvl,
+      ShipObjectKey: hull.objKey || guid, Level: adv ? 2 : 1, MaxLevel: 2, LevelRequirement: hull.lvl,
       HangarID: hull.hangar, Durability: DURABILITY[hull.prefab] || 12000, Tier: hull.tier,
       // DUMPED: [] on all 24 strike hulls, ['Carrier'] on the two carriers. Our
       // Interceptor/Assault/Gunship/Fighter values were invented. ShipRoles is read only by
@@ -1354,10 +1382,11 @@ function shipCards(hull) {
                        pitch: 55 * a, yaw: 55 * a, roll: 110 * a, strafe: 35 * a }),
         // Dumped radii before the flight block, so a real flight stat still wins on any overlap.
         detection(hull.roleDep, hull.tier),
-        (HULLS_REAL[hull.prefab] || {}).stats || {},
+        advScale((HULLS_REAL[hull.prefab] || {}).stats || {}, adv),
         // Per-hull override for the two capitals, which the dump does not cover - see CAPITAL_FLIGHT.
-        hull.realStats || {})),
-      Faction: hull.faction, ImmutableSlots: [], nextShipCardGuid: 0,
+        advScale(hull.realStats || {}, adv))),
+      Faction: hull.faction, ImmutableSlots: [],
+      nextShipCardGuid: adv || hull.npcOnly || hull.rentalOnly ? 0 : guid + ADVANCED_OFFSET,
     }),
 
     card(guid, 'World', {
@@ -1400,7 +1429,7 @@ function shipCards(hull) {
       BuyPrice: price(hull.rentalOnly ? {} : hull.tokens ? { [TOKEN]: hull.tokens } : hull.cubits ? { [CUB]: hull.cubits } : { [TYLIUM]: hull.tyl }),
       // Empty: MaxLevel 1 + nextShipCardGuid 0 means the upgrade path does not exist and the
       // button is hidden anyway.
-      UpgradePrice: price({}),
+      UpgradePrice: price(adv || hull.npcOnly || hull.rentalOnly ? {} : { [TYLIUM]: Math.round((hull.tyl || 25000) * 0.75) }),
       SellPrice: price({}),
       // Hulls are NOT sellable. ScrapShip is a logged no-op (PlayerProtocol.java:539-543) and
       // RemoveShip has no case in parseMessage at all, so a sale can only ever fire by accident -
@@ -2324,7 +2353,11 @@ function equipmentCards() {
   /* The twelve passive families are pure static-buff items: ShipSystem + GUI + Price at one guid,
    * no ability card, no Module, no ShipConfigTemplate. Buffs apply on fit via
    * ShipSubscribeInfo.applySlotSystemStats. */
-  EQUIPMENT.forEach(m => {
+  /* The hand-authored twelve are superseded by equipment-real.js - the original's own 75
+   * hull/engine/computer modules, with real buffs, keys and prices. A hand entry whose guid the
+   * dump also carries is dropped so the two cannot emit the same card twice. */
+  const realGuids = new Set(EQUIPMENT_REAL.map(e => e.sys));
+  [...EQUIPMENT.filter(m => !realGuids.has(m.sys)), ...EQUIPMENT_REAL].forEach(m => {
     const meta = EQUIP_META[m.slot];
     out.push(
       shipSystem(m.sys, m.slot, {
@@ -3476,6 +3509,11 @@ function bootstrapCards() {
       // NOT empty: ShipCustomizationWindow indexes [0] with no length guard BEFORE it sets
       // ready=true, so an empty array throws every frame the Decals tab is open.
       StickersColonial: [{ ID: 0, Texture: '' }], StickersCylon: [{ ID: 0, Texture: '' }],
+      /* Ancient needs its own array or every Ancient-faction model load throws client-side:
+       * StickerListCard.GetSticker runs Array.Find over the per-faction array, logs
+       * "There is no Stickers for this faction: Ancient" and dereferences the null anyway.
+       * 181 throws in a single play session, one per drone that spawned. */
+      StickersAncient: [{ ID: 0, Texture: '' }],
     }),
 
     // ShopProtocol.injectUser -> setupEventShop() -> ShipSystem.fromGUID(227) then (226),
@@ -5322,7 +5360,12 @@ const boot = bootstrapCards();
 const starters = HULLS.filter(h => h.starter).flatMap(shipCards);
 const world = [...roomCards(), ...sectorCards(), ...sectorObjectCards(), ...sectorFurnitureCards(), ...resourceCards(), ...lootExtraCards()];
 const weapons = [...weaponCards(), ...equipmentCards(), ...missileObjectCards(), ...moduleCards(), ...cometCards()];
-const ships = [...HULLS.filter(h => !h.starter), ...NPC_HULLS, ...NPC_HEAVIES].flatMap(shipCards);
+const ADVANCED_HULLS = HULLS.filter(h => !h.npcOnly && !h.rentalOnly).map(h => Object.assign({}, h, {
+  g: h.g + ADVANCED_OFFSET, advanced: true, starter: false,
+  name: 'Advanced ' + h.name,
+  hp: Math.round(h.hp * 1.18), pwr: Math.round(h.pwr * 1.15), speed: Math.round(h.speed * 1.05),
+}));
+const ships = [...HULLS.filter(h => !h.starter), ...NPC_HULLS, ...NPC_HEAVIES, ...ADVANCED_HULLS].flatMap(shipCards);
 const progression = progressionCards();
 const all = [...boot, ...starters, ...world, ...ships, ...weapons, ...progression];
 

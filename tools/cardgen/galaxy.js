@@ -263,7 +263,16 @@ const SECTORS = GALAXY
     return {
       id, name: NAMES[id], sectorGuid, regGuid: SHARED_REGULATION,
       pos: { x, y }, gui, colThreat, cylThreat, grp, tier,
-      extent: sizeM * 2,                  // Width is the FULL span; SpaceLevel.cs:134 halves it
+      /* sizeM IS the full span, not the half-extent. Doubling it made every system twice the
+       * size it should be and the three 40 km Update-51 systems (Carillon, Exomera, 14 Toah)
+       * genuinely absurd: generated content scales off the half-extent, so planetoids ended up
+       * 40 km out and would not even stream in on arrival.
+       * The corroboration is upstream's own layouts: Alpha Ceti and 242 Apollid place their
+       * content out to |x| ~ 5,045 (p99), i.e. a full span of ~10,090 against the wiki's
+       * 10,000 m - so the wiki number is the whole system, and half-extent is 5,000.
+       * Tannhauser is the documented exception at |x| = 7,368; it keeps a hand-set floor below,
+       * because its layout is upstream's and must not fall outside its own card. */
+      extent: Math.max(sizeM, id === 10 ? 16000 : 0),
       colJump: ctl.colJump, cylJump: ctl.cylJump,
       /* The star flag is what the CLIENT draws the outpost marker and progress widget from
        * (GalaxyMapSector.cs:146-160) and what becomes OutpostState.canOutpost server-side

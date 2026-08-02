@@ -116,11 +116,15 @@ public class Galaxy
     {
         final List<GalaxyMapUpdate> galaxyMapUpdates = new ArrayList<>();
 
-        //galaxyMapUpdates.add(new SectorDynamicMissionUpdate(Faction.Neutral, 10L, (short) 1));
-        //galaxyMapUpdates.add(new SectorDynamicMissionUpdate(Faction.Colonial, 46, (short) 1));
-        //galaxyMapUpdates.add(new SectorDynamicMissionUpdate(Faction.Cylon, 47, (short) 1));
-        galaxyMapUpdates.add(new SectorDynamicMissionUpdate(Faction.Ancient, 63, (short) 1));
-
+        /* Upstream shipped a hardcoded probe here - an Ancient dynamic mission in sector 63 -
+         * with its three siblings commented out. It announces a mission in a system that is not
+         * on our galaxy map, and GalaxyMapMediator.UpdateDynamicMissions throws on the client
+         * every time it arrives: 37 unhandled exceptions in one play session, each one aborting
+         * the rest of that galaxy update mid-apply. That is what left the sector-entry prompt
+         * on screen forever.
+         * Nothing computes dynamic missions yet, so the honest answer is to send none until
+         * something does. Restore this only alongside a real generator, and only for sector ids
+         * that exist on the map card. */
         return galaxyMapUpdates;
     }
 

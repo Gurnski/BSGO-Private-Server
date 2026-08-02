@@ -223,6 +223,14 @@ public class SpaceSubscribeInfo
         return this.statsFinal.containsStat(stat);
     }
 
+    /** Overwrite one live stat on an object already in space. Used by the debug console's
+     *  push command; ordinary gameplay changes stats through buffs and modifiers, which the
+     *  client is told about. Nothing here is persisted - the hangar card is untouched. */
+    public void setStat(final ObjectStat stat, final float value)
+    {
+        this.statsFinal.setStat(stat, value);
+    }
+
 
     public void setSkillBook(final SkillBook skillBook)
     {

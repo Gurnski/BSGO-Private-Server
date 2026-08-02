@@ -48,7 +48,7 @@ const cases = [
    'of the 25000 starting grant'],
   // ShipList entries must be Level 1 - addShip refuses Level > 1 and returns silently.
   ['Level 2 hull listed in a ShipList',
-   'ShipObjectKey: hull.objKey || guid, Level: 1, MaxLevel: 1,',
+   'ShipObjectKey: hull.objKey || guid, Level: adv ? 2 : 1, MaxLevel: 2,',
    'ShipObjectKey: hull.objKey || guid, Level: 2, MaxLevel: 2,',
    'but it is in a ShipList'],
 
