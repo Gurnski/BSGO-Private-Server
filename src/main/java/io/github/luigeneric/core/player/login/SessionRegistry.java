@@ -17,8 +17,15 @@ public class SessionRegistry
     public static final boolean DEBUG = true;
     /**
      * int in minutes
+     * <p>
+     * Upstream ships 3, which suits a real login server handing out short-lived one-shot codes.
+     * With the preconfigured sessions in application.properties there is no login server: the
+     * codes are minted once at boot and never reissued, so a 3-minute window means you can only
+     * log in during the first 3 minutes of server uptime. After that every attempt fails with
+     * "could not find: preconfigured-session" and the client hangs on "Loading... please wait",
+     * which looks exactly like a missing card. 7 days keeps a private server usable.
      */
-    public static final int TIME_SESSION_VALID = 3;
+    public static final int TIME_SESSION_VALID = 60 * 24 * 7;
     /**
      * SessionCode, SessionObject
      */
@@ -47,7 +54,10 @@ public class SessionRegistry
             var splitRes = debugSession.split("@");
             var userId = splitRes[0];
             var sessionStr = splitRes[1];
-            this.addSession(new Session(Long.parseLong(userId), sessionStr));
+            // reusable=true: these codes are minted once at boot and never reissued, so they must
+            // survive both disconnect and the age-based reaper. Otherwise the first logout locks
+            // that account out until the server restarts.
+            this.addSession(new Session(Long.parseLong(userId), sessionStr, true));
         }
     }
 
