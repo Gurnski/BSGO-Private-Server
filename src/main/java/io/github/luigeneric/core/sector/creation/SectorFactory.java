@@ -364,7 +364,7 @@ public class SectorFactory
 
         timers.add(new SpaceObjectPropertiesTimer(tick, spaceObjects, Utils.timeToTicks(TimeUnit.SECONDS, 0.1f)));
         timers.add(new ShipModifierTimeoutTimer(spaceObjects));
-        timers.add(new NpcStaticTimer(tick, spaceObjects, Utils.timeToTicks(TimeUnit.SECONDS, 5),
+        timers.add(new NpcStaticTimer(tick, spaceObjects, Utils.timeToTicks(TimeUnit.SECONDS, 2),
                 abilityCastRequestQueue, sectorDamageHistory, sectorCards));
         timers.add(new NpcDynamicTimer(tick, spaceObjects, Utils.timeToTicks(TimeUnit.SECONDS, 3),
                 abilityCastRequestQueue, sectorDamageHistory, remover, sectorCards, ctx.bgoRandom()));
@@ -410,6 +410,15 @@ public class SectorFactory
         for (final SpaceObjectTemplate spaceObjectTemplate : sectorDesc.getSpaceObjectTemplates())
         {
             if (spaceObjectTemplate.getSpaceEntityType().isOfType(SpaceEntityType.Outpost, SpaceEntityType.Planet, SpaceEntityType.Debris))
+            {
+                continue;
+            }
+            /* Ring platforms belong to the outpost, not the sector: OutpostSpawnTimer spawns
+             * them alongside its outpost and swaps their tier with the control level. A platform
+             * template within RING_NEAR of a same-faction Outpost template is a ring member;
+             * free-standing platforms still spawn statically here. */
+            if (spaceObjectTemplate.getSpaceEntityType() == SpaceEntityType.WeaponPlatform
+                    && OutpostSpawnTimer.isRingMember((StaticNpcTemplate) spaceObjectTemplate, sectorDesc))
             {
                 continue;
             }
