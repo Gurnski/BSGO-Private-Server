@@ -39,7 +39,7 @@ const { SECTORS, UPSTREAM_TEMPLATES, BASE_SECTOR } = require('./galaxy');
 
 const CORE_ROOT = process.env.BSGOCORE_PATH
   ? path.resolve(process.env.BSGOCORE_PATH)
-  : path.resolve(__dirname, '../../BSGOCore');
+  : path.resolve(__dirname, '../../server');
 const OUT = path.join(CORE_ROOT, 'ServerConfigurationUtils/global/SectorTemplates');
 
 /* ---------------------------------------------------------------- CONTENT GUIDS

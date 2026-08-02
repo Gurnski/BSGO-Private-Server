@@ -12,10 +12,10 @@ Everything here runs on [BSGOCore](https://github.com/luigeneric/BSGOCore) by
 in Java (AGPL-3.0). The protocol, the sector simulation, movement, combat, persistence: all of
 that is his work. This project is a layer on top of his server, not a replacement for it.
 
-The server we actually run is the
-[`private-server` branch of our fork](https://github.com/Gurnski/BSGOCore/tree/private-server):
-luigeneric's tree with every change of ours as a documented commit on top, so upstream history
-and credit stay intact and his future fixes stay mergeable.
+The server source lives in this repo at [`server/`](server/), imported as a git subtree so
+luigeneric's full commit history and copyright ride along, with every change of ours as a
+documented commit on top. Our [fork of BSGOCore](https://github.com/Gurnski/BSGOCore) stays
+around as the vehicle for sending fixes back upstream.
 
 The one thing BSGOCore cannot provide is game data. The BSGO client ships with none: no ship
 stats, no items, no sector layouts. Every "card" is fetched from the server at runtime, and the
@@ -31,10 +31,10 @@ against BSGOCore's own source and fails the build rather than emit a bad one, be
 handles a bad card by hanging on the loading screen forever. It also writes a sector template
 for each system.
 
-Our server changes live as commits on [the fork](https://github.com/Gurnski/BSGOCore/tree/private-server);
-`patches/` keeps the same changes as standalone patch files against pristine upstream, documented
-one by one in [PATCHES.md](PATCHES.md) with the symptom each fixes. About half are bug fixes we
-intend to offer upstream; the rest are choices that suit a small private server:
+Our server changes are commits in `server/`; `patches/` keeps the same changes as standalone
+patch files against pristine upstream, documented one by one in [PATCHES.md](PATCHES.md) with
+the symptom each fixes. About half are bug fixes we offer upstream (see the fork); the rest are
+choices that suit a small private server:
 
 - the protocol-revision handshake the final client demands (without it, the client exits to
   desktop the moment it connects)
@@ -86,11 +86,9 @@ You need JDK 21, Node.js, and your own BSGO client (protocol revision 4578, the 
 build). QUICKSTART.md walks through every step with the expected output; the short version:
 
 ```powershell
-# 1. This repo, with our BSGOCore fork cloned inside it (BSGOCore/ is gitignored here)
+# 1. One clone gets everything, server included
 git clone https://github.com/Gurnski/BSGO-Private-Server.git
-cd BSGO-Private-Server
-git clone -b private-server https://github.com/Gurnski/BSGOCore.git
-cd BSGOCore
+cd BSGO-Private-Server\server
 
 # 2. Server config
 Copy-Item .env.example .env       # then edit: CLIENT_PATH, GAMESERVER_IGNORE_HASHES=true
@@ -106,7 +104,7 @@ node tools\cardgen\emit-sector-templates.js
 node tools\cardgen\cards.js
 
 # 4. Run
-cd BSGOCore
+cd server
 $env:JAVA_HOME = "C:\path\to\jdk-21"
 .\mvnw.cmd quarkus:dev
 ```
@@ -153,9 +151,10 @@ log. An infinite loading screen is explained in the client log. They almost neve
 Original work in this repo (the card generator, the data it produces, the config overlay and
 the documentation) is MIT licensed; see `LICENSE`.
 
-[BSGOCore](https://github.com/luigeneric/BSGOCore) is a separate project by
-[luigeneric](https://github.com/luigeneric), licensed AGPL-3.0. It is not vendored here; you
-clone it yourself. The patches in `patches/` modify AGPL-3.0 code and carry that licence.
+Everything under `server/` is [BSGOCore](https://github.com/luigeneric/BSGOCore) by
+[luigeneric](https://github.com/luigeneric) plus our changes, and stays **AGPL-3.0** under its
+own [`LICENSE`](server/LICENSE); his commit history is preserved in this repo's history. The
+patch files in `patches/` modify AGPL-3.0 code and carry that licence too.
 
 **This project is not affiliated with or endorsed by Bigpoint.** It contains no game client, no
 game assets, and no decompiled client code. Battlestar Galactica Online and its assets remain

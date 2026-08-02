@@ -26,7 +26,7 @@ const fs = require('fs');
 const path = require('path');
 
 // BSGOCore checkout: override with BSGOCORE_PATH if it is not a sibling of this repo.
-const CORE_ROOT = process.env.BSGOCORE_PATH ? path.resolve(process.env.BSGOCORE_PATH) : path.resolve(__dirname, '../../BSGOCore');
+const CORE_ROOT = process.env.BSGOCORE_PATH ? path.resolve(process.env.BSGOCORE_PATH) : path.resolve(__dirname, '../../server');
 const CORE_SRC = path.join(CORE_ROOT, 'src/main/java/io/github/luigeneric');
 
 // ---------------------------------------------------------------- CardView table

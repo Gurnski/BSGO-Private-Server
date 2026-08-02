@@ -6,7 +6,7 @@ const path = require('path');
 
 const SRC = path.join(__dirname, 'cards.js');
 // Same resolution rule as cards.js: BSGOCORE_PATH overrides the in-repo default.
-const CORE = process.env.BSGOCORE_PATH ? path.resolve(process.env.BSGOCORE_PATH) : path.resolve(__dirname, '../../BSGOCore');
+const CORE = process.env.BSGOCORE_PATH ? path.resolve(process.env.BSGOCORE_PATH) : path.resolve(__dirname, '../../server');
 const TMP = path.join(__dirname, 'cards_negtest.js');
 const orig = fs.readFileSync(SRC, 'utf8');
 

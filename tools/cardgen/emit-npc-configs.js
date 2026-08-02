@@ -20,7 +20,7 @@ const fs = require('fs');
 const path = require('path');
 const { HULLS_REAL } = require('./hulls-real.js');
 
-const CORE = process.env.BSGOCORE_PATH ? path.resolve(process.env.BSGOCORE_PATH) : path.resolve(__dirname, '../../BSGOCore');
+const CORE = process.env.BSGOCORE_PATH ? path.resolve(process.env.BSGOCORE_PATH) : path.resolve(__dirname, '../../server');
 const LIVE = path.join(CORE, 'ServerConfigurationUtils/global/ShipConfigTemplates');
 const REPO = path.resolve(__dirname, '../../config/ShipConfigTemplates');
 

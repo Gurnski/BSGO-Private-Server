@@ -15,16 +15,14 @@ You need:
 
 ## 1. Get the code
 
-BSGOCore is cloned *inside* this repo's checkout — the directory is gitignored, and the tools
-look for it there by default (`BSGOCORE_PATH` overrides). The `private-server` branch of
-[our fork](https://github.com/Gurnski/BSGOCore) is upstream plus every server change as a
-documented commit; `PATCHES.md` explains each one.
+The server source ships in this repo at `server/` — luigeneric's BSGOCore imported with its
+full history, plus every change of ours as a documented commit (`PATCHES.md` explains each
+one). One clone gets everything; the tools find the server tree automatically
+(`BSGOCORE_PATH` overrides).
 
 ```powershell
 git clone https://github.com/Gurnski/BSGO-Private-Server.git
-cd BSGO-Private-Server
-git clone -b private-server https://github.com/Gurnski/BSGOCore.git
-cd BSGOCore
+cd BSGO-Private-Server\server
 ```
 
 ## 2. Server configuration
@@ -67,7 +65,7 @@ card is an infinite loading screen with nothing in any log.
 ## 4. Run the server
 
 ```powershell
-cd BSGOCore
+cd server
 $env:JAVA_HOME = "C:\path\to\jdk-21"     # must be a JDK 21, not the system-default JRE
 .\mvnw.cmd quarkus:dev
 ```
