@@ -254,7 +254,23 @@ public class LootDistributorUtil
             //only the highestDamage receives loot
             case Damage ->
             {
-                final List<User> membersFiltered = getUsersFromPartySameSector(user);
+                /* Outpost loot arrives with no single killer (outpostLoot passes a null lootOwner),
+                 * so fall back to the highest player damage dealer - the contract this case
+                 * documents. Without the fallback the null aborted objectLeftUpdate mid-drain and
+                 * the removed object stayed in the sector as a zombie. */
+                User lootUser = user;
+                if (lootUser == null)
+                {
+                    lootUser = objectDamageHistory.getSortedByDamage().stream()
+                            .filter(accumulated -> accumulated.getDealer().isPlayer())
+                            .map(accumulated -> sectorUsers.getUser(accumulated.getDealer()))
+                            .flatMap(Optional::stream)
+                            .findFirst()
+                            .orElse(null);
+                }
+                if (lootUser == null)
+                    break;
+                final List<User> membersFiltered = getUsersFromPartySameSector(lootUser);
                 final List<User> filteredForGlobal = membersFiltered.stream()
                                 .filter(member -> lootTemplate.isInGlobalLevel(member.getPlayer().getSkillBook().get()))
                                         .toList();

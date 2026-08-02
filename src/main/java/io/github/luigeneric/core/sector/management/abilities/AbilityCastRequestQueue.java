@@ -91,6 +91,12 @@ public class AbilityCastRequestQueue implements SectorJob
                 continue;
             }
             final Ship castingShip = optCastingShip.get();
+            //a removed ship still resolves until the remover drains; it must not cast anymore
+            if (castingShip.isRemoved())
+            {
+                this.removeAutoCastAbility(abilityCastRequest.getAbilityID(), castingShip.getObjectID());
+                continue;
+            }
             final Optional<ShipSlots> optSlots = castingShip.getSpaceSubscribeInfo().getShipSlots();
             if (optSlots.isEmpty()) continue;
             final ShipSlot castingSlot = optSlots.get().getSlot(abilityCastRequest.getAbilityID());
@@ -100,7 +106,7 @@ public class AbilityCastRequestQueue implements SectorJob
                 final Optional<SpaceObject> optTmpObj = ctx.spaceObjects().get(objID);
                 optTmpObj.ifPresent(e ->
                 {
-                    if (e.isVisible())
+                    if (e.isVisible() && !e.isRemoved())
                         toCallOn.add(e);
 
                 });

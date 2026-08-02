@@ -2,7 +2,10 @@ package io.github.luigeneric.core.sector.management.damage;
 
 import io.github.luigeneric.core.User;
 import io.github.luigeneric.core.player.ShipAbility;
+import io.github.luigeneric.core.protocols.ProtocolID;
+import io.github.luigeneric.core.protocols.ProtocolRegistryWriteOnly;
 import io.github.luigeneric.core.protocols.game.GameProtocolWriteOnly;
+import io.github.luigeneric.core.protocols.notification.NotificationProtocolWriteOnly;
 import io.github.luigeneric.core.sector.SectorCards;
 import io.github.luigeneric.core.sector.Tick;
 import io.github.luigeneric.core.sector.creation.SectorContext;
@@ -83,7 +86,27 @@ public class DamageMediator
             toStats.setPp(Mathf.max(toStats.getPp() - damageRecord.energyDrain(), 0));
         if (toStats.getHp() == 0f)
         {
-            this.remover.notifyRemovingCauseAdded(damageRecord.to(), RemovingCause.Death, damageRecord.from());
+            final SpaceObject toObject = damageRecord.to();
+            if (toObject.getSpaceEntityType() == SpaceEntityType.Outpost)
+            {
+                //outposts are never destroyed: JumpOut plays the client ftl-out instead of the explosion
+                final boolean alreadyRemoved = toObject.isRemoved();
+                this.remover.notifyRemovingCauseAdded(toObject, RemovingCause.JumpOut);
+                //several projectiles can land in the tick after hull zero; fire the one-shot
+                //side effects only for the hit that actually removed the outpost
+                if (!alreadyRemoved)
+                {
+                    //zero+block control here and not in a JumpOut subscriber: the decay despawn
+                    //(OutpostSpawnTimer.despawnOp) emits the same cause and must not be blocked,
+                    //and without opDied the spawn timer respawns the retreated outpost within 5s
+                    ctx.outPostStates().getStateForFaction(toObject.getFaction()).opDied(ctx.tick());
+                    sendOutpostRetreatBroadcast(toObject.getFaction());
+                }
+            }
+            else
+            {
+                this.remover.notifyRemovingCauseAdded(toObject, RemovingCause.Death, damageRecord.from());
+            }
             toStats.setPp(0);
             wasKillShot = true;
         }
@@ -92,6 +115,16 @@ public class DamageMediator
         this.sectorDamageHistory.damageUpdate(newDmgRecord);
         this.damageDurabilityModifier.damageReceived(newDmgRecord);
         sendDealDamageTo(newDmgRecord);
+    }
+
+    private void sendOutpostRetreatBroadcast(final Faction faction)
+    {
+        //EmergencyMessage renders as the prominent screen banner (proven by the shutdown broadcast)
+        final NotificationProtocolWriteOnly notificationProtocolWriteOnly =
+                ProtocolRegistryWriteOnly.getProtocol(ProtocolID.Notification);
+        ctx.sender().sendToAllClients(
+                notificationProtocolWriteOnly.writeEmergencyMessage(faction + " outpost was forced to retreat!", 5f)
+        );
     }
 
     private void sendDealDamageTo(final DamageRecord damageRecord)

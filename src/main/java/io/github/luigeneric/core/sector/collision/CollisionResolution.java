@@ -20,7 +20,9 @@ import io.github.luigeneric.templates.utils.ObjectStat;
 import io.github.luigeneric.utils.Utils;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 @Slf4j
 public class CollisionResolution
@@ -30,6 +32,8 @@ public class CollisionResolution
     private Tick currentTick;
     private List<CollisionPair> primitivePair;
     private List<CollisionInfo> contactPair;
+    /** Static-vs-static pairs already reported, so the warning fires once per pair, not 10x/second. */
+    private final Set<Long> loggedStaticOverlaps = new HashSet<>();
     public CollisionResolution(final DamageMediator damageMediator,
                                final ISpaceObjectRemover remover)
     {
@@ -185,6 +189,23 @@ public class CollisionResolution
         {
             remover.notifyRemovingCauseAdded(missile, RemovingCause.Hit, other);
         }
+        /* MISSILE x ASTEROID: both die.
+         * This case had no branch at all, so it fell through the whole if/else and did nothing -
+         * the missile was neither removed nor detonated and simply carried on through the rock,
+         * and the asteroid took no damage. Missiles cannot be TARGETED at asteroids (the missile
+         * ability group's target types are Ship-only in every Regulation card), so this is purely
+         * the incidental case: a round fired at a ship that clips a rock on the way.
+         * Both are destroyed. Damage is dealt first so the asteroid dies by the normal path and
+         * still drops its resources - notifyRemovingCauseAdded on its own would delete it silently
+         * and pay nothing - and the isRemoved guard matches the branch below, because one rock can
+         * be hit by two missiles in the same tick. */
+        else if (other.getSpaceEntityType() == SpaceEntityType.Asteroid)
+        {
+            if (other.isRemoved())
+                return;
+            this.damageMediator.dealDamageFromMissile(missile, other);
+            remover.notifyRemovingCauseAdded(missile, RemovingCause.Hit, other);
+        }
         else if (other.getSpaceEntityType().isOfType(SpaceEntityType.Outpost, SpaceEntityType.WeaponPlatform,
                 SpaceEntityType.Player, SpaceEntityType.BotFighter, SpaceEntityType.MiningShip, SpaceEntityType.Comet))
         {
@@ -225,7 +246,30 @@ public class CollisionResolution
         }
         else
         {
-            throw new IllegalStateException("This should not happen!");
+            /* BOTH OBJECTS ARE STATIC. There is genuinely nothing to resolve - a collision response
+             * pushes one body out of the other, and neither of these can be pushed - so the correct
+             * behaviour is to ignore the pair, not to throw.
+             *
+             * Throwing here turned a piece of overlapping LEVEL DATA into a repeating sector outage.
+             * The exception escapes CollisionUpdater.run into Sector.run's catch (Sector.java:115),
+             * which means spaceObjectRemover and sectorZoneManagement are SKIPPED for that tick -
+             * every tick, forever, for as long as the two objects overlap. One outpost placed too
+             * close to one asteroid took sector 6 down 1,636 times, and the only symptom in the log
+             * was "single crash". A static pair overlapping is a content bug worth reporting once;
+             * it is not worth stopping the sector over.
+             *
+             * Reported once per pair, not per tick: at 10 ticks/second an unthrottled warn here is
+             * itself a denial of service on the log, which is how this one nearly went unnoticed. */
+            final long a = Math.min(currentObj.getObjectID(), againstObj.getObjectID());
+            final long b = Math.max(currentObj.getObjectID(), againstObj.getObjectID());
+            if (loggedStaticOverlaps.add((a << 32) ^ b))
+            {
+                log.warn("Static objects overlap and cannot be resolved: {} ({}) and {} ({}) - " +
+                                "their colliders intersect but neither can move. Fix the placement " +
+                                "or the collider extents; ignoring this pair from now on.",
+                        currentObj.getObjectID(), currentObj.getSpaceEntityType(),
+                        againstObj.getObjectID(), againstObj.getSpaceEntityType());
+            }
         }
     }
 

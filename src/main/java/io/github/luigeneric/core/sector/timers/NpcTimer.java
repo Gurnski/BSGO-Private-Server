@@ -113,9 +113,27 @@ public abstract class NpcTimer extends DelayedTimer
      */
     protected SpaceObject getNextTarget(final NpcShip npcShip)
     {
+        return getNextTarget(npcShip, null);
+    }
+
+    /**
+     * Order:
+     *  get highest damage dealer. if the highest damage dealer is out of range, remove it from damage-history and get the next best damage dealer
+     *  keep the current target while it is still engageable (hysteresis up to maximumAggroDistance)
+     *  get the next best enemy in auto aggro range
+     *  get the objects and kill/defend/patrol
+     * @param npcShip
+     * @param currentTarget the target currently engaged by this npc, null if none
+     * @return
+     */
+    protected SpaceObject getNextTarget(final NpcShip npcShip, final SpaceObject currentTarget)
+    {
         SpaceObject target = getTargetFromDamageHistory(npcShip);
         if (target != null)
             return target;
+        //retain the current target out to maximumAggroDistance even beyond autoAggroDistance
+        if (isStillEngageable(npcShip, currentTarget))
+            return currentTarget;
         //get the enemy in auto aggro distance
         target = getEnemyInAutoAgroDistance(npcShip);
         if (target != null)
@@ -131,6 +149,17 @@ public abstract class NpcTimer extends DelayedTimer
             }
         }
         return null;
+    }
+
+    private boolean isStillEngageable(final NpcShip npcShip, final SpaceObject currentTarget)
+    {
+        if (currentTarget == null || currentTarget.isRemoved())
+            return false;
+        if (currentTarget instanceof PlayerShip playerShip && !playerShip.isVisible())
+            return false;
+        final float maxAgroDistance = npcShip.getNpcBehaviourTemplate().maximumAggroDistance();
+        final float distanceSq = npcShip.getMovementController().getPosition().distanceSq(currentTarget.getMovementController().getPosition());
+        return distanceSq <= maxAgroDistance * maxAgroDistance;
     }
 
     protected SpaceObject getEnemyInAutoAgroDistance(final NpcShip botFighter)
@@ -159,6 +188,9 @@ public abstract class NpcTimer extends DelayedTimer
                 .getSpaceObjectsNotOfEntityType(
                         SpaceEntityType.Missile, SpaceEntityType.Planetoid, SpaceEntityType.Asteroid, SpaceEntityType.Planet)
                 .stream()
+                /* removed-but-still-mapped objects (death and map removal are in different tick
+                 * phases) must not be acquired - matches isStillEngageable's retention rule */
+                .filter(spaceObject -> !spaceObject.isRemoved())
                 .filter(spaceObject ->
                 {
                     if (spaceObject instanceof PlayerShip playerShip)

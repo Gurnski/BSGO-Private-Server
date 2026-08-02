@@ -293,7 +293,19 @@ public class SpaceObjectRemover implements ISpaceObjectRemover, SectorJob
                 }
             }
 
-            this.notifySubscriberObjectLeft(desc);
+            /* A subscriber throwing must never abort the drain: the desc is already dequeued, so
+             * skipping the remove() below would leave a removed-but-present zombie in the sector
+             * (marked cause set, still ticking, client never told). Exactly this happened with an
+             * NPE in the outpost loot path - log and keep removing. */
+            try
+            {
+                this.notifySubscriberObjectLeft(desc);
+            }
+            catch (final Exception exception)
+            {
+                log.error("subscriber threw during object-left fan-out, removing object anyway id={} cause={}",
+                        spaceObjectToRemove.getObjectID(), desc.getRemovingCause(), exception);
+            }
             this.ctx.spaceObjects().remove(spaceObjectToRemove, desc.getRemovingCause());
 
 

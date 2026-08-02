@@ -664,6 +664,7 @@ public class SpaceObjectFactory
             return;
         }
         final ShipSlots slots = optSlots.get();
+        int fitted = 0;
 
         for (final ShipSlotCard shipSlotCard : ship.getShipCard().getShipSlotCards())
         {
@@ -688,9 +689,31 @@ public class SpaceObjectFactory
             }
 
             slots.addSlot(shipSlot);
+            fitted++;
         }
         ship.getShipBindings().setSlots(slots, ship.getShipCard().getTier());
         ship.getSpaceSubscribeInfo().applyStats();
+        /* EVERY OUTCOME ON THIS PATH USED TO BE SILENT, INCLUDING THE FAILURES. A template whose
+         * slotID values do not match the card's SlotId fits ZERO mounts and logs nothing - the
+         * error that would have said so is commented out at the top of the loop - so an unarmed
+         * station is indistinguishable from an armed one until you fly out and get shot at, or not.
+         * The binding count is logged alongside because it is a SECOND, independent way to end up
+         * with invisible hardware: ShipBindings.setSlots only emits a turret model for weapon-bearing
+         * slot types, so a fit can succeed with bindings still at zero. Fitted-but-unbound means the
+         * guns work and the turrets are invisible; both numbers matter and they can disagree. */
+        final int bindings = ship.getShipBindings().getModuleBindingList().size();
+        if (fitted == 0)
+        {
+            log.warn("setupWeaponConfig: ship {} matched config {} but fitted 0 of {} slots - " +
+                            "no slotID in the template matches a SlotId on the card, so it is UNARMED",
+                    ship.getShipCard().getCardGuid(), shipConfigTemplate.getId(),
+                    ship.getShipCard().getShipSlotCards().length);
+        }
+        else
+        {
+            log.info("setupWeaponConfig: ship {} fitted {} slot(s) from config {}, {} turret binding(s)",
+                    ship.getShipCard().getCardGuid(), fitted, shipConfigTemplate.getId(), bindings);
+        }
     }
 
 }

@@ -838,6 +838,24 @@ public class GameProtocol extends BgoProtocol implements StatsProtocolSubscriber
                     log.error("Caught cheating by docking on nondockable ship " + user().getPlayer().getPlayerLog());
                     return;
                 }
+                /* YOU MAY ONLY DOCK AT YOUR OWN FACTION'S STATION. IsDockable is a property of the
+                 * CARD, so it says "this is a station", not "this station will have you" - there was
+                 * no faction check anywhere on this path. That was harmless while outposts were
+                 * inert scenery, and stopped being harmless the moment they shot back: an attacker
+                 * could sit inside an enemy outpost's guns and dock to escape on demand, which makes
+                 * the dock button a guaranteed get-out and the dominant tactic in every outpost
+                 * fight. Every dockable object in the catalogue - both cruisers and both outposts -
+                 * carries a real Colonial/Cylon faction, so exact equality is safe here; there is no
+                 * Neutral dockable object for it to lock out. The party-anchor path above needs no
+                 * equivalent check because it already requires the target to be in your party. */
+                if (spaceObjectToDockAt.getFaction() != user().getPlayer().getFaction())
+                {
+                    log.warn("{} tried to dock at {} station {} - refused",
+                            user().getUserLogSimple(), spaceObjectToDockAt.getFaction(), dockObjectID);
+                    user().send(ProtocolRegistryWriteOnly.writeDebugMessage(
+                            "You cannot dock at an enemy station"));
+                    return;
+                }
                 final Vector3 playerPos = playerShip.getMovementController().getPosition();
                 final Vector3 dockPos = spaceObjectToDockAt.getMovementController().getPosition();
                 final float distance = Vector3.distance(playerPos, dockPos);

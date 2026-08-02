@@ -16,6 +16,7 @@ import io.github.luigeneric.core.sector.objleft.ObjectLeftDescription;
 import io.github.luigeneric.core.spaceentities.PlayerShip;
 import io.github.luigeneric.core.spaceentities.SpaceObject;
 import io.github.luigeneric.enums.RemovingCause;
+import io.github.luigeneric.enums.SpaceEntityType;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
@@ -116,12 +117,17 @@ public class LootClaimHolder implements ObjectLeftSubscriber
     public void onUpdate(final ObjectLeftDescription arg)
     {
         final RemovingCause removingCause = arg.getRemovingCause();
-        if (!removingCause.isOfType(RemovingCause.Death, RemovingCause.Collected))
+        final SpaceObject removedSpaceObject = arg.getRemovedSpaceObject();
+        //hull-zero outpost retreat leaves with JumpOut but rewards like a kill;
+        //the decay despawn is also Outpost+JumpOut yet keeps its HP above zero
+        final boolean isOutpostRetreat = removingCause == RemovingCause.JumpOut &&
+                removedSpaceObject.getSpaceEntityType() == SpaceEntityType.Outpost &&
+                removedSpaceObject.getSpaceSubscribeInfo().getHp() == 0f;
+        if (!isOutpostRetreat && !removingCause.isOfType(RemovingCause.Death, RemovingCause.Collected))
         {
-            removeClaim(arg.getRemovedSpaceObject());
+            removeClaim(removedSpaceObject);
             return;
         }
-        final SpaceObject removedSpaceObject = arg.getRemovedSpaceObject();
 
         final Optional<LootClaim> optClaim = this.getClaim(removedSpaceObject);
         if (optClaim.isEmpty())
