@@ -70,6 +70,30 @@ public class Hangar extends InfoPublisher<HangarShipsUpdate>
         }
     }
 
+    /** Removes one ship (capital-rental expiry). If it was the active ship, activation falls
+     *  back to any remaining hull so the index never dangles. No client message exists for
+     *  this, so it only runs where the client rebuilds its hangar anyway (login). */
+    public void removeHangarShip(final int serverId)
+    {
+        writeLock();
+        try
+        {
+            this.ships.remove(serverId);
+            if (this.activeShipIndex == serverId)
+            {
+                this.activeShipIndex = this.ships.isEmpty() ? -1 : this.ships.keySet().iterator().next();
+            }
+            if (!this.ships.isEmpty())
+            {
+                hangarShipsUpdate();
+            }
+        }
+        finally
+        {
+            writeUnlock();
+        }
+    }
+
     private void hangarShipsUpdate()
     {
         this.set(new HangarShipsUpdate(getActiveShip().getName(), getSortedGUIDs()));

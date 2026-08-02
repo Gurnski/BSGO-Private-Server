@@ -1,0 +1,10 @@
+{
+    "center": {
+        "x": 0,
+        "y": 0,
+        "z": 0
+    },
+    "radius": 6,
+    "prefabName": "humant1stealth",
+    "type": "Sphere"
+}

@@ -45,6 +45,9 @@ public abstract class NpcTimer extends DelayedTimer
     }
 
 
+    /** One unarmed-bot warning per sector per run; see updateWeapons. */
+    private boolean reportedUnarmed = false;
+
     protected void updateWeapons(final Ship ship, final SpaceObject closest)
     {
         if (closest == null)
@@ -53,6 +56,17 @@ public abstract class NpcTimer extends DelayedTimer
         if (optSlots.isEmpty())
             return;
         final ShipSlots slots = optSlots.get();
+        /* Unarmed bots are worth one warning per sector per server run, not one per bot per
+         * acquisition: object ids repeat across sectors and bots respawn, which turned the
+         * first version of this into a flood. It stays because "acquired but cannot shoot" is
+         * exactly the silent failure that hid the config-level bug for so long. */
+        if (!reportedUnarmed && slots.values().stream()
+                .noneMatch(s -> s.getShipSystem().getShipSystemCard() != null))
+        {
+            reportedUnarmed = true;
+            log.warn("npc {} acquired target {} but has ZERO armed slots - check its ShipConfigTemplate",
+                    ship.getObjectID(), closest.getObjectID());
+        }
         for (final ShipSlot slot : slots.values())
         {
             this.abilityCastRequestQueue.addAutoCastAbility(new AbilityCastRequest(

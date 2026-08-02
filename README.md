@@ -67,7 +67,7 @@ Login through undocking into space works end to end at full framerate.
 | Area | State |
 |---|---|
 | Login, reconnects, persistence | working |
-| Catalogue streaming (1,372 cards) | working |
+| Catalogue streaming (1,380 cards) | working |
 | Character creation | working |
 | Hangar / CIC / shop | working |
 | Space: undock, fly, boost, FTL | working |
@@ -109,7 +109,7 @@ $env:JAVA_HOME = "C:\path\to\jdk-21"
 .\mvnw.cmd quarkus:dev
 ```
 
-A healthy startup logs `size: 1372` (the card count) and `LoginServerEndpoint waiting for new
+A healthy startup logs `size: 1380` (the card count) and `LoginServerEndpoint waiting for new
 connections`. Anything else, see the troubleshooting table in QUICKSTART.md.
 
 ## Editing the data

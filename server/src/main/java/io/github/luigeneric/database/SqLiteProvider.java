@@ -10,6 +10,7 @@ import io.github.luigeneric.core.player.*;
 import io.github.luigeneric.core.player.container.ShipSlot;
 import io.github.luigeneric.core.player.container.ShipSlots;
 import io.github.luigeneric.core.player.counters.CounterDesc;
+import io.github.luigeneric.core.protocols.player.CapitalRental;
 import io.github.luigeneric.core.player.counters.Counters;
 import io.github.luigeneric.core.player.counters.MissionBook;
 import io.github.luigeneric.core.player.factors.Factor;
@@ -218,6 +219,30 @@ public class SqLiteProvider implements DbProvider
             containers.fetchMails(player);
             fetchSettings(player);
             fetchCounters(player);
+
+            /* Capital rentals expire here, at load, because there is no server-to-client
+             * remove-ship message to do it live: an expired Pegasus/Basestar disappears with
+             * the next login. A missing counter means never rented (including hulls bought
+             * under the old purchase rules) and counts as expired. */
+            for (final long rentalGuid : new long[]{ CapitalRental.PEGASUS, CapitalRental.BASESTAR })
+            {
+                for (final HangarShip hangarShip : player.getHangar().getAllHangarShips())
+                {
+                    if (hangarShip.getCardGuid() != rentalGuid)
+                    {
+                        continue;
+                    }
+                    final CounterDesc desc = player.getCounterFacade().counters()
+                            .getInternalReadOnly().get(rentalGuid);
+                    final long expiry = desc == null ? 0L : desc.getLongValue();
+                    if (expiry < System.currentTimeMillis() / 1000L)
+                    {
+                        player.getHangar().removeHangarShip(hangarShip.getServerId());
+                        log.info("Capital rental expired for player {}: removed {}", player.getUserID(), rentalGuid);
+                    }
+                    break;
+                }
+            }
             fetchTokenCap(player);
             fetchFactors(player);
             sqLiteMissions.fetchMissionBook(player);

@@ -57,6 +57,9 @@ import io.github.luigeneric.templates.shipitems.ShipItem;
 import io.github.luigeneric.templates.shipitems.ShipSystem;
 import io.github.luigeneric.templates.utils.ObjectStat;
 import io.github.luigeneric.templates.utils.ObjectStats;
+import io.github.luigeneric.core.galaxy.Galaxy;
+import io.github.luigeneric.core.player.counters.CounterDesc;
+import io.github.luigeneric.enums.ResourceType;
 import io.github.luigeneric.templates.utils.Price;
 import jakarta.enterprise.inject.spi.CDI;
 import lombok.extern.slf4j.Slf4j;
@@ -1082,6 +1085,14 @@ public class PlayerProtocol extends BgoProtocol implements StatsProtocolSubscrib
             }
         }
 
+        // The two capitals are rented by the hour, never bought - their price is dynamic and
+        // their stay in the hangar is a persisted counter, so they take their own path.
+        if (CapitalRental.isRental(shipGuid))
+        {
+            rentCapital(shipCard);
+            return;
+        }
+
         //check buy price
         final Price buyPrice = shopItemCard.getBuyPrice();
         final ShopVisitor shopVisitor = new ShopVisitor(user(), null, ctx.rng());
@@ -1102,6 +1113,52 @@ public class PlayerProtocol extends BgoProtocol implements StatsProtocolSubscrib
             user().send(writer.writeShipSlots(newShip));
             user().send(writer.writeShipInfoDurability(newShip));
         }
+    }
+
+    /** One hour of Pegasus/Basestar for tokens, priced by CapitalRental against live galaxy
+     *  control. Renting while a rental is active extends it; the expiry counter is enforced at
+     *  hangar load in SqLiteProvider. The shop dialog shows the Price card's static 20,000 -
+     *  the amount actually charged is this dynamic one, only ever equal or less. */
+    public void rentCapital(final ShipCard shipCard)
+    {
+        final Player player = this.user().getPlayer();
+        final Galaxy galaxy = CDI.current().select(Galaxy.class).get();
+        final long tokens = CapitalRental.priceFor(player.getFaction(), galaxy);
+        final Price rentPrice = new Price(ResourceType.Token, tokens);
+        if (!ContainerVisitor.isEnoughInContainer(rentPrice, player.getHold(), 1))
+        {
+            log.info("Capital rental refused, not enough tokens: {} needs {}", user().getUserLog(), tokens);
+            return;
+        }
+        final ShopVisitor shopVisitor = new ShopVisitor(user(), null, ctx.rng());
+        shopVisitor.removeBuyResources(rentPrice, player.getHold(), 1);
+
+        final long nowSeconds = System.currentTimeMillis() / 1000L;
+        final CounterDesc existing = player.getCounterFacade().counters()
+                .getInternalReadOnly().get(shipCard.getCardGuid());
+        final long base = existing == null ? 0L : existing.getLongValue();
+        final long newExpiry = Math.max(base, nowSeconds) + CapitalRental.DURATION_SECONDS;
+        player.getCounterFacade().setCounter(shipCard.getCardGuid(), newExpiry);
+        log.info("Capital rental: {} rents {} for {} tokens, expires {}",
+                user().getUserLog(), shipCard.getCardGuid(), tokens, newExpiry);
+
+        // Rented hulls live at an offset slot so they never collide with the listed ship that
+        // owns the real hangar id (the stealth ships hold 17 now).
+        final int rentalSlot = CapitalRental.SERVER_ID_OFFSET + shipCard.getHangarId();
+        final HangarShip already = player.getHangar().getByServerId(rentalSlot);
+        if (already != null && already.getCardGuid() == shipCard.getCardGuid())
+        {
+            return;     // extension: the hull is in the hangar, only the counter moved
+        }
+        final HangarShip newShip = new HangarShip(player.getUserID(), rentalSlot, shipCard.getCardGuid(), "");
+        newShip.getShipStats().setSkillBook(player.getSkillBook());
+        newShip.getShipStats().applyStats();
+        newShip.getShipStats().setHp(newShip.getShipStats().getStatOrDefault(ObjectStat.MaxHullPoints));
+        newShip.getShipStats().setPp(newShip.getShipStats().getStatOrDefault(ObjectStat.MaxPowerPoints));
+        player.getHangar().addHangarShip(newShip);
+        user().send(writeAddShip(newShip));
+        user().send(writer.writeShipSlots(newShip));
+        user().send(writer.writeShipInfoDurability(newShip));
     }
 
     public void addExperience(final long exp)

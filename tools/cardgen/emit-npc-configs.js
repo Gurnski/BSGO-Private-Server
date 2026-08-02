@@ -25,10 +25,13 @@ const LIVE = path.join(CORE, 'ServerConfigurationUtils/global/ShipConfigTemplate
 const REPO = path.resolve(__dirname, '../../config/ShipConfigTemplates');
 
 const LAUNCHER = 271446462, MISSILE_AMMO = 17980086;
-const GUNS = { 2: [6001, 6002, 6003, 6004, 6005, 6006], 3: [6011, 6012, 6013, 6014, 6015, 6016], 4: [6021, 6022, 6023] };
+const GUNS = { 1: [2645025994, 4171922670, 3694197064, 1798343138, 1320617532], 2: [6001, 6002, 6003, 6004, 6005, 6006], 3: [6011, 6012, 6013, 6014, 6015, 6016], 4: [6021, 6022, 6023] };
 
 // [guid, prefab, gunTier, npcLevel, faction]
 const NPCS = [
+  // The merit hulls fly in the strike wings but had no arming config - a third of every wing was unarmed.
+  [57, 'humant1merit', 1, 15, 'colonial'],
+  [81, 'cylont1merit', 1, 15, 'cylon'],
   [60, 'humant2fighter', 2, 25, 'colonial'], [61, 'humant2command', 2, 25, 'colonial'], [62, 'humant2defender', 2, 25, 'colonial'],
   [63, 'humant3fighter', 3, 45, 'colonial'], [64, 'humant3command', 3, 45, 'colonial'], [65, 'humant3defender', 3, 45, 'colonial'],
   [84, 'cylont2fighter', 2, 25, 'cylon'], [85, 'cylont2command', 2, 25, 'cylon'], [86, 'cylont2defender', 2, 25, 'cylon'],

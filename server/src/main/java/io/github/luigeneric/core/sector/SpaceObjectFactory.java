@@ -649,9 +649,23 @@ public class SpaceObjectFactory
     }
     private void setupWeaponConfig(final Ship ship, final short level)
     {
-        final Optional<ShipConfigTemplate> optionalShipConfigTemplate = level == -1 ?
+        /* THE REASON NPCs NEVER SHOT BACK.
+         * createBotFighter arms with the OwnerCard's level, and getFirstBestConfigForGUIDAndLevel
+         * demands config.level == that level exactly. Every NPC Owner card is Level 1 while every
+         * shipped ShipConfigTemplate carries the NPC's *rank* (upstream 10/20/75, ours 15/25/45/120),
+         * so the lookup matched nothing for every bot in the game and each one spawned with zero
+         * armed slots - silently, since the caller just returns. Bots flew, chased and rammed, and
+         * never fired a shot. Stations were unaffected: createWeaponPlatform/createOutpost use the
+         * no-level overload, which is why only they ever fought.
+         * The level is a preference now, not a requirement: exact match wins, otherwise any config
+         * for that hull. */
+        Optional<ShipConfigTemplate> optionalShipConfigTemplate = level == -1 ?
                 ShipConfigs.getFirstBestConfigForGUID(ship.getShipCard().getCardGuid()) :
                 ShipConfigs.getFirstBestConfigForGUIDAndLevel(ship.getShipCard().getCardGuid(), level);
+        if (optionalShipConfigTemplate.isEmpty() && level != -1)
+        {
+            optionalShipConfigTemplate = ShipConfigs.getFirstBestConfigForGUID(ship.getShipCard().getCardGuid());
+        }
 
         if (optionalShipConfigTemplate.isEmpty())
             return;

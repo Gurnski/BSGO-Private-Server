@@ -296,6 +296,27 @@ const CAPITAL_FLIGHT = {
 };
 
 const HULLS = [
+  /* Hangar 16 and 17 restored to their original occupants: the second merit line and the
+   * stealth ships. Identities, prices and paperdolls are the dump's own - Mk III line 23,000
+   * cubits, stealth pair 35,000 of the merits currency (ResourceType.Token internally).
+   * Hardpoints extracted from the client bundles 2026-08-02; slots and flight stats ride in
+   * from hulls-real.js like every other hull. */
+  { g: 5016, name: 'Viper Mk III', faction: 'Colonial', hangar: 16, tier: 1,
+    prefab: 'humant1multi2', objKey: 163729268, loca: 'ship_viper_mk3', paperdoll: 'ship_viper_mk3_paperdoll_layouts',
+    role: 'Fighter', roleDep: 'Multi', lvl: 1, tyl: 23000, cubits: 23000,
+    hp: 1050, pwr: 105, speed: 112, agility: 1.1, extent: 6 },
+  { g: 5018, name: 'Raven Mk VI-R', faction: 'Colonial', hangar: 17, tier: 1,
+    prefab: 'humant1stealth', objKey: 59555849, loca: 'ship_colonial_strike_stealth', paperdoll: 'ship_colonial_strike_stealth_paperdoll_layouts',
+    role: 'Stealth', roleDep: 'Stealth', lvl: 1, tyl: 35000, tokens: 35000,
+    hp: 900, pwr: 95, speed: 118, agility: 1.2, extent: 6 },
+  { g: 5116, name: 'Cylon War Raider Mk II', faction: 'Cylon', hangar: 16, tier: 1,
+    prefab: 'cylont1multi2', objKey: 189973171, loca: 'ship_war_raider_mk2', paperdoll: 'ship_war_raider_mk2_paperdoll_layouts',
+    role: 'Fighter', roleDep: 'Multi', lvl: 1, tyl: 23000, cubits: 23000,
+    hp: 1050, pwr: 105, speed: 112, agility: 1.1, extent: 6 },
+  { g: 5118, name: 'Malefactor Type-1', faction: 'Cylon', hangar: 17, tier: 1,
+    prefab: 'cylont1stealth', objKey: 113318329, loca: 'ship_cylon_strike_stealth', paperdoll: 'ship_cylon_strike_stealth_paperdoll_layouts',
+    role: 'Stealth', roleDep: 'Stealth', lvl: 1, tyl: 35000, tokens: 35000,
+    hp: 900, pwr: 95, speed: 118, agility: 1.2, extent: 6 },
   // ---- Colonial
   { g: 2366349390, name: 'Viper Mk II', faction: 'Colonial', hangar: 1, tier: 1,
     prefab: 'humant1fighter', objKey: 107780547, loca: 'ship_viper', paperdoll: 'ship_viper_paperdoll_layouts',
@@ -369,7 +390,7 @@ const HULLS = [
    * one-hour rental, so its economics are a separate question from its handling. */
   { g: 5017, name: 'Pegasus', faction: 'Colonial', hangar: 17, tier: 4,
     prefab: 'pegasus', loca: 'ship_commandtoken_pegasus', paperdoll: 'ship_commandtoken_pegasus_paperdoll_layouts',
-    role: 'Mothership', roleDep: 'Mothership', lvl: 1, tyl: 25000,
+    role: 'Mothership', roleDep: 'Mothership', lvl: 1, tyl: 25000, tokens: 20000, rentalOnly: true,
     hp: 15400, pwr: 660, speed: 52, agility: 0.55, extent: 1174,
     realStats: CAPITAL_FLIGHT },
   // ---- Cylon
@@ -430,7 +451,7 @@ const HULLS = [
    * Its own wiki page has no infobox numbers to check this against. */
   { g: 5117, name: 'Basestar', faction: 'Cylon', hangar: 17, tier: 4,
     prefab: 'basestar', loca: 'ship_commandtoken_basestar', paperdoll: 'ship_commandtoken_basestar_paperdoll_layouts',
-    role: 'Mothership', roleDep: 'Mothership', lvl: 1, tyl: 25000,
+    role: 'Mothership', roleDep: 'Mothership', lvl: 1, tyl: 25000, tokens: 20000, rentalOnly: true,
     hp: 15400, pwr: 660, speed: 52, agility: 0.55, extent: 863,
     realStats: CAPITAL_FLIGHT },
 ];
@@ -674,7 +695,7 @@ const HARDPOINTS = {
     bullet14_defensive:      { hash: 60692, pos: V3(72.070297, 23.752218, -307.778107), rot: QUAT(0, 0.965926, 0, 0.258819) },
     sticker1:                { hash: 45294, pos: V3(0, 0, 0), rot: QUAT(), type: 'Sticker' },
   },
-  pegasus: {           // Pegasus
+  pegasus: {           // Pegasus - REAL transforms, re-extracted from the client bundle 2026-08-02
     bullet01:                { hash:  49813, pos: V3(-350.94944, -95.217966, -236.744682), rot: QUAT(0.707107, 0, -0.707107, 0) },
     bullet02:                { hash:  50321, pos: V3(-350.892249, -95.183284, -68.559715), rot: QUAT(0.707107, 0, -0.707107, 0) },
     bullet03:                { hash:  19778, pos: V3(-350.892277, -95.183278, 97.203041), rot: QUAT(0.707107, 0, -0.707107, 0) },
@@ -684,9 +705,9 @@ const HARDPOINTS = {
     bullet07:                { hash:  64555, pos: V3(197.727594, -14.983938, 404.182905), rot: QUAT(0.707107, 0, 0.707107, 0) },
     bullet08:                { hash:  18078, pos: V3(352.574734, -95.209134, 97.18218), rot: QUAT(0.707107, 0, 0.707107, 0) },
     bullet09:                { hash:  21539, pos: V3(352.574762, -95.209148, -68.580577), rot: QUAT(0.707107, 0, 0.707107, 0) },
-    bullet10:                { hash: 10, pos: V3(352.64489, -95.207384, -236.666155), rot: QUAT(0.707107, 0, 0.707107, 0) },
-    bullet11:                { hash: 11, pos: V3(0.000004, -0.000009, -19.171537), rot: QUAT(1, 0, 0, 0) },
-    bullet12:                { hash: 12, pos: V3(-0.000005, -0.000006, 25.570395), rot: QUAT(1, 0, 0, 0) },
+    bullet10:                { hash:     10, pos: V3(352.64489, -95.207384, -236.666155), rot: QUAT(0.707107, 0, 0.707107, 0) },
+    bullet11:                { hash:     11, pos: V3(0.000004, -0.000009, -19.171537), rot: QUAT(1, 0, 0, 0) },
+    bullet12:                { hash:     12, pos: V3(-0.000005, -0.000006, 25.570395), rot: QUAT(1, 0, 0, 0) },
   },
   cylont1fighter: {    // Raider
     bullet01:                { hash:  49813, pos: V3(-1.161417, -0.310141, 2.245296), rot: QUAT() },
@@ -831,7 +852,7 @@ const HARDPOINTS = {
     bullet14_defensive:      { hash: 60692, pos: V3(72.070297, 23.752218, -307.778107), rot: QUAT(0, 0.965926, 0, 0.258819) },
     sticker1:                { hash: 45294, pos: V3(0, 0, 0), rot: QUAT(), type: 'Sticker' },
   },
-  basestar: {          // Basestar
+  basestar: {           // Basestar - REAL transforms, re-extracted from the client bundle 2026-08-02
     bullet01:                { hash:  49813, pos: V3(-296.495204, -95.217968, -471.633298), rot: QUAT(0.707107, 0, -0.707107, 0) },
     bullet02:                { hash:  50321, pos: V3(-205.681217, -95.183278, -303.448308), rot: QUAT(0.707107, 0, -0.707107, 0) },
     bullet03:                { hash:  19778, pos: V3(-114.924426, -95.183279, -137.685513), rot: QUAT(0.707107, 0, -0.707107, 0) },
@@ -841,9 +862,9 @@ const HARDPOINTS = {
     bullet07:                { hash:  64555, pos: V3(65.895148, -78.127984, 169.294326), rot: QUAT(0.707107, 0, 0.707107, 0) },
     bullet08:                { hash:  18078, pos: V3(110.882001, -95.209135, -137.70636), rot: QUAT(0.707107, 0, 0.707107, 0) },
     bullet09:                { hash:  21539, pos: V3(207.363873, -95.209141, -303.46909), rot: QUAT(0.707107, 0, 0.707107, 0) },
-    bullet10:                { hash: 10, pos: V3(301.058446, -95.207386, -471.554667), rot: QUAT(0.707107, 0, 0.707107, 0) },
-    bullet11:                { hash: 11, pos: V3(0.000008, -0.000009, -19.171537), rot: QUAT(1, 0, 0, 0) },
-    bullet12:                { hash: 12, pos: V3(-0.000011, -0.000006, 25.570395), rot: QUAT(1, 0, 0, 0) },
+    bullet10:                { hash:     10, pos: V3(301.058446, -95.207386, -471.554667), rot: QUAT(0.707107, 0, 0.707107, 0) },
+    bullet11:                { hash:     11, pos: V3(0.000008, -0.000009, -19.171537), rot: QUAT(1, 0, 0, 0) },
+    bullet12:                { hash:     12, pos: V3(-0.000011, -0.000006, 25.570395), rot: QUAT(1, 0, 0, 0) },
   },
 
   /* STATIONS. Extracted with tools/cardgen/extract-hardpoints.py against human_outpost /
@@ -996,6 +1017,39 @@ const HARDPOINTS = {
     bullet16:                { hash: 16,    pos: V3(-103.525864, -77.219147, 105.952393),  rot: QUAT(0.382682, 0, -0.92388, 0) },
     bullet17:                { hash: 17,    pos: V3(0, 0, 0),                              rot: QUAT(0, 0, 0, 1) },
     bullet18:                { hash: 18,    pos: V3(0, 0, 0),                              rot: QUAT(0, 0, 0, 1) },
+  },
+  humant1stealth: {    // Raven Mk VI-R
+    bullet01:                { hash:  49813, pos: V3(-1.100179, 0.030954, 3.466641), rot: QUAT(0, 0, -1, 0) },
+    bullet02:                { hash:  50321, pos: V3(0, 0, 2.53), rot: QUAT(0, 0, -1, 0) },
+    bullet03:                { hash:  19778, pos: V3(1.098442, 0.036733, 3.469342), rot: QUAT(0, 0, -1, 0) },
+    bullet04:                { hash:  50370, pos: V3(1.537918, -0.676627, -0.956552), rot: QUAT(0, 0, -1, 0) },
+    sticker1:                { hash:  45294, pos: V3(0, 0, 0), rot: QUAT(0, -1, 0, 0), type: 'Sticker' },
+  },
+  cylont1stealth: {    // Malefactor Type-1
+    bullet01:                { hash:  49813, pos: V3(-2.02463, 0.208, 2.340462), rot: QUAT(0, 0, -0.000504, -1) },
+    bullet02:                { hash:  50321, pos: V3(2.025008, 0.208, 2.340462), rot: QUAT(0, 0, 0.000504, -1) },
+    bullet03:                { hash:  19778, pos: V3(-0.01355, 0.016299, 1.517462), rot: QUAT(0, 0, -1, 0.000504) },
+    bullet04:                { hash:  50370, pos: V3(1.5, -0.806, 0.315582), rot: QUAT(0, 0, -1, -0.000504) },
+    // sticker01: no known hash for this transform name - spot skipped
+    // sticker02: no known hash for this transform name - spot skipped
+    // sticker03: no known hash for this transform name - spot skipped
+  },
+  humant1multi2: {    // Viper Mk III
+    bullet01:                { hash:  49813, pos: V3(-1.03109, -0.146515, 2.341967), rot: QUAT(0, 0, -1, 0) },
+    bullet02:                { hash:  50321, pos: V3(0, -0.306091, 4.179352), rot: QUAT(0, 0, -1, 0) },
+    bullet03:                { hash:  19778, pos: V3(1.032542, -0.142746, 2.340218), rot: QUAT(0, 0, -1, 0) },
+    elitebullet04:           { hash:  27288, pos: V3(0, -0.687683, -0.119947), rot: QUAT(0, 0, -1, 0) },
+    sticker1:                { hash:  45294, pos: V3(0, 0, 0), rot: QUAT(0, 1, 0, 0), type: 'Sticker' },
+  },
+  cylont1multi2: {    // 'Cylon War' Raider Mk II
+    bullet01:                { hash:  49813, pos: V3(2.666121, 0, 3.5), rot: QUAT(0, 0, 0, 1) },
+    bullet02:                { hash:  50321, pos: V3(0, -0.113292, 1.4), rot: QUAT(0, 0, 0, 1) },
+    bullet03:                { hash:  19778, pos: V3(-2.660084, 0, 3.5), rot: QUAT(0, 0, 0, 1) },
+    elitebullet04:           { hash:  27288, pos: V3(0, -0.360802, 0), rot: QUAT(0, 0, 0, 1) },
+    sticker1:                { hash:  45294, pos: V3(0, 0.032953, -1), rot: QUAT(0, -1, 0, 0), type: 'Sticker' },
+    sticker2:                { hash:  36077, pos: V3(0, 0.032953, -1), rot: QUAT(0, -1, 0, 0), type: 'Sticker' },
+    sticker3:                { hash:  13625, pos: V3(0, -0.016013, -1), rot: QUAT(0, -1, 0, 0), type: 'Sticker' },
+    sticker4:                { hash:  42933, pos: V3(0, -0.016013, -1), rot: QUAT(0, -1, 0, 0), type: 'Sticker' },
   },
 };
 
@@ -1343,7 +1397,7 @@ function shipCards(hull) {
       // queue array by one while the other hulls still index by their fixed order position - so
       // the last one lands past the end and throws every frame. It also has to be non-empty
       // because the real ship-purchase path reads this same price, and empty means free.
-      BuyPrice: price({ [TYLIUM]: hull.tyl }),
+      BuyPrice: price(hull.rentalOnly ? {} : hull.tokens ? { [TOKEN]: hull.tokens } : hull.cubits ? { [CUB]: hull.cubits } : { [TYLIUM]: hull.tyl }),
       // Empty: MaxLevel 1 + nextShipCardGuid 0 means the upgrade path does not exist and the
       // button is hidden anyway.
       UpgradePrice: price({}),
@@ -1508,12 +1562,23 @@ function sectorCards() {
       // of bounds past GetSectorSize().x / 2f. Three server witnesses halve it the same way.
       width: s.extent, height: s.extent, length: s.extent,
       regulationCardGuid: s.regGuid,          // MUST be non-zero: client does Depend(null) -> NRE
-      ambientColor: RGBA(0.20, 0.20, 0.25),
+      /* Per-sector look, seeded from the sector id so it is stable across rebuilds. The client
+       * ships nine nebula backgrounds (bg_nebula1..9 bundles); every sector previously got
+       * nebula1 in white, which is why the whole galaxy looked like one system. The tint stays
+       * near-white so no nebula renders murky, and home sectors keep their faction cast. */
+      ambientColor: (() => { const r = ((s.id * 2654435761) >>> 8) % 100 / 1000;
+        return RGBA(0.18 + r, 0.18 + ((s.id * 40503) >>> 4) % 80 / 1000, 0.22 + ((s.id * 69069) >>> 6) % 90 / 1000); })(),
       fogColor: RGBA(0.10, 0.10, 0.15), fogDensity: 0,
       dustColor: RGBA(0.50, 0.50, 0.50), dustDensity: 0,
-      // Real prefabs from assetmap.json. The names I invented before resolved to null, which
-      // does not hang anything but renders the sector pitch black.
-      nebulaDesc: bg('nebula1'), starsDesc: bg('stars'),
+      // Real prefabs from assetmap.json. Invented names resolve to null, which does not hang
+      // anything but renders the sector pitch black.
+      nebulaDesc: {
+        ...bg('nebula' + (1 + ((s.id * 2654435761) >>> 3) % 9)),
+        color: RGBA(0.85 + ((s.id * 40503) >>> 5) % 15 / 100,
+                    0.85 + ((s.id * 69069) >>> 7) % 15 / 100,
+                    0.85 + ((s.id * 2654435761) >>> 9) % 15 / 100),
+      },
+      starsDesc: bg('stars'),
       starsMultDesc: bg('starsmultiply_mid'), StarsVarianceDesc: bg('starsvariances'),
       movingNebulaDescs: [],
       lightDescs: [{ name: 'sunlight', color: RGBA(1.0, 0.95, 0.9), intensity: 1.0, rotation: QUAT() }],
@@ -1550,6 +1615,7 @@ const GROUP_MISSILE = 2;
  * a KeyNotFoundException the first time the ability validates - on the per-frame path. */
 const GROUP_DEFENSIVE = 3;
 const TYLIUM = 215278030;
+const TOKEN = 130920111;   // command tokens - the capital-rental currency
 
 /* Tier is a HULL-CLASS LOCK, not a quality grade. The equip check demands the system's tier equal
  * the ACTIVE SHIP's tier exactly, the Store tab force-enables the equipable-only filter and never
@@ -2843,7 +2909,10 @@ function sectorFurnitureCards() {
       // -1, not 0: WorldCard.FrameIndex defaults to -1 and GUISystemMap hides anything below
       // zero. A 0 here claims atlas frame 0 and draws the wrong icon on the system map.
       frameIndex: -1, secondaryFrameIndex: -1,
-      targetable: false, showBracketWhenInRange: false, forceShowOnMap: true,
+      // Targetable like the original: a planetoid you can select is one you can navigate by
+      // and set approach on. It has no stats and nothing shoots it - the regulation card's
+      // ability-target tables never list Planetoid(16) for weapons.
+      targetable: true, showBracketWhenInRange: true, forceShowOnMap: true,
     }));
     out.push(card(guid, 'Owner', { IsDockable: false, DockRange: 0.0, Level: 1 }));
     /* A PLANETOID WITHOUT A GUI CARD IS AN INVISIBLE WALL.
@@ -3020,6 +3089,16 @@ function sectorFurnitureCards() {
       ShipObjectKey: o.guid, Tier: OUTPOST_TIER,
       ShipRoles: ['Mothership'], ShipRoleDeprecated: 'Mothership',
     }));
+    /* Price(23): the client fetches the Price view for things its target/info UI can show,
+     * stations included - without one the server logs "Card should not be send because it's
+     * null! <guid> 23" once per client per guid, live-caught the first time a ring appeared.
+     * An empty BuyPrice means NOT FOR SALE everywhere since the shop guards, which is exactly
+     * right for a station. */
+    out.push(card(o.guid, 'Price', {
+      Category: 'Ship', ItemType: 'Ship', Tier: OUTPOST_TIER, Faction: o.faction,
+      SortingNames: [], SortingWeight: 0,
+      BuyPrice: price({}), UpgradePrice: price({}), SellPrice: price({}), CanBeSold: false,
+    }));
   });
 
   PLATFORMS.forEach(p => {
@@ -3103,6 +3182,13 @@ function sectorFurnitureCards() {
       ShipObjectKey: p.guid, Tier: p.tier,
       ShipRoles: ['Artillery'], ShipRoleDeprecated: 'None',
     }));
+    // Price(23) for the same reason as the outposts above: fetched by the client's info UI,
+    // empty BuyPrice = not for sale.
+    out.push(card(p.guid, 'Price', {
+      Category: 'Ship', ItemType: 'Ship', Tier: p.tier, Faction: p.faction,
+      SortingNames: [], SortingWeight: 0,
+      BuyPrice: price({}), UpgradePrice: price({}), SellPrice: price({}), CanBeSold: false,
+    }));
     /* Same fix as the outposts above, and for the same reason - see that comment for the evidence.
      * The platforms take the faction-generic placeholder rather than the drydock art: a sentry
      * platform is a weapon emplacement, not a station, and cannot be docked at. Both names are
@@ -3136,7 +3222,7 @@ function sectorObjectCards() {
       frameIndex: 0, secondaryFrameIndex: 0,
       targetable: true, showBracketWhenInRange: true, forceShowOnMap: true,
     }));
-    out.push(card(c.guid, 'Owner', { IsDockable: true, DockRange: 500.0, Level: 1 }));
+    out.push(card(c.guid, 'Owner', { IsDockable: true, DockRange: 1500.0, Level: 1 }));
     out.push(card(c.guid, 'GUI', {
       key: c.loca, level: 1,
       guiAtlasTexturePath: 'GUI/Inventory/items_atlas', frameIndex: 0,
@@ -3207,7 +3293,7 @@ function bootstrapCards() {
    * 16 and 17 are spliced in only when a listed ship carries them, at those fixed positions.
    * Derived from HULLS so the list and the cards can never drift apart. */
   const listFor = f => {
-    const mine = HULLS.filter(h => h.faction === f);
+    const mine = HULLS.filter(h => h.faction === f && !h.rentalOnly);
     const has = id => mine.some(h => h.hangar === id);
     const order = [1, 4, ...(has(16) ? [16] : []), 7, 11, ...(has(17) ? [17] : []),
                    2, 5, 8, 13, 3, 6, 9, 14, 15];
@@ -5007,9 +5093,13 @@ function validate(cards) {
    * client-side a CruiserShip, never a HangarShip; it is in no ShipList and has no Price card, so
    * the null cannot be reached. The rule stays in full force for anything a player can hold, which
    * is the case it was written for. Without this, arming the stations fails the build. */
+  /* A Price card alone no longer marks a hull ownable: the stations carry Price(23) views now
+   * (the client's info UI fetches them), but with an EMPTY BuyPrice, which the shop guards
+   * treat as not-for-sale everywhere. Ownable means listed, or priced with a real cost. */
   const ownableGuids = new Set([
     ...cards.filter(c => c.cardView2 === 'ShipList').flatMap(c => c.shipCardGuids || []),
-    ...cards.filter(c => c.cardView2 === 'Price').map(c => c.cardGUID),
+    ...cards.filter(c => c.cardView2 === 'Price'
+                      && Object.keys((c.BuyPrice || {}).items || {}).length > 0).map(c => c.cardGUID),
   ]);
   cards.filter(c => c.cardView2 === 'Ship').forEach(c => {
     if (!c.PaperdollUiLayoutfile) {

@@ -10,6 +10,8 @@ import io.github.luigeneric.core.protocols.ProtocolID;
 import io.github.luigeneric.core.protocols.ProtocolRegistryWriteOnly;
 import io.github.luigeneric.core.protocols.debug.DebugProtocol;
 import io.github.luigeneric.core.protocols.notification.NotificationProtocolWriteOnly;
+import io.github.luigeneric.core.protocols.player.CapitalRental;
+import io.github.luigeneric.templates.cards.ShipCard;
 import io.github.luigeneric.core.protocols.player.PlayerProtocol;
 import io.github.luigeneric.enums.GameLocation;
 import io.github.luigeneric.enums.ResourceType;
@@ -668,6 +670,17 @@ public abstract class ContainerVisitor
         // PlayerProtocol.addShip, which checks level and faction. Without this, a hand-crafted
         // MoveItem shop->hold buys a StoreShip straight into cargo and skips both checks.
         if (itemToBuy.getItemType() == ItemType.Ship) return false;
+
+        // A capital rental pass is a trigger, not an item: buying one starts the rental at the
+        // live CapitalRental discount price, and the pass itself is never delivered.
+        if (CapitalRental.isPass(itemToBuy.getCardGuid()))
+        {
+            final PlayerProtocol playerProtocol = user.getProtocol(ProtocolID.Player);
+            CDI.current().select(Catalogue.class).get()
+                    .fetchCard(CapitalRental.capitalForPass(itemToBuy.getCardGuid()), CardView.Ship)
+                    .ifPresent(card -> playerProtocol.rentCapital((ShipCard) card));
+            return false;
+        }
 
         //check prices
         final Price tmpPrice = optShopItemCard.get().getBuyPrice();

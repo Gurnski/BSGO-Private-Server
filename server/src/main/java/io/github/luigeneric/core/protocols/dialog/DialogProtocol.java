@@ -9,7 +9,14 @@ import io.github.luigeneric.core.player.Player;
 import io.github.luigeneric.core.protocols.BgoProtocol;
 import io.github.luigeneric.core.protocols.ProtocolID;
 import io.github.luigeneric.core.protocols.ProtocolRegistryWriteOnly;
+import io.github.luigeneric.core.protocols.player.CapitalRental;
+import io.github.luigeneric.core.protocols.player.PlayerProtocol;
 import io.github.luigeneric.core.protocols.player.PlayerProtocolWriteOnly;
+import io.github.luigeneric.enums.Faction;
+import io.github.luigeneric.templates.cards.CardView;
+import io.github.luigeneric.templates.cards.ShipCard;
+import io.github.luigeneric.templates.catalogue.Catalogue;
+import jakarta.enterprise.inject.spi.CDI;
 import io.github.luigeneric.utils.BgoRandom;
 import lombok.extern.slf4j.Slf4j;
 
@@ -51,6 +58,20 @@ public class DialogProtocol extends BgoProtocol
                     return;
                 }
                 final Player player = user().getPlayer();
+
+                /* Talking to the Admiral (Colonial) or Number Six (Cylon) is how you get a
+                 * flagship, exactly as the original did it: the capital is never sold in the
+                 * shop, it is authorised in the CIC. One hour, charged in merits at the live
+                 * CapitalRental price - cheapest when your faction is losing the map.
+                 * Silent no-op if you cannot afford it, same as any other failed purchase;
+                 * the assignments flow below still runs either way. */
+                final PlayerProtocol playerProtocol = user().getProtocol(ProtocolID.Player);
+                final long capitalGuid = player.getFaction() == Faction.Colonial
+                        ? CapitalRental.PEGASUS : CapitalRental.BASESTAR;
+                CDI.current().select(Catalogue.class).get()
+                        .fetchCard(capitalGuid, CardView.Ship)
+                        .ifPresent(card -> playerProtocol.rentCapital((ShipCard) card));
+
                 //doesn't matter, just by default get assignments
                 user().send(writeStopped());
 

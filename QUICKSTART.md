@@ -58,7 +58,7 @@ node tools\cardgen\emit-sector-templates.js
 node tools\cardgen\cards.js
 ```
 
-`cards.js` must end with `validation passed - 1372 cards`. It fails the build rather than let a
+`cards.js` must end with `validation passed - 1380 cards`. It fails the build rather than let a
 bad card reach a client, because the client has no timeout on card loads — a single malformed
 card is an infinite loading screen with nothing in any log.
 
@@ -73,7 +73,7 @@ $env:JAVA_HOME = "C:\path\to\jdk-21"     # must be a JDK 21, not the system-defa
 Healthy startup looks like:
 
 ```
-size: 1372
+size: 1380
 INFO [io.gi.lu.ne.LegacyTcpLoginServerListener] LoginServerListener successfully started
 INFO [io.gi.lu.ne.LegacyTcpLoginServerListener] LoginServerEndpoint waiting for new connections
 INFO [io.quarkus] bsgo-core 1.0.0-SNAPSHOT ... started in 4.131s

@@ -310,6 +310,34 @@ public class Galaxy
         return galaxyMapUpdates;
     }
 
+    /** Live outpost counts for the capital-rental discount: systems each faction holds right
+     *  now, and how many can hold an outpost at all. [colonial, cylon, capable]. */
+    public int[] countOutposts()
+    {
+        int colonial = 0, cylon = 0, capable = 0;
+        for (final MapStarDesc star : this.galaxyMapCard.getStars().values())
+        {
+            if (star.isCanColonialOutpost() || star.isCanCylonOutpost())
+            {
+                capable++;
+            }
+            final Optional<Sector> optSector = this.sectorRegistry.getSectorById(star.getId());
+            if (optSector.isEmpty())
+            {
+                continue;
+            }
+            if (optSector.get().getColonialOpState().isOutPostCached())
+            {
+                colonial++;
+            }
+            if (optSector.get().getCylonOpState().isOutPostCached())
+            {
+                cylon++;
+            }
+        }
+        return new int[]{ colonial, cylon, Math.max(1, capable) };
+    }
+
     private List<GalaxyMapUpdate> getOutpostStates(final Faction faction)
     {
         final List<GalaxyMapUpdate> galaxyMapUpdates = new ArrayList<>();

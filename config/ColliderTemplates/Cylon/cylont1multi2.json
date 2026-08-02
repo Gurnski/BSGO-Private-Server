@@ -1,0 +1,10 @@
+{
+    "center": {
+        "x": 0,
+        "y": 0,
+        "z": 0
+    },
+    "radius": 7,
+    "prefabName": "cylont1multi2",
+    "type": "Sphere"
+}
