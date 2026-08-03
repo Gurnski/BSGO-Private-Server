@@ -2,11 +2,20 @@
 // One patch per logical change, so each can be read and applied on its own.
 const cp = require('child_process');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 // BSGOCore checkout: override with BSGOCORE_PATH if it is not the in-repo clone.
 const CORE = process.env.BSGOCORE_PATH ? path.resolve(process.env.BSGOCORE_PATH) : path.resolve(__dirname, '../BSGOCore');
 const OUT = path.resolve(__dirname, '../patches');
+
+// The baseline is gitignored, so a fresh checkout does not have it. Refuse before touching
+// anything: every diff below needs it, and patches/ must survive a run that cannot succeed.
+if (!fs.existsSync(path.join(CORE, '.git'))) {
+  console.error('BSGOCore checkout not found at ' + CORE +
+    ' - clone it first (PATCHES.md "Regenerating") or point BSGOCORE_PATH at it.');
+  process.exit(1);
+}
 
 const GROUPS = [
   ['0001-protocol-revision-4578', [
@@ -48,18 +57,52 @@ const GROUPS = [
     'src/main/java/io/github/luigeneric/core/sector/timers/OutpostSpawnTimer.java']],
   ['0013-outpost-seeding-from-star-flags', [
     'src/main/java/io/github/luigeneric/core/sector/creation/SectorFactory.java']],
+  /* The ability-dispatch arms and the armour algorithm ship together because they are one
+   * decision: the dump systems this unblocks are weapons, and half of what a weapon does is
+   * decided by the armour curve. ContainerVisitor's tuning-kit guard is NOT here - it is a shop
+   * guard and belongs with the other three in 0010, where that file already lives. */
+  ['0014-ability-dispatch-and-armour', [
+    'src/main/java/io/github/luigeneric/core/sector/management/abilities/AbilityActionFactory.java',
+    'src/main/java/io/github/luigeneric/core/sector/management/abilities/actions/FireMissileAction.java',
+    'src/main/java/io/github/luigeneric/core/sector/management/SectorAlgorithms.java']],
+  /* 0015-0020 back-fill. These fifteen files were changed in earlier sessions and never added
+   * here, so the coverage check below had been failing since - which is also why patches/ was
+   * stale for 0008, 0010 and 0012. Grouped by theme; a file can only sit in one group, so where
+   * a file carries two threads (Galaxy) the patch note says so. */
+  ['0015-galaxy-update-payload', [
+    'src/main/java/io/github/luigeneric/core/galaxy/Galaxy.java']],
+  ['0016-capital-rental', [
+    'src/main/java/io/github/luigeneric/core/player/Hangar.java',
+    'src/main/java/io/github/luigeneric/core/protocols/dialog/DialogProtocol.java']],
+  ['0017-npc-combat', [
+    'src/main/java/io/github/luigeneric/core/sector/SpaceObjectFactory.java',
+    'src/main/java/io/github/luigeneric/core/sector/timers/NpcTimer.java',
+    'src/main/java/io/github/luigeneric/core/sector/timers/NpcStaticTimer.java',
+    'src/main/java/io/github/luigeneric/templates/npcbehaviour/NpcBehaviourTemplates.java',
+    'src/main/java/io/github/luigeneric/core/sector/management/abilities/AbilityCastRequestQueue.java']],
+  ['0018-outpost-death-and-loot', [
+    'src/main/java/io/github/luigeneric/core/sector/management/damage/DamageMediator.java',
+    'src/main/java/io/github/luigeneric/core/sector/management/lootsystem/LootDistributorUtil.java',
+    'src/main/java/io/github/luigeneric/core/sector/management/lootsystem/claims/LootClaimHolder.java',
+    'src/main/java/io/github/luigeneric/core/sector/management/SpaceObjectRemover.java']],
+  ['0019-collision-resolution', [
+    'src/main/java/io/github/luigeneric/core/sector/collision/CollisionResolution.java']],
+  ['0020-debug-console', [
+    'src/main/java/io/github/luigeneric/core/protocols/debug/DebugProtocol.java',
+    'src/main/java/io/github/luigeneric/core/spaceentities/statsinfo/stats/SpaceSubscribeInfo.java']],
 ];
 
-fs.mkdirSync(OUT, { recursive: true });
-// Drop stale patches so a renamed/removed group cannot linger.
-for (const f of fs.readdirSync(OUT).filter(f => f.endsWith('.patch'))) fs.rmSync(path.join(OUT, f));
+// Diffs are staged in a temp directory and only replace patches/ after every group has
+// diffed cleanly and the coverage check has passed. A run that dies part-way through must
+// leave the existing set exactly as it found it.
+const STAGE = fs.mkdtempSync(path.join(os.tmpdir(), 'mkpatches-'));
 
 let n = 0;
 for (const [name, files] of GROUPS) {
   const r = cp.spawnSync('git', ['diff', '--', ...files], { cwd: CORE, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
   if (r.status !== 0) { console.error('git diff failed for ' + name + ': ' + r.stderr); process.exit(1); }
   if (!r.stdout.trim()) { console.error('EMPTY diff for ' + name + ' - files unchanged?'); continue; }
-  fs.writeFileSync(path.join(OUT, name + '.patch'), r.stdout);
+  fs.writeFileSync(path.join(STAGE, name + '.patch'), r.stdout);
   console.log(name + '.patch  (' + r.stdout.split('\n').length + ' lines)');
   n++;
 }
@@ -73,4 +116,11 @@ if (missed.length) {
   console.error('\n*** UNCOVERED MODIFIED FILES ***\n  ' + missed.join('\n  '));
   process.exit(1);
 }
+
+// Everything checked out: swap the staged set in. Dropping the old files only now is what
+// lets a renamed/removed group disappear without a failed run ever emptying patches/.
+fs.mkdirSync(OUT, { recursive: true });
+for (const f of fs.readdirSync(OUT).filter(f => f.endsWith('.patch'))) fs.rmSync(path.join(OUT, f));
+for (const f of fs.readdirSync(STAGE)) fs.copyFileSync(path.join(STAGE, f), path.join(OUT, f));
+fs.rmSync(STAGE, { recursive: true, force: true });
 console.log('\n' + n + ' patches, all ' + status.length + ' modified files covered');

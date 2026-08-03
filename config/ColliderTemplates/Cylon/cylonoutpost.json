@@ -1,0 +1,14 @@
+{
+	"center": {
+                "x": -0.003,
+                "y": 7.269,
+                "z": 47.193
+            },
+	"extents": {
+                "x": 90.438,
+                "y": 54.097,
+                "z": 338.117
+            },
+    "prefabName": "cylonoutpost",
+    "type": "AABB"
+}

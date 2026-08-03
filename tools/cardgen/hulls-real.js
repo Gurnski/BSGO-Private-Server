@@ -27,6 +27,71 @@
  *   - hull / computer / engine / ship_paint / avionics slots were missing entirely, so no module
  *     could be fitted to anything.
  *
+ * THE STAT BLOCK IS THE WHOLE BLOCK, NOT JUST FLIGHT, and that is load-bearing rather than tidy.
+ * ShipSubscribeInfo.applySlotSystemStats:65-84 runs every fitted module's StaticBuffs through
+ * ObjectStats.applyStatsAddTo and its MultiplyBuffs through applyStatsMultTo, and both write a
+ * key ONLY if the target map already holds it (ObjectStats.java:159, :174). The target is seeded
+ * once from this block and never gains a key afterwards. So a module buffing a stat the hull does
+ * not seed does nothing at all - no error, no log line, just an item with no effect. While this
+ * file carried 18 flight keys, every ArmorValue, FirewallRating, PenetrationStrength, Avoidance
+ * and DecayResistance module in the catalogue was decorative. It now carries all 41 keys the
+ * dump's Ship cards seed, less the seven cards.js owns: 34 in the file, 32 or 33 on any one hull.
+ *
+ * SEVEN DUMP KEYS ARE DELIBERATELY ABSENT: FtlRange, FtlCharge, FtlCooldown, FtlCost,
+ * DetectionVisualRadius, DetectionInnerRadius, DetectionOuterRadius. shipCards() merges this
+ * file's stats LAST, so emitting them here would silently beat cards.js, and cards.js is right
+ * about all seven - our galaxy geometry is not the original's (cards.js:124-139) and the three
+ * radii are already set per hull by the DETECTION table. negtest case 6 anchors on the literal
+ * "FtlCooldown: 35, FtlCost: 1," at cards.js:139 and would go vacuous while still printing PASS.
+ *
+ * NINE BUFF KEYS CAN NEVER BE SEEDED - not by us, not by the original. Cross-joining the dump
+ * modules' buff keys against the union of all 95 dump Ship stat blocks leaves these unseeded on
+ * every hull the original ever shipped:
+ *     DrainResistance  PowerPointRestore  ToggleSystemCooldown
+ *     MissileCooldown        MissilePowerPointCost
+ *     LightMissileCooldown   LightMissilePowerPointCost
+ *     HeavyMissileCooldown   HeavyMissilePowerPointCost
+ * No extraction can fix that, because there is nothing to extract. Two of them are inert by
+ * design rather than by omission: SkillBook.java:261 maps MissileCooldown onto Cooldown for
+ * SKILLS only, never for ship stats, and RestoreBuffAction.java:37-39 reads PowerPointRestore off
+ * the casting ABILITY's ItemBuffAdd, never off the ship. The dead-buff validator treats exactly
+ * this list as a known-inert allowlist and warns instead of failing - a module buffing one of
+ * these is as inert here as it was on the live server, which is as close to correct as the data
+ * allows. TurnSpeed and TurnAcceleration look unseeded by the same test (345 and 90 dump modules
+ * buff them) but are NOT dead and must never be added to that allowlist: applySlotSystemStats
+ * passes every buff through ObjectStats.mapObjectStats first, and :106-119 rewrites TurnSpeed to
+ * Pitch/YawMaxSpeed and TurnAcceleration to Pitch/YawAcceleration, all four of which are seeded.
+ *
+ * THREE OF THE ADDED KEYS CHANGE COMBAT MATH FOR EVERY SHIP. All three are intended, and the
+ * first two only make sense next to the dump's own weapons:
+ *   - Avoidance / AvoidanceFading. WeaponAction.java:95-99 feeds them to
+ *     HitchanceBasedOnThrottle, where the base hit chance is
+ *     clamp(0.675 - 0.0015*(avoidance - accuracy), 0.05, 0.95). At the Avoidance 0 we shipped,
+ *     Accuracy 100 hit 82.5% of the time and anything above 150 hit the 95% ceiling - there was no
+ *     such thing as a miss. The real numbers are TIER-MATCHED: hulls carry 490-520 at tier 1,
+ *     250-290 at tier 2, 30-70 at tier 3, 20 at tier 4, and the dump answers them with weapons at
+ *     Accuracy 400 (tier 1), 335 (tier 2) and 125 (tier 3). Dump on dump is 51% at tier 1 and
+ *     76-80% at tier 3, which is the curve the game was tuned around. Our CURRENT tier-1 weapons
+ *     carry Accuracy 100-150, and against Avoidance 510 that is a 6-13% hit chance at full
+ *     throttle: hulls and weapons are one balance system and have to land in the same wave.
+ *     AvoidanceFading is 0.75 on tiers 1-2 and ABSENT on tiers 3-4. Absent reads as 0, and
+ *     HitchanceBasedOnThrottle.java:62 short-circuits on 0 and returns the full avoidance - no
+ *     divide, no NaN. So a tier-1/2 hull fades to 25% avoidance when stationary and a tier-3/4
+ *     hull never fades at all.
+ *   - ArmorValue: 0-10 at tier 1, 25-30 at tier 2, 40-45 at tier 3. Inert while SectorAlgorithms
+ *     installs ArmorAlgorithmV0, whose getMultiplicator() returns a constant 1. Under V1 these
+ *     change damage taken for every ship and NPC in the game.
+ *   - CriticalDefense, 60-150. cards.js seeds 0 on every hull so that crit-defence buffs have
+ *     something to apply to; the dump's real values win because this file merges last.
+ *     CritchanceAlgorithmV1 gives clamp01((5 + 0.15*(critOffense - critDefense))/100), so a weapon
+ *     needs CriticalOffense above critDefense - 33 to crit at all. Our tier-1 weapons carry 20-45
+ *     against the new 60-120, so tier 1 crits stop entirely until the dump weapons (100-200) land.
+ *     Tiers 3 and 4 are unaffected - ours already carry 90-405.
+ * None of this reaches the ten stations, platforms and motherships or the two capitals, which have
+ * no dump prefab and so no entry here. They keep Avoidance 0 (a 95% hit ceiling against them) and
+ * whatever cards.js gives them, which for the Pegasus and the Basestar is CAPITAL_FLIGHT's
+ * ArmorValue 60 / CriticalDefense 200.
+ *
  * SLOT ROW: [slotId, slotType, objectPoint, objectPointServerHash, level]
  * objectPoint is "undefined" and the hash 44673 for every non-weapon slot - those do not attach
  * to a transform on the model, so they share one sentinel.
@@ -35,7 +100,7 @@
 
 const HULLS_REAL = {
   cylont1command: {
-    stats: { Speed: 52.5, BoostSpeed: 77.5, Acceleration: 10, AccelerationMultiplierOnBoost: 3, PitchMaxSpeed: 47.5, YawMaxSpeed: 47.5, RollMaxSpeed: 130.625, StrafeMaxSpeed: 0, PitchAcceleration: 47.5, YawAcceleration: 47.5, RollAcceleration: 598.5, StrafeAcceleration: 0, InertiaCompensation: 100, BoostCost: 0.6, MaxHullPoints: 500, MaxPowerPoints: 150, HullRecovery: 3, PowerRecovery: 5.5 },
+    stats: { Speed: 52.5, BoostSpeed: 77.5, Acceleration: 10, AccelerationMultiplierOnBoost: 3, PitchMaxSpeed: 47.5, YawMaxSpeed: 47.5, RollMaxSpeed: 130.625, StrafeMaxSpeed: 0, PitchAcceleration: 47.5, YawAcceleration: 47.5, RollAcceleration: 598.5, StrafeAcceleration: 0, InertiaCompensation: 100, BoostCost: 0.6, MaxHullPoints: 500, MaxPowerPoints: 150, HullRecovery: 3, PowerRecovery: 5.5, ArmorValue: 5, Avoidance: 500, AvoidanceFading: 0.75, CriticalDefense: 100, FirewallRating: 200, PenetrationStrength: 200, DecayDamageFactor: 50, DecayResistance: 0, MaxVitalPoints: 130, VitalRecovery: 0.8, CargoHoldVolume: 6, CargoPickupDelay: 4, CargoDropoffDelay: 2, CargoLootDelay: 2, JumpTargetTransponderPowerPointCost: -25 },
     slots: [
       [0, 'weapon', 'bullet01', 49813, 1],
       [1, 'weapon', 'bullet02', 50321, 1],
@@ -55,7 +120,7 @@ const HULLS_REAL = {
     ],
   },
   cylont1defender: {
-    stats: { Speed: 50, BoostSpeed: 75, Acceleration: 8, AccelerationMultiplierOnBoost: 7, PitchMaxSpeed: 45, YawMaxSpeed: 45, RollMaxSpeed: 101.25, StrafeMaxSpeed: 0, PitchAcceleration: 45, YawAcceleration: 45, RollAcceleration: 450, StrafeAcceleration: 0, InertiaCompensation: 100, BoostCost: 0.7, MaxHullPoints: 715, MaxPowerPoints: 150, HullRecovery: 5.5, PowerRecovery: 5 },
+    stats: { Speed: 50, BoostSpeed: 75, Acceleration: 8, AccelerationMultiplierOnBoost: 7, PitchMaxSpeed: 45, YawMaxSpeed: 45, RollMaxSpeed: 101.25, StrafeMaxSpeed: 0, PitchAcceleration: 45, YawAcceleration: 45, RollAcceleration: 450, StrafeAcceleration: 0, InertiaCompensation: 100, BoostCost: 0.7, MaxHullPoints: 715, MaxPowerPoints: 150, HullRecovery: 5.5, PowerRecovery: 5, ArmorValue: 10, Avoidance: 490, AvoidanceFading: 0.75, CriticalDefense: 120, FirewallRating: 150, PenetrationStrength: 150, DecayDamageFactor: 50, DecayResistance: 0, MaxVitalPoints: 130, VitalRecovery: 0.8, CargoHoldVolume: 7, CargoPickupDelay: 4, CargoDropoffDelay: 2, CargoLootDelay: 2 },
     slots: [
       [0, 'weapon', 'bullet01', 49813, 1],
       [1, 'weapon', 'bullet02', 50321, 1],
@@ -76,7 +141,7 @@ const HULLS_REAL = {
     ],
   },
   cylont1fighter: {
-    stats: { Speed: 55, BoostSpeed: 90, Acceleration: 13.5, AccelerationMultiplierOnBoost: 1.5, PitchMaxSpeed: 52, YawMaxSpeed: 52, RollMaxSpeed: 182, StrafeMaxSpeed: 0, PitchAcceleration: 55, YawAcceleration: 55, RollAcceleration: 748, StrafeAcceleration: 0, InertiaCompensation: 175, BoostCost: 0.5, MaxHullPoints: 450, MaxPowerPoints: 100, HullRecovery: 2.5, PowerRecovery: 5 },
+    stats: { Speed: 55, BoostSpeed: 90, Acceleration: 13.5, AccelerationMultiplierOnBoost: 1.5, PitchMaxSpeed: 52, YawMaxSpeed: 52, RollMaxSpeed: 182, StrafeMaxSpeed: 0, PitchAcceleration: 55, YawAcceleration: 55, RollAcceleration: 748, StrafeAcceleration: 0, InertiaCompensation: 175, BoostCost: 0.5, MaxHullPoints: 450, MaxPowerPoints: 100, HullRecovery: 2.5, PowerRecovery: 5, ArmorValue: 5, Avoidance: 510, AvoidanceFading: 0.75, CriticalDefense: 80, FirewallRating: 100, PenetrationStrength: 100, DecayDamageFactor: 50, DecayResistance: 0, MaxVitalPoints: 80, VitalRecovery: 0.5, CargoHoldVolume: 4, CargoPickupDelay: 4, CargoDropoffDelay: 2, CargoLootDelay: 2 },
     slots: [
       [0, 'weapon', 'bullet01', 49813, 1],
       [1, 'weapon', 'bullet02', 50321, 1],
@@ -96,7 +161,7 @@ const HULLS_REAL = {
     ],
   },
   cylont1merit: {
-    stats: { Speed: 55, BoostSpeed: 85, Acceleration: 12, AccelerationMultiplierOnBoost: 4, PitchMaxSpeed: 50, YawMaxSpeed: 50, RollMaxSpeed: 200, StrafeMaxSpeed: 0, PitchAcceleration: 55, YawAcceleration: 55, RollAcceleration: 748, StrafeAcceleration: 0, InertiaCompensation: 100, BoostCost: 0.75, MaxHullPoints: 585, MaxPowerPoints: 150, HullRecovery: 4.5, PowerRecovery: 5 },
+    stats: { Speed: 55, BoostSpeed: 85, Acceleration: 12, AccelerationMultiplierOnBoost: 4, PitchMaxSpeed: 50, YawMaxSpeed: 50, RollMaxSpeed: 200, StrafeMaxSpeed: 0, PitchAcceleration: 55, YawAcceleration: 55, RollAcceleration: 748, StrafeAcceleration: 0, InertiaCompensation: 100, BoostCost: 0.75, MaxHullPoints: 585, MaxPowerPoints: 150, HullRecovery: 4.5, PowerRecovery: 5, ArmorValue: 5, Avoidance: 510, AvoidanceFading: 0.75, CriticalDefense: 80, FirewallRating: 100, PenetrationStrength: 100, DecayDamageFactor: 50, DecayResistance: 0, MaxVitalPoints: 100, VitalRecovery: 0.6, CargoHoldVolume: 4, CargoPickupDelay: 4, CargoDropoffDelay: 2, CargoLootDelay: 2 },
     slots: [
       [0, 'weapon', 'bullet01', 49813, 1],
       [1, 'weapon', 'bullet02', 50321, 2],
@@ -117,7 +182,7 @@ const HULLS_REAL = {
     ],
   },
   cylont1multi2: {
-    stats: { Speed: 55, BoostSpeed: 100, Acceleration: 14, AccelerationMultiplierOnBoost: 4.5, PitchMaxSpeed: 51, YawMaxSpeed: 51, RollMaxSpeed: 175, StrafeMaxSpeed: 0, PitchAcceleration: 55, YawAcceleration: 55, RollAcceleration: 748, StrafeAcceleration: 0, InertiaCompensation: 100, BoostCost: 0.5, MaxHullPoints: 515, MaxPowerPoints: 100, HullRecovery: 3.5, PowerRecovery: 5.2 },
+    stats: { Speed: 55, BoostSpeed: 100, Acceleration: 14, AccelerationMultiplierOnBoost: 4.5, PitchMaxSpeed: 51, YawMaxSpeed: 51, RollMaxSpeed: 175, StrafeMaxSpeed: 0, PitchAcceleration: 55, YawAcceleration: 55, RollAcceleration: 748, StrafeAcceleration: 0, InertiaCompensation: 100, BoostCost: 0.5, MaxHullPoints: 515, MaxPowerPoints: 100, HullRecovery: 3.5, PowerRecovery: 5.2, ArmorValue: 5, Avoidance: 510, AvoidanceFading: 0.75, CriticalDefense: 80, FirewallRating: 100, PenetrationStrength: 100, DecayDamageFactor: 50, DecayResistance: 0, MaxVitalPoints: 80, VitalRecovery: 0.5, CargoHoldVolume: 5, CargoPickupDelay: 4, CargoDropoffDelay: 2, CargoLootDelay: 2 },
     slots: [
       [0, 'weapon', 'bullet01', 49813, 1],
       [1, 'weapon', 'bullet02', 50321, 1],
@@ -137,7 +202,7 @@ const HULLS_REAL = {
     ],
   },
   cylont1scout: {
-    stats: { Speed: 52.5, BoostSpeed: 77.5, Acceleration: 10, AccelerationMultiplierOnBoost: 4, PitchMaxSpeed: 47.5, YawMaxSpeed: 47.5, RollMaxSpeed: 130.625, StrafeMaxSpeed: 0, PitchAcceleration: 47.5, YawAcceleration: 47.5, RollAcceleration: 598.5, StrafeAcceleration: 0, InertiaCompensation: 100, BoostCost: 0.6, MaxHullPoints: 650, MaxPowerPoints: 200, HullRecovery: 5, PowerRecovery: 6 },
+    stats: { Speed: 52.5, BoostSpeed: 77.5, Acceleration: 10, AccelerationMultiplierOnBoost: 4, PitchMaxSpeed: 47.5, YawMaxSpeed: 47.5, RollMaxSpeed: 130.625, StrafeMaxSpeed: 0, PitchAcceleration: 47.5, YawAcceleration: 47.5, RollAcceleration: 598.5, StrafeAcceleration: 0, InertiaCompensation: 100, BoostCost: 0.6, MaxHullPoints: 650, MaxPowerPoints: 200, HullRecovery: 5, PowerRecovery: 6, ArmorValue: 5, Avoidance: 500, AvoidanceFading: 0.75, CriticalDefense: 100, FirewallRating: 200, PenetrationStrength: 200, DecayDamageFactor: 50, DecayResistance: 0, MaxVitalPoints: 130, VitalRecovery: 0.8, CargoHoldVolume: 5, CargoPickupDelay: 4, CargoDropoffDelay: 2, CargoLootDelay: 2, JumpTargetTransponderPowerPointCost: -75 },
     slots: [
       [0, 'weapon', 'bullet01', 49813, 1],
       [1, 'weapon', 'bullet02', 50321, 1],
@@ -157,7 +222,7 @@ const HULLS_REAL = {
     ],
   },
   cylont1stealth: {
-    stats: { Speed: 70, BoostSpeed: 90, Acceleration: 13, AccelerationMultiplierOnBoost: 1.25, PitchMaxSpeed: 52, YawMaxSpeed: 50, RollMaxSpeed: 90, StrafeMaxSpeed: 30, PitchAcceleration: 75, YawAcceleration: 90, RollAcceleration: 750, StrafeAcceleration: 80, InertiaCompensation: 175, BoostCost: 0.5, MaxHullPoints: 350, MaxPowerPoints: 120, HullRecovery: 3, PowerRecovery: 3 },
+    stats: { Speed: 70, BoostSpeed: 90, Acceleration: 13, AccelerationMultiplierOnBoost: 1.25, PitchMaxSpeed: 52, YawMaxSpeed: 50, RollMaxSpeed: 90, StrafeMaxSpeed: 30, PitchAcceleration: 75, YawAcceleration: 90, RollAcceleration: 750, StrafeAcceleration: 80, InertiaCompensation: 175, BoostCost: 0.5, MaxHullPoints: 350, MaxPowerPoints: 120, HullRecovery: 3, PowerRecovery: 3, ArmorValue: 0, Avoidance: 520, AvoidanceFading: 0.75, CriticalDefense: 60, FirewallRating: 100, PenetrationStrength: 100, DecayDamageFactor: 50, DecayResistance: 0, MaxVitalPoints: 70, VitalRecovery: 0.4, CargoHoldVolume: 3, CargoPickupDelay: 4, CargoDropoffDelay: 2, CargoLootDelay: 2 },
     slots: [
       [0, 'gun', 'bullet01', 49813, 1],
       [1, 'computer', 'undefined', 44673, 2],
@@ -175,7 +240,7 @@ const HULLS_REAL = {
     ],
   },
   cylont2command: {
-    stats: { Speed: 37.5, BoostSpeed: 57.5, Acceleration: 5, AccelerationMultiplierOnBoost: 1.5, PitchMaxSpeed: 22.5, YawMaxSpeed: 22.5, RollMaxSpeed: 39.375, StrafeMaxSpeed: 0, PitchAcceleration: 22.5, YawAcceleration: 22.5, RollAcceleration: 39.375, StrafeAcceleration: 0, InertiaCompensation: 50, BoostCost: 1.8, MaxHullPoints: 1700, MaxPowerPoints: 330, HullRecovery: 15, PowerRecovery: 12 },
+    stats: { Speed: 37.5, BoostSpeed: 57.5, Acceleration: 5, AccelerationMultiplierOnBoost: 1.5, PitchMaxSpeed: 22.5, YawMaxSpeed: 22.5, RollMaxSpeed: 39.375, StrafeMaxSpeed: 0, PitchAcceleration: 22.5, YawAcceleration: 22.5, RollAcceleration: 39.375, StrafeAcceleration: 0, InertiaCompensation: 50, BoostCost: 1.8, MaxHullPoints: 1700, MaxPowerPoints: 330, HullRecovery: 15, PowerRecovery: 12, ArmorValue: 25, Avoidance: 270, AvoidanceFading: 0.75, CriticalDefense: 100, FirewallRating: 200, PenetrationStrength: 200, DecayDamageFactor: 150, DecayResistance: 0, MaxVitalPoints: 160, VitalRecovery: 1, CargoHoldVolume: 9, CargoPickupDelay: 4, CargoDropoffDelay: 2, CargoLootDelay: 2, JumpTargetTransponderPowerPointCost: -50 },
     slots: [
       [0, 'weapon', 'bullet01', 49813, 1],
       [1, 'weapon', 'bullet03', 19778, 1],
@@ -197,7 +262,7 @@ const HULLS_REAL = {
     ],
   },
   cylont2defender: {
-    stats: { Speed: 35, BoostSpeed: 55, Acceleration: 4, AccelerationMultiplierOnBoost: 1.5, PitchMaxSpeed: 20, YawMaxSpeed: 20, RollMaxSpeed: 30, StrafeMaxSpeed: 0, PitchAcceleration: 20, YawAcceleration: 20, RollAcceleration: 30, StrafeAcceleration: 0, InertiaCompensation: 50, BoostCost: 2.1, MaxHullPoints: 2000, MaxPowerPoints: 200, HullRecovery: 8.9, PowerRecovery: 10 },
+    stats: { Speed: 35, BoostSpeed: 55, Acceleration: 4, AccelerationMultiplierOnBoost: 1.5, PitchMaxSpeed: 20, YawMaxSpeed: 20, RollMaxSpeed: 30, StrafeMaxSpeed: 0, PitchAcceleration: 20, YawAcceleration: 20, RollAcceleration: 30, StrafeAcceleration: 0, InertiaCompensation: 50, BoostCost: 2.1, MaxHullPoints: 2000, MaxPowerPoints: 200, HullRecovery: 8.9, PowerRecovery: 10, ArmorValue: 30, Avoidance: 250, AvoidanceFading: 0.75, CriticalDefense: 120, FirewallRating: 150, PenetrationStrength: 150, DecayDamageFactor: 150, DecayResistance: 0, MaxVitalPoints: 170, VitalRecovery: 1.1, CargoHoldVolume: 10, CargoPickupDelay: 4, CargoDropoffDelay: 2, CargoLootDelay: 2 },
     slots: [
       [0, 'weapon', 'bullet01', 49813, 1],
       [1, 'weapon', 'bullet03', 19778, 1],
@@ -220,7 +285,7 @@ const HULLS_REAL = {
     ],
   },
   cylont2fighter: {
-    stats: { Speed: 40, BoostSpeed: 60, Acceleration: 5, AccelerationMultiplierOnBoost: 1.5, PitchMaxSpeed: 25, YawMaxSpeed: 25, RollMaxSpeed: 50, StrafeMaxSpeed: 0, PitchAcceleration: 25, YawAcceleration: 25, RollAcceleration: 50, StrafeAcceleration: 0, InertiaCompensation: 50, BoostCost: 1.5, MaxHullPoints: 1400, MaxPowerPoints: 200, HullRecovery: 7.8, PowerRecovery: 10 },
+    stats: { Speed: 40, BoostSpeed: 60, Acceleration: 5, AccelerationMultiplierOnBoost: 1.5, PitchMaxSpeed: 25, YawMaxSpeed: 25, RollMaxSpeed: 50, StrafeMaxSpeed: 0, PitchAcceleration: 25, YawAcceleration: 25, RollAcceleration: 50, StrafeAcceleration: 0, InertiaCompensation: 50, BoostCost: 1.5, MaxHullPoints: 1400, MaxPowerPoints: 200, HullRecovery: 7.8, PowerRecovery: 10, ArmorValue: 25, Avoidance: 290, AvoidanceFading: 0.75, CriticalDefense: 80, FirewallRating: 100, PenetrationStrength: 100, DecayDamageFactor: 150, DecayResistance: 0, MaxVitalPoints: 140, VitalRecovery: 0.9, CargoHoldVolume: 7, CargoPickupDelay: 4, CargoDropoffDelay: 2, CargoLootDelay: 2 },
     slots: [
       [0, 'weapon', 'bullet01', 49813, 1],
       [1, 'weapon', 'bullet03', 19778, 1],
@@ -241,7 +306,7 @@ const HULLS_REAL = {
     ],
   },
   cylont2merit: {
-    stats: { Speed: 40, BoostSpeed: 60, Acceleration: 5, AccelerationMultiplierOnBoost: 1.5, PitchMaxSpeed: 25, YawMaxSpeed: 25, RollMaxSpeed: 43.75, StrafeMaxSpeed: 0, PitchAcceleration: 25, YawAcceleration: 25, RollAcceleration: 43.75, StrafeAcceleration: 0, InertiaCompensation: 50, BoostCost: 2.7, MaxHullPoints: 1950, MaxPowerPoints: 300, HullRecovery: 15, PowerRecovery: 10 },
+    stats: { Speed: 40, BoostSpeed: 60, Acceleration: 5, AccelerationMultiplierOnBoost: 1.5, PitchMaxSpeed: 25, YawMaxSpeed: 25, RollMaxSpeed: 43.75, StrafeMaxSpeed: 0, PitchAcceleration: 25, YawAcceleration: 25, RollAcceleration: 43.75, StrafeAcceleration: 0, InertiaCompensation: 50, BoostCost: 2.7, MaxHullPoints: 1950, MaxPowerPoints: 300, HullRecovery: 15, PowerRecovery: 10, ArmorValue: 25, Avoidance: 260, AvoidanceFading: 0.75, CriticalDefense: 100, FirewallRating: 150, PenetrationStrength: 150, DecayDamageFactor: 150, DecayResistance: 0, MaxVitalPoints: 140, VitalRecovery: 0.9, CargoHoldVolume: 6, CargoPickupDelay: 4, CargoDropoffDelay: 2, CargoLootDelay: 2 },
     slots: [
       [0, 'weapon', 'bullet01', 49813, 1],
       [1, 'weapon', 'bullet02', 50321, 1],
@@ -263,7 +328,7 @@ const HULLS_REAL = {
     ],
   },
   cylont3command: {
-    stats: { Speed: 27.5, BoostSpeed: 42.5, Acceleration: 2, AccelerationMultiplierOnBoost: 1.5, PitchMaxSpeed: 9, YawMaxSpeed: 9, RollMaxSpeed: 9, StrafeMaxSpeed: 0, PitchAcceleration: 9, YawAcceleration: 9, RollAcceleration: 9, StrafeAcceleration: 0, InertiaCompensation: 50, BoostCost: 5.4, MaxHullPoints: 3500, MaxPowerPoints: 650, HullRecovery: 19.4, PowerRecovery: 28 },
+    stats: { Speed: 27.5, BoostSpeed: 42.5, Acceleration: 2, AccelerationMultiplierOnBoost: 1.5, PitchMaxSpeed: 9, YawMaxSpeed: 9, RollMaxSpeed: 9, StrafeMaxSpeed: 0, PitchAcceleration: 9, YawAcceleration: 9, RollAcceleration: 9, StrafeAcceleration: 0, InertiaCompensation: 50, BoostCost: 5.4, MaxHullPoints: 3500, MaxPowerPoints: 650, HullRecovery: 19.4, PowerRecovery: 28, ArmorValue: 40, Avoidance: 50, CriticalDefense: 100, FirewallRating: 200, PenetrationStrength: 200, DecayDamageFactor: 350, DecayResistance: 0, MaxVitalPoints: 220, VitalRecovery: 1.4, DurabilityBonus: 0.4, CargoHoldVolume: 13, CargoPickupDelay: 4, CargoDropoffDelay: 2, CargoLootDelay: 2, JumpTargetTransponderPowerPointCost: -150 },
     slots: [
       [0, 'weapon', 'bullet01', 49813, 1],
       [1, 'weapon', 'bullet02', 50321, 1],
@@ -286,7 +351,7 @@ const HULLS_REAL = {
     ],
   },
   cylont3defender: {
-    stats: { Speed: 25, BoostSpeed: 40, Acceleration: 1.5, AccelerationMultiplierOnBoost: 1.5, PitchMaxSpeed: 8, YawMaxSpeed: 8, RollMaxSpeed: 8, StrafeMaxSpeed: 0, PitchAcceleration: 8, YawAcceleration: 8, RollAcceleration: 8, StrafeAcceleration: 0, InertiaCompensation: 50, BoostCost: 6.3, MaxHullPoints: 4500, MaxPowerPoints: 500, HullRecovery: 20.6, PowerRecovery: 25 },
+    stats: { Speed: 25, BoostSpeed: 40, Acceleration: 1.5, AccelerationMultiplierOnBoost: 1.5, PitchMaxSpeed: 8, YawMaxSpeed: 8, RollMaxSpeed: 8, StrafeMaxSpeed: 0, PitchAcceleration: 8, YawAcceleration: 8, RollAcceleration: 8, StrafeAcceleration: 0, InertiaCompensation: 50, BoostCost: 6.3, MaxHullPoints: 4500, MaxPowerPoints: 500, HullRecovery: 20.6, PowerRecovery: 25, ArmorValue: 45, Avoidance: 30, CriticalDefense: 120, FirewallRating: 150, PenetrationStrength: 150, DecayDamageFactor: 350, DecayResistance: 0, MaxVitalPoints: 240, VitalRecovery: 1.5, DurabilityBonus: 0.4, CargoHoldVolume: 15, CargoPickupDelay: 4, CargoDropoffDelay: 2, CargoLootDelay: 2 },
     slots: [
       [0, 'weapon', 'bullet01', 49813, 1],
       [1, 'weapon', 'bullet02', 50321, 1],
@@ -309,7 +374,7 @@ const HULLS_REAL = {
     ],
   },
   cylont3fighter: {
-    stats: { Speed: 30, BoostSpeed: 45, Acceleration: 2.5, AccelerationMultiplierOnBoost: 1.5, PitchMaxSpeed: 10, YawMaxSpeed: 10, RollMaxSpeed: 10, StrafeMaxSpeed: 0, PitchAcceleration: 10, YawAcceleration: 10, RollAcceleration: 10, StrafeAcceleration: 0, InertiaCompensation: 50, BoostCost: 4.5, MaxHullPoints: 4290, MaxPowerPoints: 750, HullRecovery: 33, PowerRecovery: 25 },
+    stats: { Speed: 30, BoostSpeed: 45, Acceleration: 2.5, AccelerationMultiplierOnBoost: 1.5, PitchMaxSpeed: 10, YawMaxSpeed: 10, RollMaxSpeed: 10, StrafeMaxSpeed: 0, PitchAcceleration: 10, YawAcceleration: 10, RollAcceleration: 10, StrafeAcceleration: 0, InertiaCompensation: 50, BoostCost: 4.5, MaxHullPoints: 4290, MaxPowerPoints: 750, HullRecovery: 33, PowerRecovery: 25, ArmorValue: 40, Avoidance: 70, CriticalDefense: 80, FirewallRating: 100, PenetrationStrength: 100, DecayDamageFactor: 350, DecayResistance: 0, MaxVitalPoints: 180, VitalRecovery: 1.1, DurabilityBonus: 0.4, CargoHoldVolume: 12, CargoPickupDelay: 4, CargoDropoffDelay: 2, CargoLootDelay: 2 },
     slots: [
       [0, 'weapon', 'bullet01', 49813, 1],
       [1, 'weapon', 'bullet02', 50321, 1],
@@ -334,7 +399,7 @@ const HULLS_REAL = {
     ],
   },
   cylont3merit: {
-    stats: { Speed: 30, BoostSpeed: 45, Acceleration: 2, AccelerationMultiplierOnBoost: 1.5, PitchMaxSpeed: 10, YawMaxSpeed: 10, RollMaxSpeed: 10, StrafeMaxSpeed: 0, PitchAcceleration: 10, YawAcceleration: 10, RollAcceleration: 10, StrafeAcceleration: 0, InertiaCompensation: 50, BoostCost: 8.1, MaxHullPoints: 4550, MaxPowerPoints: 750, HullRecovery: 35, PowerRecovery: 25 },
+    stats: { Speed: 30, BoostSpeed: 45, Acceleration: 2, AccelerationMultiplierOnBoost: 1.5, PitchMaxSpeed: 10, YawMaxSpeed: 10, RollMaxSpeed: 10, StrafeMaxSpeed: 0, PitchAcceleration: 10, YawAcceleration: 10, RollAcceleration: 10, StrafeAcceleration: 0, InertiaCompensation: 50, BoostCost: 8.1, MaxHullPoints: 4550, MaxPowerPoints: 750, HullRecovery: 35, PowerRecovery: 25, ArmorValue: 40, Avoidance: 50, CriticalDefense: 100, FirewallRating: 150, PenetrationStrength: 150, DecayDamageFactor: 350, DecayResistance: 0, MaxVitalPoints: 180, VitalRecovery: 1.1, DurabilityBonus: 0.4, CargoHoldVolume: 10, CargoPickupDelay: 4, CargoDropoffDelay: 2, CargoLootDelay: 2 },
     slots: [
       [0, 'weapon', 'bullet02', 50321, 1],
       [1, 'weapon', 'bullet01', 49813, 1],
@@ -358,7 +423,7 @@ const HULLS_REAL = {
     ],
   },
   cylont4carrier: {
-    stats: { Speed: 18, BoostSpeed: 30, Acceleration: 3, AccelerationMultiplierOnBoost: 1.5, PitchMaxSpeed: 8, YawMaxSpeed: 8, RollMaxSpeed: 8, StrafeMaxSpeed: 0, PitchAcceleration: 9, YawAcceleration: 9, RollAcceleration: 9, StrafeAcceleration: 0, InertiaCompensation: 44, BoostCost: 18, MaxHullPoints: 8000, MaxPowerPoints: 1000, HullRecovery: 40, PowerRecovery: 40 },
+    stats: { Speed: 18, BoostSpeed: 30, Acceleration: 3, AccelerationMultiplierOnBoost: 1.5, PitchMaxSpeed: 8, YawMaxSpeed: 8, RollMaxSpeed: 8, StrafeMaxSpeed: 0, PitchAcceleration: 9, YawAcceleration: 9, RollAcceleration: 9, StrafeAcceleration: 0, InertiaCompensation: 44, BoostCost: 18, MaxHullPoints: 8000, MaxPowerPoints: 1000, HullRecovery: 40, PowerRecovery: 40, ArmorValue: 40, Avoidance: 20, CriticalDefense: 150, FirewallRating: 240, PenetrationStrength: 240, DecayDamageFactor: 800, DecayResistance: 0, MaxVitalPoints: 240, VitalRecovery: 1.5, DurabilityBonus: 0.5, CargoHoldVolume: 16, CargoPickupDelay: 4, CargoDropoffDelay: 2, CargoLootDelay: 2 },
     slots: [
       [0, 'gun', 'bullet06_cannon', 28932, 1],
       [1, 'gun', 'bullet01_cannon', 28205, 1],
@@ -390,7 +455,7 @@ const HULLS_REAL = {
     ],
   },
   humant1command: {
-    stats: { Speed: 52.5, BoostSpeed: 77.5, Acceleration: 10, AccelerationMultiplierOnBoost: 3, PitchMaxSpeed: 47.5, YawMaxSpeed: 47.5, RollMaxSpeed: 130.625, StrafeMaxSpeed: 0, PitchAcceleration: 47.5, YawAcceleration: 47.5, RollAcceleration: 598.5, StrafeAcceleration: 0, InertiaCompensation: 100, BoostCost: 0.6, MaxHullPoints: 500, MaxPowerPoints: 150, HullRecovery: 3, PowerRecovery: 5.5 },
+    stats: { Speed: 52.5, BoostSpeed: 77.5, Acceleration: 10, AccelerationMultiplierOnBoost: 3, PitchMaxSpeed: 47.5, YawMaxSpeed: 47.5, RollMaxSpeed: 130.625, StrafeMaxSpeed: 0, PitchAcceleration: 47.5, YawAcceleration: 47.5, RollAcceleration: 598.5, StrafeAcceleration: 0, InertiaCompensation: 100, BoostCost: 0.6, MaxHullPoints: 500, MaxPowerPoints: 150, HullRecovery: 3, PowerRecovery: 5.5, ArmorValue: 5, Avoidance: 500, AvoidanceFading: 0.75, CriticalDefense: 100, FirewallRating: 200, PenetrationStrength: 200, DecayDamageFactor: 50, DecayResistance: 0, MaxVitalPoints: 130, VitalRecovery: 0.8, CargoHoldVolume: 6, CargoPickupDelay: 4, CargoDropoffDelay: 2, CargoLootDelay: 2, JumpTargetTransponderPowerPointCost: -25 },
     slots: [
       [0, 'weapon', 'bullet01', 49813, 1],
       [1, 'weapon', 'bullet02', 50321, 1],
@@ -410,7 +475,7 @@ const HULLS_REAL = {
     ],
   },
   humant1defender: {
-    stats: { Speed: 50, BoostSpeed: 75, Acceleration: 8, AccelerationMultiplierOnBoost: 7, PitchMaxSpeed: 45, YawMaxSpeed: 45, RollMaxSpeed: 101.25, StrafeMaxSpeed: 0, PitchAcceleration: 45, YawAcceleration: 45, RollAcceleration: 450, StrafeAcceleration: 0, InertiaCompensation: 100, BoostCost: 0.7, MaxHullPoints: 715, MaxPowerPoints: 150, HullRecovery: 5.5, PowerRecovery: 5 },
+    stats: { Speed: 50, BoostSpeed: 75, Acceleration: 8, AccelerationMultiplierOnBoost: 7, PitchMaxSpeed: 45, YawMaxSpeed: 45, RollMaxSpeed: 101.25, StrafeMaxSpeed: 0, PitchAcceleration: 45, YawAcceleration: 45, RollAcceleration: 450, StrafeAcceleration: 0, InertiaCompensation: 100, BoostCost: 0.7, MaxHullPoints: 715, MaxPowerPoints: 150, HullRecovery: 5.5, PowerRecovery: 5, ArmorValue: 10, Avoidance: 490, AvoidanceFading: 0.75, CriticalDefense: 120, FirewallRating: 150, PenetrationStrength: 150, DecayDamageFactor: 50, DecayResistance: 0, MaxVitalPoints: 130, VitalRecovery: 0.8, CargoHoldVolume: 7, CargoPickupDelay: 4, CargoDropoffDelay: 2, CargoLootDelay: 2 },
     slots: [
       [0, 'weapon', 'bullet01', 49813, 1],
       [1, 'weapon', 'bullet02', 50321, 1],
@@ -431,7 +496,7 @@ const HULLS_REAL = {
     ],
   },
   humant1fighter: {
-    stats: { Speed: 55, BoostSpeed: 90, Acceleration: 13.5, AccelerationMultiplierOnBoost: 1.5, PitchMaxSpeed: 52, YawMaxSpeed: 52, RollMaxSpeed: 182, StrafeMaxSpeed: 0, PitchAcceleration: 55, YawAcceleration: 55, RollAcceleration: 748, StrafeAcceleration: 0, InertiaCompensation: 175, BoostCost: 0.5, MaxHullPoints: 450, MaxPowerPoints: 100, HullRecovery: 2.5, PowerRecovery: 5 },
+    stats: { Speed: 55, BoostSpeed: 90, Acceleration: 13.5, AccelerationMultiplierOnBoost: 1.5, PitchMaxSpeed: 52, YawMaxSpeed: 52, RollMaxSpeed: 182, StrafeMaxSpeed: 0, PitchAcceleration: 55, YawAcceleration: 55, RollAcceleration: 748, StrafeAcceleration: 0, InertiaCompensation: 175, BoostCost: 0.5, MaxHullPoints: 450, MaxPowerPoints: 100, HullRecovery: 2.5, PowerRecovery: 5, ArmorValue: 5, Avoidance: 510, AvoidanceFading: 0.75, CriticalDefense: 80, FirewallRating: 100, PenetrationStrength: 100, DecayDamageFactor: 50, DecayResistance: 0, MaxVitalPoints: 80, VitalRecovery: 0.5, CargoHoldVolume: 4, CargoPickupDelay: 4, CargoDropoffDelay: 2, CargoLootDelay: 2 },
     slots: [
       [0, 'weapon', 'bullet01', 49813, 1],
       [1, 'weapon', 'bullet02', 50321, 1],
@@ -451,7 +516,7 @@ const HULLS_REAL = {
     ],
   },
   humant1merit: {
-    stats: { Speed: 55, BoostSpeed: 85, Acceleration: 12, AccelerationMultiplierOnBoost: 4, PitchMaxSpeed: 50, YawMaxSpeed: 50, RollMaxSpeed: 200, StrafeMaxSpeed: 0, PitchAcceleration: 55, YawAcceleration: 55, RollAcceleration: 748, StrafeAcceleration: 0, InertiaCompensation: 100, BoostCost: 0.75, MaxHullPoints: 585, MaxPowerPoints: 150, HullRecovery: 4.5, PowerRecovery: 5 },
+    stats: { Speed: 55, BoostSpeed: 85, Acceleration: 12, AccelerationMultiplierOnBoost: 4, PitchMaxSpeed: 50, YawMaxSpeed: 50, RollMaxSpeed: 200, StrafeMaxSpeed: 0, PitchAcceleration: 55, YawAcceleration: 55, RollAcceleration: 748, StrafeAcceleration: 0, InertiaCompensation: 100, BoostCost: 0.75, MaxHullPoints: 585, MaxPowerPoints: 150, HullRecovery: 4.5, PowerRecovery: 5, ArmorValue: 5, Avoidance: 510, AvoidanceFading: 0.75, CriticalDefense: 80, FirewallRating: 100, PenetrationStrength: 100, DecayDamageFactor: 50, DecayResistance: 0, MaxVitalPoints: 100, VitalRecovery: 0.6, CargoHoldVolume: 4, CargoPickupDelay: 4, CargoDropoffDelay: 2, CargoLootDelay: 2 },
     slots: [
       [0, 'weapon', 'bullet01', 49813, 1],
       [1, 'weapon', 'bullet02', 50321, 2],
@@ -472,7 +537,7 @@ const HULLS_REAL = {
     ],
   },
   humant1multi2: {
-    stats: { Speed: 55, BoostSpeed: 100, Acceleration: 14, AccelerationMultiplierOnBoost: 4.5, PitchMaxSpeed: 51, YawMaxSpeed: 51, RollMaxSpeed: 180, StrafeMaxSpeed: 0, PitchAcceleration: 55, YawAcceleration: 55, RollAcceleration: 748, StrafeAcceleration: 0, InertiaCompensation: 100, BoostCost: 0.5, MaxHullPoints: 515, MaxPowerPoints: 100, HullRecovery: 3.5, PowerRecovery: 5.2 },
+    stats: { Speed: 55, BoostSpeed: 100, Acceleration: 14, AccelerationMultiplierOnBoost: 4.5, PitchMaxSpeed: 51, YawMaxSpeed: 51, RollMaxSpeed: 180, StrafeMaxSpeed: 0, PitchAcceleration: 55, YawAcceleration: 55, RollAcceleration: 748, StrafeAcceleration: 0, InertiaCompensation: 100, BoostCost: 0.5, MaxHullPoints: 515, MaxPowerPoints: 100, HullRecovery: 3.5, PowerRecovery: 5.2, ArmorValue: 5, Avoidance: 510, AvoidanceFading: 0.75, CriticalDefense: 80, FirewallRating: 100, PenetrationStrength: 100, DecayDamageFactor: 50, DecayResistance: 0, MaxVitalPoints: 80, VitalRecovery: 0.5, CargoHoldVolume: 5, CargoPickupDelay: 4, CargoDropoffDelay: 2, CargoLootDelay: 2 },
     slots: [
       [0, 'weapon', 'bullet01', 49813, 1],
       [1, 'weapon', 'bullet02', 50321, 1],
@@ -492,7 +557,7 @@ const HULLS_REAL = {
     ],
   },
   humant1scout: {
-    stats: { Speed: 52.5, BoostSpeed: 77.5, Acceleration: 10, AccelerationMultiplierOnBoost: 4, PitchMaxSpeed: 47.5, YawMaxSpeed: 47.5, RollMaxSpeed: 130.625, StrafeMaxSpeed: 0, PitchAcceleration: 47.5, YawAcceleration: 47.5, RollAcceleration: 598.5, StrafeAcceleration: 0, InertiaCompensation: 100, BoostCost: 0.6, MaxHullPoints: 650, MaxPowerPoints: 200, HullRecovery: 5, PowerRecovery: 6 },
+    stats: { Speed: 52.5, BoostSpeed: 77.5, Acceleration: 10, AccelerationMultiplierOnBoost: 4, PitchMaxSpeed: 47.5, YawMaxSpeed: 47.5, RollMaxSpeed: 130.625, StrafeMaxSpeed: 0, PitchAcceleration: 47.5, YawAcceleration: 47.5, RollAcceleration: 598.5, StrafeAcceleration: 0, InertiaCompensation: 100, BoostCost: 0.6, MaxHullPoints: 650, MaxPowerPoints: 200, HullRecovery: 5, PowerRecovery: 6, ArmorValue: 5, Avoidance: 500, AvoidanceFading: 0.75, CriticalDefense: 100, FirewallRating: 200, PenetrationStrength: 200, DecayDamageFactor: 50, DecayResistance: 0, MaxVitalPoints: 130, VitalRecovery: 0.8, CargoHoldVolume: 5, CargoPickupDelay: 4, CargoDropoffDelay: 2, CargoLootDelay: 2, JumpTargetTransponderPowerPointCost: -75 },
     slots: [
       [0, 'weapon', 'bullet01', 49813, 1],
       [1, 'weapon', 'bullet02', 50321, 1],
@@ -512,7 +577,7 @@ const HULLS_REAL = {
     ],
   },
   humant1stealth: {
-    stats: { Speed: 70, BoostSpeed: 90, Acceleration: 13, AccelerationMultiplierOnBoost: 1.25, PitchMaxSpeed: 52, YawMaxSpeed: 50, RollMaxSpeed: 90, StrafeMaxSpeed: 30, PitchAcceleration: 75, YawAcceleration: 90, RollAcceleration: 750, StrafeAcceleration: 80, InertiaCompensation: 175, BoostCost: 0.5, MaxHullPoints: 350, MaxPowerPoints: 120, HullRecovery: 3, PowerRecovery: 3 },
+    stats: { Speed: 70, BoostSpeed: 90, Acceleration: 13, AccelerationMultiplierOnBoost: 1.25, PitchMaxSpeed: 52, YawMaxSpeed: 50, RollMaxSpeed: 90, StrafeMaxSpeed: 30, PitchAcceleration: 75, YawAcceleration: 90, RollAcceleration: 750, StrafeAcceleration: 80, InertiaCompensation: 175, BoostCost: 0.5, MaxHullPoints: 350, MaxPowerPoints: 120, HullRecovery: 3, PowerRecovery: 3, ArmorValue: 0, Avoidance: 520, AvoidanceFading: 0.75, CriticalDefense: 60, FirewallRating: 100, PenetrationStrength: 100, DecayDamageFactor: 50, DecayResistance: 0, MaxVitalPoints: 70, VitalRecovery: 0.4, CargoHoldVolume: 3, CargoPickupDelay: 4, CargoDropoffDelay: 2, CargoLootDelay: 2 },
     slots: [
       [0, 'gun', 'bullet01', 49813, 1],
       [1, 'engine', 'undefined', 44673, 2],
@@ -530,7 +595,7 @@ const HULLS_REAL = {
     ],
   },
   humant2command: {
-    stats: { Speed: 37.5, BoostSpeed: 57.5, Acceleration: 5, AccelerationMultiplierOnBoost: 1.5, PitchMaxSpeed: 22.5, YawMaxSpeed: 22.5, RollMaxSpeed: 39.375, StrafeMaxSpeed: 0, PitchAcceleration: 22.5, YawAcceleration: 22.5, RollAcceleration: 39.375, StrafeAcceleration: 0, InertiaCompensation: 50, BoostCost: 1.8, MaxHullPoints: 1700, MaxPowerPoints: 330, HullRecovery: 15, PowerRecovery: 12 },
+    stats: { Speed: 37.5, BoostSpeed: 57.5, Acceleration: 5, AccelerationMultiplierOnBoost: 1.5, PitchMaxSpeed: 22.5, YawMaxSpeed: 22.5, RollMaxSpeed: 39.375, StrafeMaxSpeed: 0, PitchAcceleration: 22.5, YawAcceleration: 22.5, RollAcceleration: 39.375, StrafeAcceleration: 0, InertiaCompensation: 50, BoostCost: 1.8, MaxHullPoints: 1700, MaxPowerPoints: 330, HullRecovery: 15, PowerRecovery: 12, ArmorValue: 25, Avoidance: 270, AvoidanceFading: 0.75, CriticalDefense: 100, FirewallRating: 200, PenetrationStrength: 200, DecayDamageFactor: 150, DecayResistance: 0, MaxVitalPoints: 160, VitalRecovery: 1, CargoHoldVolume: 9, CargoPickupDelay: 4, CargoDropoffDelay: 2, CargoLootDelay: 2, JumpTargetTransponderPowerPointCost: -50 },
     slots: [
       [0, 'weapon', 'bullet01', 49813, 1],
       [1, 'weapon', 'bullet03', 19778, 1],
@@ -552,7 +617,7 @@ const HULLS_REAL = {
     ],
   },
   humant2defender: {
-    stats: { Speed: 35, BoostSpeed: 55, Acceleration: 4, AccelerationMultiplierOnBoost: 1.5, PitchMaxSpeed: 20, YawMaxSpeed: 20, RollMaxSpeed: 30, StrafeMaxSpeed: 0, PitchAcceleration: 20, YawAcceleration: 20, RollAcceleration: 30, StrafeAcceleration: 0, InertiaCompensation: 50, BoostCost: 2.1, MaxHullPoints: 2000, MaxPowerPoints: 200, HullRecovery: 8.9, PowerRecovery: 10 },
+    stats: { Speed: 35, BoostSpeed: 55, Acceleration: 4, AccelerationMultiplierOnBoost: 1.5, PitchMaxSpeed: 20, YawMaxSpeed: 20, RollMaxSpeed: 30, StrafeMaxSpeed: 0, PitchAcceleration: 20, YawAcceleration: 20, RollAcceleration: 30, StrafeAcceleration: 0, InertiaCompensation: 50, BoostCost: 2.1, MaxHullPoints: 2000, MaxPowerPoints: 200, HullRecovery: 8.9, PowerRecovery: 10, ArmorValue: 30, Avoidance: 250, AvoidanceFading: 0.75, CriticalDefense: 120, FirewallRating: 150, PenetrationStrength: 150, DecayDamageFactor: 150, DecayResistance: 0, MaxVitalPoints: 170, VitalRecovery: 1.1, CargoHoldVolume: 10, CargoPickupDelay: 4, CargoDropoffDelay: 2, CargoLootDelay: 2 },
     slots: [
       [0, 'weapon', 'bullet01', 49813, 1],
       [1, 'weapon', 'bullet03', 19778, 1],
@@ -575,7 +640,7 @@ const HULLS_REAL = {
     ],
   },
   humant2fighter: {
-    stats: { Speed: 40, BoostSpeed: 60, Acceleration: 5, AccelerationMultiplierOnBoost: 1.5, PitchMaxSpeed: 25, YawMaxSpeed: 25, RollMaxSpeed: 50, StrafeMaxSpeed: 0, PitchAcceleration: 25, YawAcceleration: 25, RollAcceleration: 50, StrafeAcceleration: 0, InertiaCompensation: 50, BoostCost: 1.5, MaxHullPoints: 1400, MaxPowerPoints: 200, HullRecovery: 7.8, PowerRecovery: 10 },
+    stats: { Speed: 40, BoostSpeed: 60, Acceleration: 5, AccelerationMultiplierOnBoost: 1.5, PitchMaxSpeed: 25, YawMaxSpeed: 25, RollMaxSpeed: 50, StrafeMaxSpeed: 0, PitchAcceleration: 25, YawAcceleration: 25, RollAcceleration: 50, StrafeAcceleration: 0, InertiaCompensation: 50, BoostCost: 1.5, MaxHullPoints: 1400, MaxPowerPoints: 200, HullRecovery: 7.8, PowerRecovery: 10, ArmorValue: 25, Avoidance: 290, AvoidanceFading: 0.75, CriticalDefense: 80, FirewallRating: 100, PenetrationStrength: 100, DecayDamageFactor: 150, DecayResistance: 0, MaxVitalPoints: 140, VitalRecovery: 0.9, CargoHoldVolume: 7, CargoPickupDelay: 4, CargoDropoffDelay: 2, CargoLootDelay: 2 },
     slots: [
       [0, 'weapon', 'bullet01', 49813, 1],
       [1, 'weapon', 'bullet03', 19778, 1],
@@ -596,7 +661,7 @@ const HULLS_REAL = {
     ],
   },
   humant2merit: {
-    stats: { Speed: 40, BoostSpeed: 60, Acceleration: 5, AccelerationMultiplierOnBoost: 1.5, PitchMaxSpeed: 25, YawMaxSpeed: 25, RollMaxSpeed: 43.75, StrafeMaxSpeed: 0, PitchAcceleration: 25, YawAcceleration: 25, RollAcceleration: 43.75, StrafeAcceleration: 0, InertiaCompensation: 50, BoostCost: 2.7, MaxHullPoints: 1950, MaxPowerPoints: 300, HullRecovery: 15, PowerRecovery: 10 },
+    stats: { Speed: 40, BoostSpeed: 60, Acceleration: 5, AccelerationMultiplierOnBoost: 1.5, PitchMaxSpeed: 25, YawMaxSpeed: 25, RollMaxSpeed: 43.75, StrafeMaxSpeed: 0, PitchAcceleration: 25, YawAcceleration: 25, RollAcceleration: 43.75, StrafeAcceleration: 0, InertiaCompensation: 50, BoostCost: 2.7, MaxHullPoints: 1950, MaxPowerPoints: 300, HullRecovery: 15, PowerRecovery: 10, ArmorValue: 25, Avoidance: 260, AvoidanceFading: 0.75, CriticalDefense: 100, FirewallRating: 150, PenetrationStrength: 150, DecayDamageFactor: 150, DecayResistance: 0, MaxVitalPoints: 140, VitalRecovery: 0.9, CargoHoldVolume: 6, CargoPickupDelay: 4, CargoDropoffDelay: 2, CargoLootDelay: 2 },
     slots: [
       [0, 'weapon', 'bullet01', 49813, 1],
       [1, 'weapon', 'bullet02', 50321, 1],
@@ -618,7 +683,7 @@ const HULLS_REAL = {
     ],
   },
   humant3command: {
-    stats: { Speed: 27.5, BoostSpeed: 42.5, Acceleration: 2, AccelerationMultiplierOnBoost: 1.5, PitchMaxSpeed: 9, YawMaxSpeed: 9, RollMaxSpeed: 9, StrafeMaxSpeed: 0, PitchAcceleration: 9, YawAcceleration: 9, RollAcceleration: 9, StrafeAcceleration: 0, InertiaCompensation: 50, BoostCost: 5.4, MaxHullPoints: 3500, MaxPowerPoints: 650, HullRecovery: 19.4, PowerRecovery: 28 },
+    stats: { Speed: 27.5, BoostSpeed: 42.5, Acceleration: 2, AccelerationMultiplierOnBoost: 1.5, PitchMaxSpeed: 9, YawMaxSpeed: 9, RollMaxSpeed: 9, StrafeMaxSpeed: 0, PitchAcceleration: 9, YawAcceleration: 9, RollAcceleration: 9, StrafeAcceleration: 0, InertiaCompensation: 50, BoostCost: 5.4, MaxHullPoints: 3500, MaxPowerPoints: 650, HullRecovery: 19.4, PowerRecovery: 28, ArmorValue: 40, Avoidance: 50, CriticalDefense: 100, FirewallRating: 200, PenetrationStrength: 200, DecayDamageFactor: 350, DecayResistance: 0, MaxVitalPoints: 220, VitalRecovery: 1.4, DurabilityBonus: 0.4, CargoHoldVolume: 13, CargoPickupDelay: 4, CargoDropoffDelay: 2, CargoLootDelay: 2, JumpTargetTransponderPowerPointCost: -150 },
     slots: [
       [0, 'weapon', 'bullet01', 49813, 1],
       [1, 'weapon', 'bullet02', 50321, 1],
@@ -641,7 +706,7 @@ const HULLS_REAL = {
     ],
   },
   humant3defender: {
-    stats: { Speed: 25, BoostSpeed: 40, Acceleration: 1.5, AccelerationMultiplierOnBoost: 1.5, PitchMaxSpeed: 8, YawMaxSpeed: 8, RollMaxSpeed: 8, StrafeMaxSpeed: 0, PitchAcceleration: 8, YawAcceleration: 8, RollAcceleration: 8, StrafeAcceleration: 0, InertiaCompensation: 50, BoostCost: 6.3, MaxHullPoints: 4500, MaxPowerPoints: 500, HullRecovery: 20.6, PowerRecovery: 25 },
+    stats: { Speed: 25, BoostSpeed: 40, Acceleration: 1.5, AccelerationMultiplierOnBoost: 1.5, PitchMaxSpeed: 8, YawMaxSpeed: 8, RollMaxSpeed: 8, StrafeMaxSpeed: 0, PitchAcceleration: 8, YawAcceleration: 8, RollAcceleration: 8, StrafeAcceleration: 0, InertiaCompensation: 50, BoostCost: 6.3, MaxHullPoints: 4500, MaxPowerPoints: 500, HullRecovery: 20.6, PowerRecovery: 25, ArmorValue: 45, Avoidance: 30, CriticalDefense: 120, FirewallRating: 150, PenetrationStrength: 150, DecayDamageFactor: 350, DecayResistance: 0, MaxVitalPoints: 240, VitalRecovery: 1.5, DurabilityBonus: 0.4, CargoHoldVolume: 15, CargoPickupDelay: 4, CargoDropoffDelay: 2, CargoLootDelay: 2 },
     slots: [
       [0, 'weapon', 'bullet01', 49813, 1],
       [1, 'weapon', 'bullet02', 50321, 1],
@@ -664,7 +729,7 @@ const HULLS_REAL = {
     ],
   },
   humant3fighter: {
-    stats: { Speed: 30, BoostSpeed: 45, Acceleration: 2.5, AccelerationMultiplierOnBoost: 1.5, PitchMaxSpeed: 10, YawMaxSpeed: 10, RollMaxSpeed: 10, StrafeMaxSpeed: 0, PitchAcceleration: 10, YawAcceleration: 10, RollAcceleration: 10, StrafeAcceleration: 0, InertiaCompensation: 50, BoostCost: 4.5, MaxHullPoints: 4290, MaxPowerPoints: 750, HullRecovery: 33, PowerRecovery: 25 },
+    stats: { Speed: 30, BoostSpeed: 45, Acceleration: 2.5, AccelerationMultiplierOnBoost: 1.5, PitchMaxSpeed: 10, YawMaxSpeed: 10, RollMaxSpeed: 10, StrafeMaxSpeed: 0, PitchAcceleration: 10, YawAcceleration: 10, RollAcceleration: 10, StrafeAcceleration: 0, InertiaCompensation: 50, BoostCost: 4.5, MaxHullPoints: 4290, MaxPowerPoints: 750, HullRecovery: 33, PowerRecovery: 25, ArmorValue: 40, Avoidance: 70, CriticalDefense: 80, FirewallRating: 100, PenetrationStrength: 100, DecayDamageFactor: 350, DecayResistance: 0, MaxVitalPoints: 180, VitalRecovery: 1.1, DurabilityBonus: 0.4, CargoHoldVolume: 12, CargoPickupDelay: 4, CargoDropoffDelay: 2, CargoLootDelay: 2 },
     slots: [
       [0, 'weapon', 'elitebullet07', 7123, 1],
       [1, 'weapon', 'bullet02', 50321, 1],
@@ -689,7 +754,7 @@ const HULLS_REAL = {
     ],
   },
   humant3merit: {
-    stats: { Speed: 30, BoostSpeed: 45, Acceleration: 2, AccelerationMultiplierOnBoost: 1.5, PitchMaxSpeed: 10, YawMaxSpeed: 10, RollMaxSpeed: 10, StrafeMaxSpeed: 0, PitchAcceleration: 10, YawAcceleration: 10, RollAcceleration: 10, StrafeAcceleration: 0, InertiaCompensation: 50, BoostCost: 8.1, MaxHullPoints: 4550, MaxPowerPoints: 750, HullRecovery: 35, PowerRecovery: 25 },
+    stats: { Speed: 30, BoostSpeed: 45, Acceleration: 2, AccelerationMultiplierOnBoost: 1.5, PitchMaxSpeed: 10, YawMaxSpeed: 10, RollMaxSpeed: 10, StrafeMaxSpeed: 0, PitchAcceleration: 10, YawAcceleration: 10, RollAcceleration: 10, StrafeAcceleration: 0, InertiaCompensation: 50, BoostCost: 8.1, MaxHullPoints: 4550, MaxPowerPoints: 750, HullRecovery: 35, PowerRecovery: 25, ArmorValue: 40, Avoidance: 50, CriticalDefense: 100, FirewallRating: 150, PenetrationStrength: 150, DecayDamageFactor: 350, DecayResistance: 0, MaxVitalPoints: 180, VitalRecovery: 1.1, DurabilityBonus: 0.4, CargoHoldVolume: 10, CargoPickupDelay: 4, CargoDropoffDelay: 2, CargoLootDelay: 2 },
     slots: [
       [0, 'weapon', 'bullet01', 49813, 1],
       [1, 'weapon', 'bullet02', 50321, 1],
@@ -713,7 +778,7 @@ const HULLS_REAL = {
     ],
   },
   humant4carrier: {
-    stats: { Speed: 18, BoostSpeed: 30, Acceleration: 3, AccelerationMultiplierOnBoost: 1.5, PitchMaxSpeed: 8, YawMaxSpeed: 8, RollMaxSpeed: 8, StrafeMaxSpeed: 0, PitchAcceleration: 9, YawAcceleration: 9, RollAcceleration: 9, StrafeAcceleration: 0, InertiaCompensation: 44, BoostCost: 18, MaxHullPoints: 8000, MaxPowerPoints: 1000, HullRecovery: 40, PowerRecovery: 40 },
+    stats: { Speed: 18, BoostSpeed: 30, Acceleration: 3, AccelerationMultiplierOnBoost: 1.5, PitchMaxSpeed: 8, YawMaxSpeed: 8, RollMaxSpeed: 8, StrafeMaxSpeed: 0, PitchAcceleration: 9, YawAcceleration: 9, RollAcceleration: 9, StrafeAcceleration: 0, InertiaCompensation: 44, BoostCost: 18, MaxHullPoints: 8000, MaxPowerPoints: 1000, HullRecovery: 40, PowerRecovery: 40, ArmorValue: 40, Avoidance: 20, CriticalDefense: 150, FirewallRating: 240, PenetrationStrength: 240, DecayDamageFactor: 800, DecayResistance: 0, MaxVitalPoints: 240, VitalRecovery: 1.5, DurabilityBonus: 0.5, CargoHoldVolume: 16, CargoPickupDelay: 4, CargoDropoffDelay: 2, CargoLootDelay: 2 },
     slots: [
       [0, 'gun', 'bullet06_cannon', 28932, 1],
       [1, 'gun', 'bullet01_cannon', 28205, 1],

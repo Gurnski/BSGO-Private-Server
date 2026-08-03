@@ -1,0 +1,14 @@
+{
+	"center": {
+                "x": 0,
+                "y": 0,
+                "z": 0
+            },
+	"extents": {
+                "x": 73.626,
+                "y": 111.059,
+                "z": 73.626
+            },
+    "prefabName": "cylon_stationary_platform_small",
+    "type": "AABB"
+}

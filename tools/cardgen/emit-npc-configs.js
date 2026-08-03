@@ -19,13 +19,40 @@
 const fs = require('fs');
 const path = require('path');
 const { HULLS_REAL } = require('./hulls-real.js');
+const { SYSTEMS_REAL } = require('./systems-real.js');
 
 const CORE = process.env.BSGOCORE_PATH ? path.resolve(process.env.BSGOCORE_PATH) : path.resolve(__dirname, '../../server');
 const LIVE = path.join(CORE, 'ServerConfigurationUtils/global/ShipConfigTemplates');
 const REPO = path.resolve(__dirname, '../../config/ShipConfigTemplates');
 
 const LAUNCHER = 271446462, MISSILE_AMMO = 17980086;
-const GUNS = { 1: [2645025994, 4171922670, 3694197064, 1798343138, 1320617532], 2: [6001, 6002, 6003, 6004, 6005, 6006], 3: [6011, 6012, 6013, 6014, 6015, 6016], 4: [6021, 6022, 6023] };
+
+/* The gun pool per tier, PICKED FROM THE CATALOGUE rather than listed here. The old table named
+ * 6001-6023, eighteen hand-scaled weapons that no longer exist, and a config naming a deleted guid
+ * is not a build error anywhere - ShipSystem.fromGUID throws at SpaceObjectFactory.java:698, which
+ * sits OUTSIDE setupWeaponConfig's try, so the first player to fly into that sector takes the
+ * exception. Deriving the pool means deleting an item can never leave a config pointing at it.
+ *
+ * The filter is narrow on purpose, and each clause is load-bearing:
+ *   FireCannon   - the weapon/t3 pool also holds a point-defence bubble, a flak screen, a mining
+ *                  laser and a 260-second-cooldown nuclear torpedo. None of those is a gun.
+ *   Launch Auto  - NpcStaticTimer fires what the ship carries; a Manual launcher is a player
+ *                  trigger and would sit idle on an NPC.
+ *   MinRange 0   - WeaponAction.java:78-82 enforces MinRange as a HARD FLOOR, so the tier-2
+ *                  anti-capital cannon (MinRange 500) would be unable to answer anything actually
+ *                  attacking the ship.
+ * Tier 4 is gone with the table: no t4 hull in NPCS below has a `weapon` slot, and the dump has no
+ * weapon/t4 system to put in one if it did. The carriers use the capital types instead. */
+const gunPool = tier => SYSTEMS_REAL
+  .filter(r => r.slot === 'weapon' && r.tier === tier && r.ability
+            && r.ability.actionType === 'FireCannon' && r.ability.launch === 'Auto'
+            && !(r.levels[0].ab.add.MinRange > 0))
+  .map(r => r.sys);
+const GUNS = { 1: gunPool(1), 2: gunPool(2), 3: gunPool(3) };
+for (const [t, g] of Object.entries(GUNS)) {
+  if (!g.length) { console.error('no weapon/t' + t + ' gun survives the pool filter'); process.exit(1); }
+  console.log('tier ' + t + ' gun pool (' + g.length + '): ' + g.join(', '));
+}
 
 // [guid, prefab, gunTier, npcLevel, faction]
 const NPCS = [
@@ -53,7 +80,10 @@ for (const [guid, prefab, tier, level, faction] of NPCS) {
     // 'gun' (6031), 'defensive_weapon' (6032/6033) and 'launcher'. The launcher pair stays on
     // the t1 missile launcher + ammo because that pairing is the one the upstream strike configs
     // prove actually fires; the t4 launcher cards' ammo binding is unverified.
-    if (type === 'weapon') slotConfigs.push({ slotID: slotId, itemGUID: guns[g++ % guns.length] });
+    if (type === 'weapon') {
+      if (!guns) { console.error(prefab + ': tier ' + tier + ' has a weapon slot and no gun pool'); process.exit(1); }
+      slotConfigs.push({ slotID: slotId, itemGUID: guns[g++ % guns.length] });
+    }
     else if (type === 'gun') slotConfigs.push({ slotID: slotId, itemGUID: 6031 });
     else if (type === 'defensive_weapon') slotConfigs.push({ slotID: slotId, itemGUID: [6032, 6033][d++ % 2] });
     else if (type === 'launcher') slotConfigs.push({ slotID: slotId, itemGUID: LAUNCHER, consumableGUID: MISSILE_AMMO });

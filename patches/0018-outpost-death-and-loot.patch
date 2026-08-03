@@ -1,0 +1,148 @@
+diff --git a/src/main/java/io/github/luigeneric/core/sector/management/SpaceObjectRemover.java b/src/main/java/io/github/luigeneric/core/sector/management/SpaceObjectRemover.java
+index 76a4fba..e804bff 100644
+--- a/src/main/java/io/github/luigeneric/core/sector/management/SpaceObjectRemover.java
++++ b/src/main/java/io/github/luigeneric/core/sector/management/SpaceObjectRemover.java
+@@ -293,7 +293,19 @@ public class SpaceObjectRemover implements ISpaceObjectRemover, SectorJob
+                 }
+             }
+ 
+-            this.notifySubscriberObjectLeft(desc);
++            /* A subscriber throwing must never abort the drain: the desc is already dequeued, so
++             * skipping the remove() below would leave a removed-but-present zombie in the sector
++             * (marked cause set, still ticking, client never told). Exactly this happened with an
++             * NPE in the outpost loot path - log and keep removing. */
++            try
++            {
++                this.notifySubscriberObjectLeft(desc);
++            }
++            catch (final Exception exception)
++            {
++                log.error("subscriber threw during object-left fan-out, removing object anyway id={} cause={}",
++                        spaceObjectToRemove.getObjectID(), desc.getRemovingCause(), exception);
++            }
+             this.ctx.spaceObjects().remove(spaceObjectToRemove, desc.getRemovingCause());
+ 
+ 
+diff --git a/src/main/java/io/github/luigeneric/core/sector/management/damage/DamageMediator.java b/src/main/java/io/github/luigeneric/core/sector/management/damage/DamageMediator.java
+index 9a2ae93..116f2d3 100644
+--- a/src/main/java/io/github/luigeneric/core/sector/management/damage/DamageMediator.java
++++ b/src/main/java/io/github/luigeneric/core/sector/management/damage/DamageMediator.java
+@@ -2,7 +2,10 @@ package io.github.luigeneric.core.sector.management.damage;
+ 
+ import io.github.luigeneric.core.User;
+ import io.github.luigeneric.core.player.ShipAbility;
++import io.github.luigeneric.core.protocols.ProtocolID;
++import io.github.luigeneric.core.protocols.ProtocolRegistryWriteOnly;
+ import io.github.luigeneric.core.protocols.game.GameProtocolWriteOnly;
++import io.github.luigeneric.core.protocols.notification.NotificationProtocolWriteOnly;
+ import io.github.luigeneric.core.sector.SectorCards;
+ import io.github.luigeneric.core.sector.Tick;
+ import io.github.luigeneric.core.sector.creation.SectorContext;
+@@ -83,7 +86,27 @@ public class DamageMediator
+             toStats.setPp(Mathf.max(toStats.getPp() - damageRecord.energyDrain(), 0));
+         if (toStats.getHp() == 0f)
+         {
+-            this.remover.notifyRemovingCauseAdded(damageRecord.to(), RemovingCause.Death, damageRecord.from());
++            final SpaceObject toObject = damageRecord.to();
++            if (toObject.getSpaceEntityType() == SpaceEntityType.Outpost)
++            {
++                //outposts are never destroyed: JumpOut plays the client ftl-out instead of the explosion
++                final boolean alreadyRemoved = toObject.isRemoved();
++                this.remover.notifyRemovingCauseAdded(toObject, RemovingCause.JumpOut);
++                //several projectiles can land in the tick after hull zero; fire the one-shot
++                //side effects only for the hit that actually removed the outpost
++                if (!alreadyRemoved)
++                {
++                    //zero+block control here and not in a JumpOut subscriber: the decay despawn
++                    //(OutpostSpawnTimer.despawnOp) emits the same cause and must not be blocked,
++                    //and without opDied the spawn timer respawns the retreated outpost within 5s
++                    ctx.outPostStates().getStateForFaction(toObject.getFaction()).opDied(ctx.tick());
++                    sendOutpostRetreatBroadcast(toObject.getFaction());
++                }
++            }
++            else
++            {
++                this.remover.notifyRemovingCauseAdded(toObject, RemovingCause.Death, damageRecord.from());
++            }
+             toStats.setPp(0);
+             wasKillShot = true;
+         }
+@@ -94,6 +117,16 @@ public class DamageMediator
+         sendDealDamageTo(newDmgRecord);
+     }
+ 
++    private void sendOutpostRetreatBroadcast(final Faction faction)
++    {
++        //EmergencyMessage renders as the prominent screen banner (proven by the shutdown broadcast)
++        final NotificationProtocolWriteOnly notificationProtocolWriteOnly =
++                ProtocolRegistryWriteOnly.getProtocol(ProtocolID.Notification);
++        ctx.sender().sendToAllClients(
++                notificationProtocolWriteOnly.writeEmergencyMessage(faction + " outpost was forced to retreat!", 5f)
++        );
++    }
++
+     private void sendDealDamageTo(final DamageRecord damageRecord)
+     {
+         final SpaceObject castingShip = damageRecord.from();
+diff --git a/src/main/java/io/github/luigeneric/core/sector/management/lootsystem/LootDistributorUtil.java b/src/main/java/io/github/luigeneric/core/sector/management/lootsystem/LootDistributorUtil.java
+index 3e4e262..088506b 100644
+--- a/src/main/java/io/github/luigeneric/core/sector/management/lootsystem/LootDistributorUtil.java
++++ b/src/main/java/io/github/luigeneric/core/sector/management/lootsystem/LootDistributorUtil.java
+@@ -254,7 +254,23 @@ public class LootDistributorUtil
+             //only the highestDamage receives loot
+             case Damage ->
+             {
+-                final List<User> membersFiltered = getUsersFromPartySameSector(user);
++                /* Outpost loot arrives with no single killer (outpostLoot passes a null lootOwner),
++                 * so fall back to the highest player damage dealer - the contract this case
++                 * documents. Without the fallback the null aborted objectLeftUpdate mid-drain and
++                 * the removed object stayed in the sector as a zombie. */
++                User lootUser = user;
++                if (lootUser == null)
++                {
++                    lootUser = objectDamageHistory.getSortedByDamage().stream()
++                            .filter(accumulated -> accumulated.getDealer().isPlayer())
++                            .map(accumulated -> sectorUsers.getUser(accumulated.getDealer()))
++                            .flatMap(Optional::stream)
++                            .findFirst()
++                            .orElse(null);
++                }
++                if (lootUser == null)
++                    break;
++                final List<User> membersFiltered = getUsersFromPartySameSector(lootUser);
+                 final List<User> filteredForGlobal = membersFiltered.stream()
+                                 .filter(member -> lootTemplate.isInGlobalLevel(member.getPlayer().getSkillBook().get()))
+                                         .toList();
+diff --git a/src/main/java/io/github/luigeneric/core/sector/management/lootsystem/claims/LootClaimHolder.java b/src/main/java/io/github/luigeneric/core/sector/management/lootsystem/claims/LootClaimHolder.java
+index 78fadd5..9f5a872 100644
+--- a/src/main/java/io/github/luigeneric/core/sector/management/lootsystem/claims/LootClaimHolder.java
++++ b/src/main/java/io/github/luigeneric/core/sector/management/lootsystem/claims/LootClaimHolder.java
+@@ -16,6 +16,7 @@ import io.github.luigeneric.core.sector.objleft.ObjectLeftDescription;
+ import io.github.luigeneric.core.spaceentities.PlayerShip;
+ import io.github.luigeneric.core.spaceentities.SpaceObject;
+ import io.github.luigeneric.enums.RemovingCause;
++import io.github.luigeneric.enums.SpaceEntityType;
+ import lombok.Getter;
+ import lombok.extern.slf4j.Slf4j;
+ 
+@@ -116,12 +117,17 @@ public class LootClaimHolder implements ObjectLeftSubscriber
+     public void onUpdate(final ObjectLeftDescription arg)
+     {
+         final RemovingCause removingCause = arg.getRemovingCause();
+-        if (!removingCause.isOfType(RemovingCause.Death, RemovingCause.Collected))
++        final SpaceObject removedSpaceObject = arg.getRemovedSpaceObject();
++        //hull-zero outpost retreat leaves with JumpOut but rewards like a kill;
++        //the decay despawn is also Outpost+JumpOut yet keeps its HP above zero
++        final boolean isOutpostRetreat = removingCause == RemovingCause.JumpOut &&
++                removedSpaceObject.getSpaceEntityType() == SpaceEntityType.Outpost &&
++                removedSpaceObject.getSpaceSubscribeInfo().getHp() == 0f;
++        if (!isOutpostRetreat && !removingCause.isOfType(RemovingCause.Death, RemovingCause.Collected))
+         {
+-            removeClaim(arg.getRemovedSpaceObject());
++            removeClaim(removedSpaceObject);
+             return;
+         }
+-        final SpaceObject removedSpaceObject = arg.getRemovedSpaceObject();
+ 
+         final Optional<LootClaim> optClaim = this.getClaim(removedSpaceObject);
+         if (optClaim.isEmpty())

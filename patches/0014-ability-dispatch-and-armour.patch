@@ -1,0 +1,88 @@
+diff --git a/src/main/java/io/github/luigeneric/core/sector/management/SectorAlgorithms.java b/src/main/java/io/github/luigeneric/core/sector/management/SectorAlgorithms.java
+index 1cf5cb0..61e3437 100644
+--- a/src/main/java/io/github/luigeneric/core/sector/management/SectorAlgorithms.java
++++ b/src/main/java/io/github/luigeneric/core/sector/management/SectorAlgorithms.java
+@@ -26,11 +26,21 @@ public final class SectorAlgorithms
+         this.ewDurationAlgorithm = Objects.requireNonNull(ewDurationAlgorithm);
+     }
+ 
++    /* Armour. V0 returns a constant 1, i.e. armour is discarded and ArmorPiercing does nothing, so
++     * every armour-plating module and every ArmorValue on a hull is decorative. V1 is the original's
++     * own curve, (100 - clamp(armor - armorPiercing, 0, 99.9)) / 100. THIS CHANGES DAMAGE NUMBERS
++     * FOR EVERY PLAYER AND EVERY NPC IN EVERY SECTOR. This is not confined to new content: 97 of
++     * the stat blocks the card generator already emits carry a non-zero ArmorValue, and only 40
++     * abilities answer with any ArmorPiercing at all, so most existing targets get harder to kill
++     * the moment this flips. To revert, put ArmorAlgorithmV0 back on the line below and change
++     * nothing else. */
++    private static final IArmorAlgorithm ARMOR_ALGORITHM = new ArmorAlgorithmV1();
++
+     public static SectorAlgorithms defaultAlgorithms()
+     {
+         return new SectorAlgorithms(
+                 new HitchanceBasedOnThrottle(),
+-                new ArmorAlgorithmV0(),
++                ARMOR_ALGORITHM,
+                 new CritchanceAlgorithmV1(),
+                 new FlareChanceAlgorithmV1(),
+                 new HackDurationAlgorithmV1()
+diff --git a/src/main/java/io/github/luigeneric/core/sector/management/abilities/AbilityActionFactory.java b/src/main/java/io/github/luigeneric/core/sector/management/abilities/AbilityActionFactory.java
+index 2d7eb29..2a13887 100644
+--- a/src/main/java/io/github/luigeneric/core/sector/management/abilities/AbilityActionFactory.java
++++ b/src/main/java/io/github/luigeneric/core/sector/management/abilities/AbilityActionFactory.java
+@@ -71,12 +71,28 @@ public class AbilityActionFactory
+             {
+                 return new RestoreBuffAction(castingShip, castingSlot, targetSpaceObjects, isAutocastAbility, ctx);
+             }
+-            case FireMissle, FireTorpedo ->
++            /* FireHeavyMissile and FireLightMissile are the live game's own names for a launcher's
++             * guided projectile and need nothing FireMissle does not already do: their ability cards
++             * carry Speed, MaxHullPoints, LifeTime and the six rotation stats, which is exactly the
++             * projectile stat set FireMissileAction reads back out when it spawns the missile.
++             * FireLightMissile has no user today - its only family in the card dump is the Rocket
++             * Pack, which is dropped for having all six rotation stats at 0 - and is wired up here
++             * anyway so that fixing the pack is a card change with no server change behind it.
++             * Leaving a type out is not a no-op: create's default arm throws, the throw escapes
++             * AbilityCastRequestQueue.run into Sector.run's per-tick catch, and the rest of that
++             * tick is abandoned for every player in the sector. On a Launch: Auto weapon that
++             * repeats every frame. */
++            case FireMissle, FireTorpedo, FireHeavyMissile, FireLightMissile ->
+             {
+                 return new FireMissileAction(castingShip, castingSlot, targetSpaceObjects, isAutocastAbility,
+                         ctx, sectorAlgorithms, damageMediator, joinQueue);
+             }
+-            case FireCannon ->
++            /* Three more hitscan guns. Their abilities carry only Accuracy, Angle, DamageLow/High,
++             * Min/Optimal/MaxRange, Cooldown and PowerPointCost - no projectile stats at all - so
++             * they resolve through FireCannonAction's roll-to-hit-then-deal-damage path unchanged.
++             * They pick the same weapon FX as every other cannon, because that choice keys off
++             * OverwriteActionType and the dump sets it to None on all 2 223 of its ability cards. */
++            case FireCannon, FireMachineGun, FireShotgun, FireKillCannon ->
+             {
+                 return new FireCannonAction(castingShip, castingSlot, targetSpaceObjects, isAutocastAbility,
+                         ctx, sectorAlgorithms, damageMediator);
+diff --git a/src/main/java/io/github/luigeneric/core/sector/management/abilities/actions/FireMissileAction.java b/src/main/java/io/github/luigeneric/core/sector/management/abilities/actions/FireMissileAction.java
+index 4332d80..989f4f1 100644
+--- a/src/main/java/io/github/luigeneric/core/sector/management/abilities/actions/FireMissileAction.java
++++ b/src/main/java/io/github/luigeneric/core/sector/management/abilities/actions/FireMissileAction.java
+@@ -125,6 +125,21 @@ public class FireMissileAction extends WeaponAction
+             }
+         }
+ 
++        if (missileGUID == 0)
++        {
++            /* The DamageNuclear branch only recognises DamageHigh 4.0 and 19.0, so any other
++             * nuclear countable falls out of it with the guid still 0 - the three mines that carry
++             * DamageHigh 0.3 do exactly that. SpaceObjectFactory.createMissile throws on a card guid
++             * it cannot resolve, and that throw escapes into Sector.run's per-tick catch and
++             * abandons the rest of the tick for everyone in the sector. It is reachable on purpose,
++             * too: PlayerProtocol's SelectConsumable validates neither ConsumableType nor Tier, so a
++             * crafted packet can seat a mine in a missile slot and then hold the fire button.
++             * Fire an ordinary missile rather than take the sector down with us. */
++            log.warn("FireMissileAction: no missile card matched consumable {}, firing the default missile",
++                    shipConsumableCard != null ? shipConsumableCard.getCardGuid() : 0);
++            missileGUID = StaticCardGUID.MissileCard.getValue();
++        }
++
+         return missileGUID;
+     }
+ }

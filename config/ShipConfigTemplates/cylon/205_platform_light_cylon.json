@@ -1,0 +1,17 @@
+[{
+    "id": 205,
+    "shipGUID": 1783473196,
+    "level": 1,
+    "slotConfigs": [
+        { "slotID": 0,  "itemGUID": 6041 },
+        { "slotID": 1,  "itemGUID": 6041 },
+        { "slotID": 2,  "itemGUID": 6041 },
+        { "slotID": 3,  "itemGUID": 6041 },
+        { "slotID": 4,  "itemGUID": 6041 },
+        { "slotID": 5,  "itemGUID": 6041 },
+        { "slotID": 6,  "itemGUID": 6041 },
+        { "slotID": 7,  "itemGUID": 6041 },
+        { "slotID": 8,  "itemGUID": 6042 },
+        { "slotID": 9,  "itemGUID": 6042 }
+    ]
+}]

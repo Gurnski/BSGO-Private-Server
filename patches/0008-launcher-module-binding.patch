@@ -1,18 +1,32 @@
 diff --git a/src/main/java/io/github/luigeneric/core/spaceentities/bindings/ShipBindings.java b/src/main/java/io/github/luigeneric/core/spaceentities/bindings/ShipBindings.java
-index 3b77efd..3ddad5d 100644
+index 3b77efd..0a43100 100644
 --- a/src/main/java/io/github/luigeneric/core/spaceentities/bindings/ShipBindings.java
 +++ b/src/main/java/io/github/luigeneric/core/spaceentities/bindings/ShipBindings.java
-@@ -60,7 +60,12 @@ public class ShipBindings implements IProtocolWrite
+@@ -60,7 +60,26 @@ public class ShipBindings implements IProtocolWrite
          {
              final ShipSystemCard systemCard = slot.getShipSystem().getShipSystemCard();
              if (systemCard == null) continue;
 -            if (systemCard.getShipSlotType() == ShipSlotType.weapon)
-+            // launcher, not just weapon: the FireMissle branch below sits INSIDE this guard, so a
-+            // launcher-typed slot could never emit a missile-pod binding - the pod simply never
-+            // appeared on the model. The client's own data and every shipped ShipConfigTemplate
-+            // treat slot 2 as a launcher, so the guard was the bug, not the slot type.
++            /* EVERY weapon-bearing slot type, not just weapon+launcher. The FireMissle/FireCannon
++             * branches below sit INSIDE this guard, so a slot type missing from it can never emit a
++             * turret or missile-pod binding - the model simply never appears, silently.
++             *   launcher          - the client's own data and every shipped ShipConfigTemplate treat
++             *                       slot 2 as a launcher; without it no missile pod rendered.
++             *   gun / defensive_  - the capital-ship types. The live game's own cards use them: the
++             *   weapon              dumped capital families item_slot_capital_system_gun_long_range_cc
++             *                       and the flak/point-defence batteries are SlotType gun and
++             *                       defensive_weapon respectively, and Update 53.5 describes the
++             *                       Pegasus's visible cannon, flak and PD turrets. Our Pegasus (5017)
++             *                       and Basestar (5117) carry 6 gun + 2 defensive_weapon mounts, so
++             *                       eight of their twelve hardpoints rendered nothing at all.
++             *   special_weapon    - listed for completeness; nothing ships one yet.
++             * This guard is belt-and-braces anyway: the switch below leaves moduleGUID at 0 for any
++             * non-firing ability, so a hull/engine/computer module could not produce a binding even
++             * if it reached here. Widening it cannot bind a non-weapon. */
 +            final ShipSlotType slotType = systemCard.getShipSlotType();
-+            if (slotType == ShipSlotType.weapon || slotType == ShipSlotType.launcher)
++            if (slotType == ShipSlotType.weapon || slotType == ShipSlotType.launcher
++                    || slotType == ShipSlotType.gun || slotType == ShipSlotType.defensive_weapon
++                    || slotType == ShipSlotType.special_weapon)
              {
                  final ShipAbility ability = slot.getShipAbility();
                  if (ability != null)

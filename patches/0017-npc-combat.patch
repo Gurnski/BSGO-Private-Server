@@ -1,0 +1,290 @@
+diff --git a/src/main/java/io/github/luigeneric/core/sector/SpaceObjectFactory.java b/src/main/java/io/github/luigeneric/core/sector/SpaceObjectFactory.java
+index ac9ec97..2ab52ea 100644
+--- a/src/main/java/io/github/luigeneric/core/sector/SpaceObjectFactory.java
++++ b/src/main/java/io/github/luigeneric/core/sector/SpaceObjectFactory.java
+@@ -649,9 +649,23 @@ public class SpaceObjectFactory
+     }
+     private void setupWeaponConfig(final Ship ship, final short level)
+     {
+-        final Optional<ShipConfigTemplate> optionalShipConfigTemplate = level == -1 ?
++        /* THE REASON NPCs NEVER SHOT BACK.
++         * createBotFighter arms with the OwnerCard's level, and getFirstBestConfigForGUIDAndLevel
++         * demands config.level == that level exactly. Every NPC Owner card is Level 1 while every
++         * shipped ShipConfigTemplate carries the NPC's *rank* (upstream 10/20/75, ours 15/25/45/120),
++         * so the lookup matched nothing for every bot in the game and each one spawned with zero
++         * armed slots - silently, since the caller just returns. Bots flew, chased and rammed, and
++         * never fired a shot. Stations were unaffected: createWeaponPlatform/createOutpost use the
++         * no-level overload, which is why only they ever fought.
++         * The level is a preference now, not a requirement: exact match wins, otherwise any config
++         * for that hull. */
++        Optional<ShipConfigTemplate> optionalShipConfigTemplate = level == -1 ?
+                 ShipConfigs.getFirstBestConfigForGUID(ship.getShipCard().getCardGuid()) :
+                 ShipConfigs.getFirstBestConfigForGUIDAndLevel(ship.getShipCard().getCardGuid(), level);
++        if (optionalShipConfigTemplate.isEmpty() && level != -1)
++        {
++            optionalShipConfigTemplate = ShipConfigs.getFirstBestConfigForGUID(ship.getShipCard().getCardGuid());
++        }
+ 
+         if (optionalShipConfigTemplate.isEmpty())
+             return;
+@@ -664,6 +678,7 @@ public class SpaceObjectFactory
+             return;
+         }
+         final ShipSlots slots = optSlots.get();
++        int fitted = 0;
+ 
+         for (final ShipSlotCard shipSlotCard : ship.getShipCard().getShipSlotCards())
+         {
+@@ -688,9 +703,31 @@ public class SpaceObjectFactory
+             }
+ 
+             slots.addSlot(shipSlot);
++            fitted++;
+         }
+         ship.getShipBindings().setSlots(slots, ship.getShipCard().getTier());
+         ship.getSpaceSubscribeInfo().applyStats();
++        /* EVERY OUTCOME ON THIS PATH USED TO BE SILENT, INCLUDING THE FAILURES. A template whose
++         * slotID values do not match the card's SlotId fits ZERO mounts and logs nothing - the
++         * error that would have said so is commented out at the top of the loop - so an unarmed
++         * station is indistinguishable from an armed one until you fly out and get shot at, or not.
++         * The binding count is logged alongside because it is a SECOND, independent way to end up
++         * with invisible hardware: ShipBindings.setSlots only emits a turret model for weapon-bearing
++         * slot types, so a fit can succeed with bindings still at zero. Fitted-but-unbound means the
++         * guns work and the turrets are invisible; both numbers matter and they can disagree. */
++        final int bindings = ship.getShipBindings().getModuleBindingList().size();
++        if (fitted == 0)
++        {
++            log.warn("setupWeaponConfig: ship {} matched config {} but fitted 0 of {} slots - " +
++                            "no slotID in the template matches a SlotId on the card, so it is UNARMED",
++                    ship.getShipCard().getCardGuid(), shipConfigTemplate.getId(),
++                    ship.getShipCard().getShipSlotCards().length);
++        }
++        else
++        {
++            log.info("setupWeaponConfig: ship {} fitted {} slot(s) from config {}, {} turret binding(s)",
++                    ship.getShipCard().getCardGuid(), fitted, shipConfigTemplate.getId(), bindings);
++        }
+     }
+ 
+ }
+diff --git a/src/main/java/io/github/luigeneric/core/sector/management/abilities/AbilityCastRequestQueue.java b/src/main/java/io/github/luigeneric/core/sector/management/abilities/AbilityCastRequestQueue.java
+index ca589ce..9403a63 100644
+--- a/src/main/java/io/github/luigeneric/core/sector/management/abilities/AbilityCastRequestQueue.java
++++ b/src/main/java/io/github/luigeneric/core/sector/management/abilities/AbilityCastRequestQueue.java
+@@ -91,6 +91,12 @@ public class AbilityCastRequestQueue implements SectorJob
+                 continue;
+             }
+             final Ship castingShip = optCastingShip.get();
++            //a removed ship still resolves until the remover drains; it must not cast anymore
++            if (castingShip.isRemoved())
++            {
++                this.removeAutoCastAbility(abilityCastRequest.getAbilityID(), castingShip.getObjectID());
++                continue;
++            }
+             final Optional<ShipSlots> optSlots = castingShip.getSpaceSubscribeInfo().getShipSlots();
+             if (optSlots.isEmpty()) continue;
+             final ShipSlot castingSlot = optSlots.get().getSlot(abilityCastRequest.getAbilityID());
+@@ -100,7 +106,7 @@ public class AbilityCastRequestQueue implements SectorJob
+                 final Optional<SpaceObject> optTmpObj = ctx.spaceObjects().get(objID);
+                 optTmpObj.ifPresent(e ->
+                 {
+-                    if (e.isVisible())
++                    if (e.isVisible() && !e.isRemoved())
+                         toCallOn.add(e);
+ 
+                 });
+diff --git a/src/main/java/io/github/luigeneric/core/sector/timers/NpcStaticTimer.java b/src/main/java/io/github/luigeneric/core/sector/timers/NpcStaticTimer.java
+index 45ffe58..5ab40b8 100644
+--- a/src/main/java/io/github/luigeneric/core/sector/timers/NpcStaticTimer.java
++++ b/src/main/java/io/github/luigeneric/core/sector/timers/NpcStaticTimer.java
+@@ -9,6 +9,8 @@ import io.github.luigeneric.core.sector.management.SectorSpaceObjects;
+ import io.github.luigeneric.core.sector.management.abilities.AbilityCastRequest;
+ import io.github.luigeneric.core.sector.management.abilities.AbilityCastRequestQueue;
+ import io.github.luigeneric.core.sector.management.damage.SectorDamageHistory;
++import io.github.luigeneric.core.sector.management.relation.Relation;
++import io.github.luigeneric.core.sector.management.relation.RelationUtil;
+ import io.github.luigeneric.core.spaceentities.NpcShip;
+ import io.github.luigeneric.core.spaceentities.Ship;
+ import io.github.luigeneric.core.spaceentities.SpaceObject;
+@@ -21,6 +23,18 @@ import java.util.stream.Collectors;
+ 
+ public class NpcStaticTimer extends NpcTimer
+ {
++    /** Object types a static defence (outpost/platform) may ever damage. Deliberately NOT
++     *  SpaceEntityType.getShipTypes(): that array includes JumpBeacon and AsteroidBot. */
++    private static final SpaceEntityType[] STATION_TARGETABLE_TYPES = {
++            SpaceEntityType.Player,
++            SpaceEntityType.BotFighter,
++            SpaceEntityType.Cruiser,
++            SpaceEntityType.MiningShip,
++            SpaceEntityType.Outpost,
++            SpaceEntityType.WeaponPlatform,
++            SpaceEntityType.Missile,
++            SpaceEntityType.Mine
++    };
+     private final Map<Long, SpaceObject> lastTargets;
+     public NpcStaticTimer(final Tick tick, final SectorSpaceObjects sectorSpaceObjects, final long delay,
+                           final AbilityCastRequestQueue abilityCastRequestQueue,
+@@ -39,12 +53,23 @@ public class NpcStaticTimer extends NpcTimer
+                 SpaceEntityType.WeaponPlatform,
+                 SpaceEntityType.Outpost
+         );
++        //prune cache entries for stations no longer in the sector, else destroyed-station
++        //entries pin their last target for the sector's lifetime
++        final Set<Long> liveStationIds = npcShips.stream().map(SpaceObject::getObjectID).collect(Collectors.toSet());
++        lastTargets.keySet().retainAll(liveStationIds);
+         for (final NpcShip npcShip : npcShips)
+         {
+-            //update target
+-            final SpaceObject closest = getNextTarget(npcShip);
+-            //if no change in target, dont update all weapons all over again!
++            //a removed ship must not keep or re-register autocasts
++            if (npcShip.isRemoved())
++            {
++                lastTargets.remove(npcShip.getObjectID());
++                updateWeapons(npcShip, null);
++                continue;
++            }
+             final SpaceObject lastTarget = lastTargets.get(npcShip.getObjectID());
++            //update target, retaining the current one out to maximumAggroDistance
++            final SpaceObject closest = getNextTarget(npcShip, lastTarget);
++            //if no change in target, dont update all weapons all over again!
+             //lastTarget may be null, closest aswell!
+             if ((lastTarget == null && closest == null) || closest != null && closest.equals(lastTarget))
+             {
+@@ -100,7 +125,9 @@ public class NpcStaticTimer extends NpcTimer
+     private Set<Long> getAllEnemyObjectIds(final Ship me, final Predicate<SpaceObject> predicate)
+     {
+         return this.sectorSpaceObjects.values().stream()
+-                .filter(obj -> obj.getFaction() != me.getFaction())
++                .filter(obj -> obj.getSpaceEntityType().isOfType(STATION_TARGETABLE_TYPES))
++                .filter(obj -> RelationUtil.getRelation(obj, me,
++                        sectorCards.regulationCard().getTargetBracketMode()) == Relation.Enemy)
+                 .filter(predicate)
+                 .map(SpaceObject::getObjectID)
+                 .collect(Collectors.toSet());
+diff --git a/src/main/java/io/github/luigeneric/core/sector/timers/NpcTimer.java b/src/main/java/io/github/luigeneric/core/sector/timers/NpcTimer.java
+index 20994f9..0187efa 100644
+--- a/src/main/java/io/github/luigeneric/core/sector/timers/NpcTimer.java
++++ b/src/main/java/io/github/luigeneric/core/sector/timers/NpcTimer.java
+@@ -45,6 +45,9 @@ public abstract class NpcTimer extends DelayedTimer
+     }
+ 
+ 
++    /** One unarmed-bot warning per sector per run; see updateWeapons. */
++    private boolean reportedUnarmed = false;
++
+     protected void updateWeapons(final Ship ship, final SpaceObject closest)
+     {
+         if (closest == null)
+@@ -53,6 +56,17 @@ public abstract class NpcTimer extends DelayedTimer
+         if (optSlots.isEmpty())
+             return;
+         final ShipSlots slots = optSlots.get();
++        /* Unarmed bots are worth one warning per sector per server run, not one per bot per
++         * acquisition: object ids repeat across sectors and bots respawn, which turned the
++         * first version of this into a flood. It stays because "acquired but cannot shoot" is
++         * exactly the silent failure that hid the config-level bug for so long. */
++        if (!reportedUnarmed && slots.values().stream()
++                .noneMatch(s -> s.getShipSystem().getShipSystemCard() != null))
++        {
++            reportedUnarmed = true;
++            log.warn("npc {} acquired target {} but has ZERO armed slots - check its ShipConfigTemplate",
++                    ship.getObjectID(), closest.getObjectID());
++        }
+         for (final ShipSlot slot : slots.values())
+         {
+             this.abilityCastRequestQueue.addAutoCastAbility(new AbilityCastRequest(
+@@ -112,10 +126,28 @@ public abstract class NpcTimer extends DelayedTimer
+      * @return
+      */
+     protected SpaceObject getNextTarget(final NpcShip npcShip)
++    {
++        return getNextTarget(npcShip, null);
++    }
++
++    /**
++     * Order:
++     *  get highest damage dealer. if the highest damage dealer is out of range, remove it from damage-history and get the next best damage dealer
++     *  keep the current target while it is still engageable (hysteresis up to maximumAggroDistance)
++     *  get the next best enemy in auto aggro range
++     *  get the objects and kill/defend/patrol
++     * @param npcShip
++     * @param currentTarget the target currently engaged by this npc, null if none
++     * @return
++     */
++    protected SpaceObject getNextTarget(final NpcShip npcShip, final SpaceObject currentTarget)
+     {
+         SpaceObject target = getTargetFromDamageHistory(npcShip);
+         if (target != null)
+             return target;
++        //retain the current target out to maximumAggroDistance even beyond autoAggroDistance
++        if (isStillEngageable(npcShip, currentTarget))
++            return currentTarget;
+         //get the enemy in auto aggro distance
+         target = getEnemyInAutoAgroDistance(npcShip);
+         if (target != null)
+@@ -133,6 +165,17 @@ public abstract class NpcTimer extends DelayedTimer
+         return null;
+     }
+ 
++    private boolean isStillEngageable(final NpcShip npcShip, final SpaceObject currentTarget)
++    {
++        if (currentTarget == null || currentTarget.isRemoved())
++            return false;
++        if (currentTarget instanceof PlayerShip playerShip && !playerShip.isVisible())
++            return false;
++        final float maxAgroDistance = npcShip.getNpcBehaviourTemplate().maximumAggroDistance();
++        final float distanceSq = npcShip.getMovementController().getPosition().distanceSq(currentTarget.getMovementController().getPosition());
++        return distanceSq <= maxAgroDistance * maxAgroDistance;
++    }
++
+     protected SpaceObject getEnemyInAutoAgroDistance(final NpcShip botFighter)
+     {
+         SpaceObject target = null;
+@@ -159,6 +202,9 @@ public abstract class NpcTimer extends DelayedTimer
+                 .getSpaceObjectsNotOfEntityType(
+                         SpaceEntityType.Missile, SpaceEntityType.Planetoid, SpaceEntityType.Asteroid, SpaceEntityType.Planet)
+                 .stream()
++                /* removed-but-still-mapped objects (death and map removal are in different tick
++                 * phases) must not be acquired - matches isStillEngageable's retention rule */
++                .filter(spaceObject -> !spaceObject.isRemoved())
+                 .filter(spaceObject ->
+                 {
+                     if (spaceObject instanceof PlayerShip playerShip)
+diff --git a/src/main/java/io/github/luigeneric/templates/npcbehaviour/NpcBehaviourTemplates.java b/src/main/java/io/github/luigeneric/templates/npcbehaviour/NpcBehaviourTemplates.java
+index 8ead91d..1620fe3 100644
+--- a/src/main/java/io/github/luigeneric/templates/npcbehaviour/NpcBehaviourTemplates.java
++++ b/src/main/java/io/github/luigeneric/templates/npcbehaviour/NpcBehaviourTemplates.java
+@@ -24,13 +24,30 @@ public class NpcBehaviourTemplates
+             {
+                 return new NpcBehaviourTemplate(3, 2000, 4000, lifeTimeSeconds, jumpOutIfInCombat, speedZeroDistance);
+             }
++            // The event capitals (C5-07 Poseidon / Kraken) fly tier-4 hulls. Longer reach than
++            // the lines: a boss that ignores you until 2 km is a piniata, not an event.
++            case 4 ->
++            {
++                return new NpcBehaviourTemplate(4, 2500, 5000, lifeTimeSeconds, jumpOutIfInCombat, speedZeroDistance);
++            }
+             default -> throw new IllegalArgumentException("Tier " + tier + " not implemented");
+         }
+     }
+ 
++    /* 3500 acquire / 4000 leash. A station engages anything hostile that comes near it - enemy
++     * players and enemy-faction bots alike, which getPotentialEnemyObjects already handles by
++     * RELATION rather than by type, so no extra work is needed to make bots valid targets.
++     * autoAggroDistance is the range at which it picks a target up unprovoked; maximumAggroDistance
++     * is how far it keeps shooting at something that has already damaged it, so the leash is
++     * deliberately the longer of the two. Both were 3300, which meant anything that opened fire from
++     * just outside acquisition range got dropped the moment it drifted one metre further out.
++     * These exceed the longest station weapon (2000 m) on purpose, exactly as the live game had it -
++     * Platforms.txt:1 shows aggro decoupled from weapon range there too. Acquiring early is harmless
++     * (getNextTarget always returns the CLOSEST valid target) and it means the station is already
++     * tracking you as you close, instead of spending a 5-second timer tick waking up. */
+     public static NpcBehaviourTemplate createOutpostTemplate()
+     {
+-        return new NpcBehaviourTemplate(1, 3300, 3300, Float.MAX_VALUE, false, 0);
++        return new NpcBehaviourTemplate(1, 3500, 4000, Float.MAX_VALUE, false, 0);
+     }
+ 
+     public static NpcBehaviourTemplate createPlatFormTemplate(final byte tier, WeaponPlatformTemplate weaponPlatformTemplate)

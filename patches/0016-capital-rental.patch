@@ -1,0 +1,75 @@
+diff --git a/src/main/java/io/github/luigeneric/core/player/Hangar.java b/src/main/java/io/github/luigeneric/core/player/Hangar.java
+index ae8fb9d..4e5fabd 100644
+--- a/src/main/java/io/github/luigeneric/core/player/Hangar.java
++++ b/src/main/java/io/github/luigeneric/core/player/Hangar.java
+@@ -70,6 +70,30 @@ public class Hangar extends InfoPublisher<HangarShipsUpdate>
+         }
+     }
+ 
++    /** Removes one ship (capital-rental expiry). If it was the active ship, activation falls
++     *  back to any remaining hull so the index never dangles. No client message exists for
++     *  this, so it only runs where the client rebuilds its hangar anyway (login). */
++    public void removeHangarShip(final int serverId)
++    {
++        writeLock();
++        try
++        {
++            this.ships.remove(serverId);
++            if (this.activeShipIndex == serverId)
++            {
++                this.activeShipIndex = this.ships.isEmpty() ? -1 : this.ships.keySet().iterator().next();
++            }
++            if (!this.ships.isEmpty())
++            {
++                hangarShipsUpdate();
++            }
++        }
++        finally
++        {
++            writeUnlock();
++        }
++    }
++
+     private void hangarShipsUpdate()
+     {
+         this.set(new HangarShipsUpdate(getActiveShip().getName(), getSortedGUIDs()));
+diff --git a/src/main/java/io/github/luigeneric/core/protocols/dialog/DialogProtocol.java b/src/main/java/io/github/luigeneric/core/protocols/dialog/DialogProtocol.java
+index 4ff4531..eb8f94a 100644
+--- a/src/main/java/io/github/luigeneric/core/protocols/dialog/DialogProtocol.java
++++ b/src/main/java/io/github/luigeneric/core/protocols/dialog/DialogProtocol.java
+@@ -9,7 +9,14 @@ import io.github.luigeneric.core.player.Player;
+ import io.github.luigeneric.core.protocols.BgoProtocol;
+ import io.github.luigeneric.core.protocols.ProtocolID;
+ import io.github.luigeneric.core.protocols.ProtocolRegistryWriteOnly;
++import io.github.luigeneric.core.protocols.player.CapitalRental;
++import io.github.luigeneric.core.protocols.player.PlayerProtocol;
+ import io.github.luigeneric.core.protocols.player.PlayerProtocolWriteOnly;
++import io.github.luigeneric.enums.Faction;
++import io.github.luigeneric.templates.cards.CardView;
++import io.github.luigeneric.templates.cards.ShipCard;
++import io.github.luigeneric.templates.catalogue.Catalogue;
++import jakarta.enterprise.inject.spi.CDI;
+ import io.github.luigeneric.utils.BgoRandom;
+ import lombok.extern.slf4j.Slf4j;
+ 
+@@ -51,6 +58,20 @@ public class DialogProtocol extends BgoProtocol
+                     return;
+                 }
+                 final Player player = user().getPlayer();
++
++                /* Talking to the Admiral (Colonial) or Number Six (Cylon) is how you get a
++                 * flagship, exactly as the original did it: the capital is never sold in the
++                 * shop, it is authorised in the CIC. One hour, charged in merits at the live
++                 * CapitalRental price - cheapest when your faction is losing the map.
++                 * Silent no-op if you cannot afford it, same as any other failed purchase;
++                 * the assignments flow below still runs either way. */
++                final PlayerProtocol playerProtocol = user().getProtocol(ProtocolID.Player);
++                final long capitalGuid = player.getFaction() == Faction.Colonial
++                        ? CapitalRental.PEGASUS : CapitalRental.BASESTAR;
++                CDI.current().select(Catalogue.class).get()
++                        .fetchCard(capitalGuid, CardView.Ship)
++                        .ifPresent(card -> playerProtocol.rentCapital((ShipCard) card));
++
+                 //doesn't matter, just by default get assignments
+                 user().send(writeStopped());
+ 

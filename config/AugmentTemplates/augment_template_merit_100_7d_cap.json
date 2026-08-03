@@ -1,0 +1,19 @@
+[
+    {
+        "_generated": "tools/cardgen/gen-consumables-real.js - do not hand-edit",
+        "factorSource": "Augment",
+        "factorTypeRecords": [
+            {
+                "type": "MeritIncome",
+                "value": 1
+            },
+            {
+                "type": "MeritCapacity",
+                "value": 1
+            }
+        ],
+        "activeTimeInHours": 168,
+        "augmentActionType": "None",
+        "associatedItemGUID": 228331798
+    }
+]

@@ -1,0 +1,156 @@
+diff --git a/src/main/java/io/github/luigeneric/core/protocols/debug/DebugProtocol.java b/src/main/java/io/github/luigeneric/core/protocols/debug/DebugProtocol.java
+index 76d27dc..7b1aad6 100644
+--- a/src/main/java/io/github/luigeneric/core/protocols/debug/DebugProtocol.java
++++ b/src/main/java/io/github/luigeneric/core/protocols/debug/DebugProtocol.java
+@@ -61,6 +61,10 @@ import io.github.luigeneric.templates.utils.ShipSlotType;
+ import io.github.luigeneric.utils.BgoRandom;
+ import io.github.luigeneric.utils.Utils;
+ import jakarta.enterprise.inject.spi.CDI;
++import io.github.luigeneric.templates.utils.ObjectStat;
++import io.github.luigeneric.core.spaceentities.SpaceObject;
++import java.util.TreeMap;
++import java.util.Map;
+ import lombok.extern.slf4j.Slf4j;
+ 
+ import java.io.IOException;
+@@ -438,6 +442,121 @@ public class DebugProtocol extends BgoProtocol
+                     sendEzMsg("ERROR:" + exception.getMessage());
+                 }
+             }
++            /* push <speed> [seconds]
++             * Shove the ship you are flying up to <speed> and let it bleed off. The stat is
++             * raised so the server's own clamp allows it (GameProtocol clamps every client speed
++             * report to the ship's max), the throttle is opened to match, and after [seconds]
++             * (default 5) the stat drops back - from there the movement sim decelerates the hull
++             * at its own acceleration, which is the drag you feel on the way down.
++             * Only touches the live ship in the sector, never the hangar card, so nothing about
++             * it persists: die, dock or relog and the ship is stock again. */
++            case "push" ->
++            {
++                try
++                {
++                    final float speed = Float.parseFloat(br.readString());
++                    float seconds;
++                    try { seconds = Float.parseFloat(br.readString()); }
++                    catch (final Exception noSecondArg) { seconds = 5f; }
++                    if (speed <= 0 || speed > 20000)
++                    {
++                        sendEzMsg("push: speed must be 1..20000");
++                        return;
++                    }
++                    final Player pusher = ctx.user().getPlayer();
++                    final Optional<Sector> optSector = sectorRegistry.getSectorById(pusher.getSectorId());
++                    if (optSector.isEmpty())
++                    {
++                        sendEzMsg("push: you are not in a sector");
++                        return;
++                    }
++                    final Optional<PlayerShip> optShip =
++                            optSector.get().getCtx().users().getPlayerShipByUserID(pusher.getUserID());
++                    if (optShip.isEmpty())
++                    {
++                        sendEzMsg("push: no ship in space - undock first");
++                        return;
++                    }
++                    final PlayerShip ship = optShip.get();
++                    final var stats = ship.getSpaceSubscribeInfo();
++                    final float baseSpeed = stats.getStatOrDefault(ObjectStat.Speed);
++                    final float baseBoost = stats.getStatOrDefault(ObjectStat.BoostSpeed);
++                    stats.setStat(ObjectStat.Speed, speed);
++                    stats.setStat(ObjectStat.BoostSpeed, speed);
++                    final var opts = ship.getMovementController().getMovementOptions();
++                    opts.setSpeed(speed);
++                    opts.setThrottleSpeed(speed);
++                    sendEzMsg(String.format("push: %.0f for %.1fs (was %.0f)", speed, seconds, baseSpeed));
++
++                    final long restoreAtMillis = System.currentTimeMillis() + (long) (seconds * 1000f);
++                    Thread.ofVirtual().start(() ->
++                    {
++                        try
++                        {
++                            final long sleepFor = restoreAtMillis - System.currentTimeMillis();
++                            if (sleepFor > 0) Thread.sleep(sleepFor);
++                            stats.setStat(ObjectStat.Speed, baseSpeed);
++                            stats.setStat(ObjectStat.BoostSpeed, baseBoost);
++                            // Throttle stays where it is: the sim now sees a speed above the
++                            // ship's maximum and walks it down, which is the point.
++                        }
++                        catch (final InterruptedException interrupted)
++                        {
++                            Thread.currentThread().interrupt();
++                        }
++                    });
++                }
++                catch (final Exception ex)
++                {
++                    sendEzMsg("push <speed> [seconds] - " + ex);
++                }
++            }
++            /* heal - hull and power back to full on the ship you are flying. */
++            case "heal" ->
++            {
++                final Player healed = ctx.user().getPlayer();
++                sectorRegistry.getSectorById(healed.getSectorId())
++                        .flatMap(sec -> sec.getCtx().users().getPlayerShipByUserID(healed.getUserID()))
++                        .ifPresentOrElse(ship ->
++                        {
++                            final var stats = ship.getSpaceSubscribeInfo();
++                            stats.setHp(stats.getStatOrDefault(ObjectStat.MaxHullPoints));
++                            stats.setPp(stats.getStatOrDefault(ObjectStat.MaxPowerPoints));
++                            sendEzMsg("heal: hull and power restored");
++                        }, () -> sendEzMsg("heal: no ship in space"));
++            }
++            /* where - sector id, position and current speed. The fastest way to answer
++             * "is the server simulating me where I think I am". */
++            case "where" ->
++            {
++                final Player who = ctx.user().getPlayer();
++                sectorRegistry.getSectorById(who.getSectorId())
++                        .flatMap(sec -> sec.getCtx().users().getPlayerShipByUserID(who.getUserID()))
++                        .ifPresentOrElse(ship ->
++                        {
++                            final var pos = ship.getMovementController().getPosition();
++                            sendEzMsg(String.format("sector %d  pos %.0f/%.0f/%.0f  speed %.1f  hp %.0f",
++                                    who.getSectorId(), pos.getX(), pos.getY(), pos.getZ(),
++                                    ship.getMovementController().getMovementOptions().getSpeed(),
++                                    ship.getSpaceSubscribeInfo().getHp()));
++                        }, () -> sendEzMsg("where: room, sector " + who.getSectorId()));
++            }
++            /* npcs - what is alive in this sector, by type. Answers "did my wing spawn". */
++            case "npcs" ->
++            {
++                sectorRegistry.getSectorById(ctx.user().getPlayer().getSectorId()).ifPresentOrElse(sector ->
++                {
++                    final Map<String, Integer> byType = new TreeMap<>();
++                    for (final SpaceObject so : sector.getCtx().spaceObjects().values())
++                    {
++                        byType.merge(so.getSpaceEntityType().name(), 1, Integer::sum);
++                    }
++                    final StringBuilder sb = new StringBuilder("sector ")
++                            .append(sector.getId()).append(": ");
++                    byType.forEach((k, v) -> sb.append(k).append('=').append(v).append(' '));
++                    sendEzMsg(sb.toString());
++                }, () -> sendEzMsg("npcs: not in a sector"));
++            }
+             case "set_counter_by" ->
+             {
+                 try
+diff --git a/src/main/java/io/github/luigeneric/core/spaceentities/statsinfo/stats/SpaceSubscribeInfo.java b/src/main/java/io/github/luigeneric/core/spaceentities/statsinfo/stats/SpaceSubscribeInfo.java
+index 69e527e..9f14f44 100644
+--- a/src/main/java/io/github/luigeneric/core/spaceentities/statsinfo/stats/SpaceSubscribeInfo.java
++++ b/src/main/java/io/github/luigeneric/core/spaceentities/statsinfo/stats/SpaceSubscribeInfo.java
+@@ -223,6 +223,14 @@ public class SpaceSubscribeInfo
+         return this.statsFinal.containsStat(stat);
+     }
+ 
++    /** Overwrite one live stat on an object already in space. Used by the debug console's
++     *  push command; ordinary gameplay changes stats through buffs and modifiers, which the
++     *  client is told about. Nothing here is persisted - the hangar card is untouched. */
++    public void setStat(final ObjectStat stat, final float value)
++    {
++        this.statsFinal.setStat(stat, value);
++    }
++
+ 
+     public void setSkillBook(final SkillBook skillBook)
+     {

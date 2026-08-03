@@ -71,12 +71,28 @@ public class AbilityActionFactory
             {
                 return new RestoreBuffAction(castingShip, castingSlot, targetSpaceObjects, isAutocastAbility, ctx);
             }
-            case FireMissle, FireTorpedo ->
+            /* FireHeavyMissile and FireLightMissile are the live game's own names for a launcher's
+             * guided projectile and need nothing FireMissle does not already do: their ability cards
+             * carry Speed, MaxHullPoints, LifeTime and the six rotation stats, which is exactly the
+             * projectile stat set FireMissileAction reads back out when it spawns the missile.
+             * FireLightMissile has no user today - its only family in the card dump is the Rocket
+             * Pack, which is dropped for having all six rotation stats at 0 - and is wired up here
+             * anyway so that fixing the pack is a card change with no server change behind it.
+             * Leaving a type out is not a no-op: create's default arm throws, the throw escapes
+             * AbilityCastRequestQueue.run into Sector.run's per-tick catch, and the rest of that
+             * tick is abandoned for every player in the sector. On a Launch: Auto weapon that
+             * repeats every frame. */
+            case FireMissle, FireTorpedo, FireHeavyMissile, FireLightMissile ->
             {
                 return new FireMissileAction(castingShip, castingSlot, targetSpaceObjects, isAutocastAbility,
                         ctx, sectorAlgorithms, damageMediator, joinQueue);
             }
-            case FireCannon ->
+            /* Three more hitscan guns. Their abilities carry only Accuracy, Angle, DamageLow/High,
+             * Min/Optimal/MaxRange, Cooldown and PowerPointCost - no projectile stats at all - so
+             * they resolve through FireCannonAction's roll-to-hit-then-deal-damage path unchanged.
+             * They pick the same weapon FX as every other cannon, because that choice keys off
+             * OverwriteActionType and the dump sets it to None on all 2 223 of its ability cards. */
+            case FireCannon, FireMachineGun, FireShotgun, FireKillCannon ->
             {
                 return new FireCannonAction(castingShip, castingSlot, targetSpaceObjects, isAutocastAbility,
                         ctx, sectorAlgorithms, damageMediator);

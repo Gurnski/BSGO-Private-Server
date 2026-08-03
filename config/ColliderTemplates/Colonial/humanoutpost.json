@@ -1,0 +1,14 @@
+{
+	"center": {
+                "x": 0.058,
+                "y": 17.157,
+                "z": -46.179
+            },
+	"extents": {
+                "x": 96.824,
+                "y": 116.965,
+                "z": 289.926
+            },
+    "prefabName": "humanoutpost",
+    "type": "AABB"
+}

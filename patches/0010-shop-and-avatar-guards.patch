@@ -1,8 +1,35 @@
 diff --git a/src/main/java/io/github/luigeneric/core/player/container/visitors/ContainerVisitor.java b/src/main/java/io/github/luigeneric/core/player/container/visitors/ContainerVisitor.java
-index a46d26b..1a26ca3 100644
+index a46d26b..692fc75 100644
 --- a/src/main/java/io/github/luigeneric/core/player/container/visitors/ContainerVisitor.java
 +++ b/src/main/java/io/github/luigeneric/core/player/container/visitors/ContainerVisitor.java
-@@ -663,8 +663,17 @@ public abstract class ContainerVisitor
+@@ -10,6 +10,8 @@ import io.github.luigeneric.core.protocols.ProtocolID;
+ import io.github.luigeneric.core.protocols.ProtocolRegistryWriteOnly;
+ import io.github.luigeneric.core.protocols.debug.DebugProtocol;
+ import io.github.luigeneric.core.protocols.notification.NotificationProtocolWriteOnly;
++import io.github.luigeneric.core.protocols.player.CapitalRental;
++import io.github.luigeneric.templates.cards.ShipCard;
+ import io.github.luigeneric.core.protocols.player.PlayerProtocol;
+ import io.github.luigeneric.enums.GameLocation;
+ import io.github.luigeneric.enums.ResourceType;
+@@ -396,7 +398,16 @@ public abstract class ContainerVisitor
+         final ShopItemCard shopItemCard = optShopItemCard.get();
+ 
+ 
+-        final float cubitsPrice = shopItemCard.getUpgradePrice().getItems().get(ResourceType.Cubits.guid);
++        // The tuning-kit odds are packCount / (cubitsPrice / 1000), so a card whose UpgradePrice has
++        // no Cubits entry unboxes null here, and one that prices Cubits at 0 divides by zero: the
++        // chance comes out +Infinity, Mathf.min pins it to 1f, and rollChance(1f) always succeeds.
++        // That is a free guaranteed level-up for a single tuning kit, and this path never charges
++        // the UpgradePrice at all - only the kits. 136 of the 2 190 upgrade levels in the card dump
++        // carry Cubits at exactly 0, so it arms itself the moment UserUpgradeable systems ship.
++        // No price, no pack upgrade; the ordinary cubit upgrade path is unaffected.
++        final Float cubitsInPrice = shopItemCard.getUpgradePrice().getItems().get(ResourceType.Cubits.guid);
++        if (cubitsInPrice == null || cubitsInPrice <= 0f) return false;
++        final float cubitsPrice = cubitsInPrice;
+         final float chanceToUpgrade = Mathf.min(1f, packCount / (cubitsPrice / 1000f));
+ 
+         Optional<ShipItem> tuningKits = hold.getByGUID(ResourceType.TuningKit.guid);
+@@ -663,8 +674,28 @@ public abstract class ContainerVisitor
              return false;
          }
  
@@ -11,6 +38,17 @@ index a46d26b..1a26ca3 100644
 +        // PlayerProtocol.addShip, which checks level and faction. Without this, a hand-crafted
 +        // MoveItem shop->hold buys a StoreShip straight into cargo and skips both checks.
 +        if (itemToBuy.getItemType() == ItemType.Ship) return false;
++
++        // A capital rental pass is a trigger, not an item: buying one starts the rental at the
++        // live CapitalRental discount price, and the pass itself is never delivered.
++        if (CapitalRental.isPass(itemToBuy.getCardGuid()))
++        {
++            final PlayerProtocol playerProtocol = user.getProtocol(ProtocolID.Player);
++            CDI.current().select(Catalogue.class).get()
++                    .fetchCard(CapitalRental.capitalForPass(itemToBuy.getCardGuid()), CardView.Ship)
++                    .ifPresent(card -> playerProtocol.rentCapital((ShipCard) card));
++            return false;
++        }
 +
          //check prices
          final Price tmpPrice = optShopItemCard.get().getBuyPrice();
@@ -21,10 +59,20 @@ index a46d26b..1a26ca3 100644
          if (!isEnoughInContainer) return false;
          buyPrice.addPrice(tmpPrice);
 diff --git a/src/main/java/io/github/luigeneric/core/protocols/player/PlayerProtocol.java b/src/main/java/io/github/luigeneric/core/protocols/player/PlayerProtocol.java
-index 29669b4..4101449 100644
+index 29669b4..68cc38e 100644
 --- a/src/main/java/io/github/luigeneric/core/protocols/player/PlayerProtocol.java
 +++ b/src/main/java/io/github/luigeneric/core/protocols/player/PlayerProtocol.java
-@@ -218,6 +218,20 @@ public class PlayerProtocol extends BgoProtocol implements StatsProtocolSubscrib
+@@ -57,6 +57,9 @@ import io.github.luigeneric.templates.shipitems.ShipItem;
+ import io.github.luigeneric.templates.shipitems.ShipSystem;
+ import io.github.luigeneric.templates.utils.ObjectStat;
+ import io.github.luigeneric.templates.utils.ObjectStats;
++import io.github.luigeneric.core.galaxy.Galaxy;
++import io.github.luigeneric.core.player.counters.CounterDesc;
++import io.github.luigeneric.enums.ResourceType;
+ import io.github.luigeneric.templates.utils.Price;
+ import jakarta.enterprise.inject.spi.CDI;
+ import lombok.extern.slf4j.Slf4j;
+@@ -218,6 +221,20 @@ public class PlayerProtocol extends BgoProtocol implements StatsProtocolSubscrib
                      final AvatarDescription avatarDescription = br.readDesc(AvatarDescription.class);
                      final Player player = this.user().getPlayer();
  
@@ -45,6 +93,74 @@ index 29669b4..4101449 100644
  
                      if (avatarDescription != null)
                      {
+@@ -1068,6 +1085,14 @@ public class PlayerProtocol extends BgoProtocol implements StatsProtocolSubscrib
+             }
+         }
+ 
++        // The two capitals are rented by the hour, never bought - their price is dynamic and
++        // their stay in the hangar is a persisted counter, so they take their own path.
++        if (CapitalRental.isRental(shipGuid))
++        {
++            rentCapital(shipCard);
++            return;
++        }
++
+         //check buy price
+         final Price buyPrice = shopItemCard.getBuyPrice();
+         final ShopVisitor shopVisitor = new ShopVisitor(user(), null, ctx.rng());
+@@ -1090,6 +1115,52 @@ public class PlayerProtocol extends BgoProtocol implements StatsProtocolSubscrib
+         }
+     }
+ 
++    /** One hour of Pegasus/Basestar for tokens, priced by CapitalRental against live galaxy
++     *  control. Renting while a rental is active extends it; the expiry counter is enforced at
++     *  hangar load in SqLiteProvider. The shop dialog shows the Price card's static 20,000 -
++     *  the amount actually charged is this dynamic one, only ever equal or less. */
++    public void rentCapital(final ShipCard shipCard)
++    {
++        final Player player = this.user().getPlayer();
++        final Galaxy galaxy = CDI.current().select(Galaxy.class).get();
++        final long tokens = CapitalRental.priceFor(player.getFaction(), galaxy);
++        final Price rentPrice = new Price(ResourceType.Token, tokens);
++        if (!ContainerVisitor.isEnoughInContainer(rentPrice, player.getHold(), 1))
++        {
++            log.info("Capital rental refused, not enough tokens: {} needs {}", user().getUserLog(), tokens);
++            return;
++        }
++        final ShopVisitor shopVisitor = new ShopVisitor(user(), null, ctx.rng());
++        shopVisitor.removeBuyResources(rentPrice, player.getHold(), 1);
++
++        final long nowSeconds = System.currentTimeMillis() / 1000L;
++        final CounterDesc existing = player.getCounterFacade().counters()
++                .getInternalReadOnly().get(shipCard.getCardGuid());
++        final long base = existing == null ? 0L : existing.getLongValue();
++        final long newExpiry = Math.max(base, nowSeconds) + CapitalRental.DURATION_SECONDS;
++        player.getCounterFacade().setCounter(shipCard.getCardGuid(), newExpiry);
++        log.info("Capital rental: {} rents {} for {} tokens, expires {}",
++                user().getUserLog(), shipCard.getCardGuid(), tokens, newExpiry);
++
++        // Rented hulls live at an offset slot so they never collide with the listed ship that
++        // owns the real hangar id (the stealth ships hold 17 now).
++        final int rentalSlot = CapitalRental.SERVER_ID_OFFSET + shipCard.getHangarId();
++        final HangarShip already = player.getHangar().getByServerId(rentalSlot);
++        if (already != null && already.getCardGuid() == shipCard.getCardGuid())
++        {
++            return;     // extension: the hull is in the hangar, only the counter moved
++        }
++        final HangarShip newShip = new HangarShip(player.getUserID(), rentalSlot, shipCard.getCardGuid(), "");
++        newShip.getShipStats().setSkillBook(player.getSkillBook());
++        newShip.getShipStats().applyStats();
++        newShip.getShipStats().setHp(newShip.getShipStats().getStatOrDefault(ObjectStat.MaxHullPoints));
++        newShip.getShipStats().setPp(newShip.getShipStats().getStatOrDefault(ObjectStat.MaxPowerPoints));
++        player.getHangar().addHangarShip(newShip);
++        user().send(writeAddShip(newShip));
++        user().send(writer.writeShipSlots(newShip));
++        user().send(writer.writeShipInfoDurability(newShip));
++    }
++
+     public void addExperience(final long exp)
+     {
+         if (user() == null)
 diff --git a/src/main/java/io/github/luigeneric/core/protocols/shop/ShopProtocol.java b/src/main/java/io/github/luigeneric/core/protocols/shop/ShopProtocol.java
 index 79dcfa7..3288f37 100644
 --- a/src/main/java/io/github/luigeneric/core/protocols/shop/ShopProtocol.java

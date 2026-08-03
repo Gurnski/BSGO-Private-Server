@@ -125,6 +125,21 @@ public class FireMissileAction extends WeaponAction
             }
         }
 
+        if (missileGUID == 0)
+        {
+            /* The DamageNuclear branch only recognises DamageHigh 4.0 and 19.0, so any other
+             * nuclear countable falls out of it with the guid still 0 - the three mines that carry
+             * DamageHigh 0.3 do exactly that. SpaceObjectFactory.createMissile throws on a card guid
+             * it cannot resolve, and that throw escapes into Sector.run's per-tick catch and
+             * abandons the rest of the tick for everyone in the sector. It is reachable on purpose,
+             * too: PlayerProtocol's SelectConsumable validates neither ConsumableType nor Tier, so a
+             * crafted packet can seat a mine in a missile slot and then hold the fire button.
+             * Fire an ordinary missile rather than take the sector down with us. */
+            log.warn("FireMissileAction: no missile card matched consumable {}, firing the default missile",
+                    shipConsumableCard != null ? shipConsumableCard.getCardGuid() : 0);
+            missileGUID = StaticCardGUID.MissileCard.getValue();
+        }
+
         return missileGUID;
     }
 }

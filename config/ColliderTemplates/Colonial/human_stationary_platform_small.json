@@ -1,0 +1,14 @@
+{
+	"center": {
+                "x": 0,
+                "y": -17.132,
+                "z": 0
+            },
+	"extents": {
+                "x": 59.419,
+                "y": 96.412,
+                "z": 53.257
+            },
+    "prefabName": "human_stationary_platform_small",
+    "type": "AABB"
+}

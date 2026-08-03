@@ -26,11 +26,21 @@ public final class SectorAlgorithms
         this.ewDurationAlgorithm = Objects.requireNonNull(ewDurationAlgorithm);
     }
 
+    /* Armour. V0 returns a constant 1, i.e. armour is discarded and ArmorPiercing does nothing, so
+     * every armour-plating module and every ArmorValue on a hull is decorative. V1 is the original's
+     * own curve, (100 - clamp(armor - armorPiercing, 0, 99.9)) / 100. THIS CHANGES DAMAGE NUMBERS
+     * FOR EVERY PLAYER AND EVERY NPC IN EVERY SECTOR. This is not confined to new content: 97 of
+     * the stat blocks the card generator already emits carry a non-zero ArmorValue, and only 40
+     * abilities answer with any ArmorPiercing at all, so most existing targets get harder to kill
+     * the moment this flips. To revert, put ArmorAlgorithmV0 back on the line below and change
+     * nothing else. */
+    private static final IArmorAlgorithm ARMOR_ALGORITHM = new ArmorAlgorithmV1();
+
     public static SectorAlgorithms defaultAlgorithms()
     {
         return new SectorAlgorithms(
                 new HitchanceBasedOnThrottle(),
-                new ArmorAlgorithmV0(),
+                ARMOR_ALGORITHM,
                 new CritchanceAlgorithmV1(),
                 new FlareChanceAlgorithmV1(),
                 new HackDurationAlgorithmV1()

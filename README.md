@@ -24,9 +24,10 @@ what this repo fills, along with fixes for the problems we hit on the way.
 
 ## What this repo adds
 
-`tools/cardgen/` generates the card catalogue the server sends to clients: 1,260 cards covering
-58 star systems, 14 hulls per faction from the tier-1 strikes up to the Pegasus and Basestar, 24
-weapons, skills, missions, the shop, and every resource type. The generator validates each card
+`tools/cardgen/` generates the card catalogue the server sends to clients: 11,696 cards covering
+58 star systems, 14 hulls per faction from the tier-1 strikes up to the Pegasus and Basestar, the
+original game's full equipment catalogue (219 systems as ten-level upgrade ladders, 175
+consumables, 97 paints), skills, missions, the shop, and every resource type. The generator validates each card
 against BSGOCore's own source and fails the build rather than emit a bad one, because the client
 handles a bad card by hanging on the loading screen forever. It also writes a sector template
 for each system.

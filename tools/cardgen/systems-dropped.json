@@ -1,0 +1,119 @@
+{
+  "_comment": [
+    "GENERATED FILE - do not hand-edit. Regenerate with tools/cardgen/gen-systems-real.js.",
+    "Dump level-1 ship systems the equipment pass deliberately does not ship, and why. This is",
+    "player-visible content: four complete tiered families (mine launchers, Active DRADIS, Jump",
+    "Transponders, Flak Blockers) plus Auto Pilot, Spawn Mode, the EMP Mine and the Rocket Pack.",
+    "A returning player will look for these by name, so cards.js prints this list every run.",
+    "Every entry is here because emitting it would take down a sector, not because we ran out of",
+    "time - see the reason field. Any change to this file is a reviewed diff."
+  ],
+  "generatedFrom": "cards_20260729_223813.json",
+  "dropped": [
+    {
+      "guid": 614131840,
+      "key": "system_auto_pilot",
+      "slot": "computer",
+      "tier": 1,
+      "reason": "ActionType Follow - AbilityActionFactory.create has no case for it and its default throws inside the sector tick"
+    },
+    {
+      "guid": 2142950111,
+      "key": "item_slot_strike_system_active_dradis",
+      "slot": "computer",
+      "tier": 1,
+      "reason": "ActionType ToggleSystem - AbilityActionFactory.create has no case for it and its default throws inside the sector tick"
+    },
+    {
+      "guid": 3869628190,
+      "key": "item_slot_strike_command_computer_system_jump_transponder",
+      "slot": "computer",
+      "tier": 1,
+      "reason": "ActionType ActivateJumpTargetTransponder - AbilityActionFactory.create has no case for it and its default throws inside the sector tick"
+    },
+    {
+      "guid": 2274404989,
+      "key": "item_slot_escort_system_command_computer_flak_blocker_area",
+      "slot": "computer",
+      "tier": 2,
+      "reason": "ActionType ShortCircuit - AbilityActionFactory.create has no case for it and its default throws inside the sector tick"
+    },
+    {
+      "guid": 3365960494,
+      "key": "item_slot_escort_command_computer_system_jump_transponder",
+      "slot": "computer",
+      "tier": 2,
+      "reason": "ActionType ActivateJumpTargetTransponder - AbilityActionFactory.create has no case for it and its default throws inside the sector tick"
+    },
+    {
+      "guid": 3579260622,
+      "key": "item_slot_escort_system_command_computer_flak_blocker",
+      "slot": "computer",
+      "tier": 2,
+      "reason": "ActionType ShortCircuit - AbilityActionFactory.create has no case for it and its default throws inside the sector tick"
+    },
+    {
+      "guid": 4150285567,
+      "key": "item_slot_escort_system_active_dradis",
+      "slot": "computer",
+      "tier": 2,
+      "reason": "ActionType ToggleSystem - AbilityActionFactory.create has no case for it and its default throws inside the sector tick"
+    },
+    {
+      "guid": 231290766,
+      "key": "item_slot_line_command_computer_system_jump_transponder",
+      "slot": "computer",
+      "tier": 3,
+      "reason": "ActionType ActivateJumpTargetTransponder - AbilityActionFactory.create has no case for it and its default throws inside the sector tick"
+    },
+    {
+      "guid": 1159904495,
+      "key": "item_slot_line_system_active_dradis",
+      "slot": "computer",
+      "tier": 3,
+      "reason": "ActionType ToggleSystem - AbilityActionFactory.create has no case for it and its default throws inside the sector tick"
+    },
+    {
+      "guid": 3248853726,
+      "key": "system_light_mine_launcher",
+      "slot": "hull",
+      "tier": 1,
+      "reason": "ActionType None - AbilityActionFactory.create has no case for it and its default throws inside the sector tick"
+    },
+    {
+      "guid": 3224337694,
+      "key": "system_medium_mine_launcher",
+      "slot": "hull",
+      "tier": 2,
+      "reason": "ActionType None - AbilityActionFactory.create has no case for it and its default throws inside the sector tick"
+    },
+    {
+      "guid": 708067806,
+      "key": "system_large_mine_launcher",
+      "slot": "hull",
+      "tier": 3,
+      "reason": "ActionType None - AbilityActionFactory.create has no case for it and its default throws inside the sector tick"
+    },
+    {
+      "guid": 133146263,
+      "key": "item_slot_strike_stealth_weapon_system_rocket_pack",
+      "slot": "launcher",
+      "tier": 1,
+      "reason": "projectile with zero YawAcceleration/YawMaxSpeed/PitchAcceleration/PitchMaxSpeed/RollAcceleration/RollMaxSpeed - divides to NaN in MovementSimulation and throws inside SectorMovementUpdater every frame the round lives"
+    },
+    {
+      "guid": 3709725857,
+      "key": "item_slot_strike_stealth_weapon_system_emp_mine",
+      "slot": "launcher",
+      "tier": 1,
+      "reason": "ActionType None - AbilityActionFactory.create has no case for it and its default throws inside the sector tick"
+    },
+    {
+      "guid": 395660941,
+      "key": "item_slot_capital_system_role_spawn_mode",
+      "slot": "role",
+      "tier": 4,
+      "reason": "ActionType Fortify - AbilityActionFactory.create has no case for it and its default throws inside the sector tick"
+    }
+  ]
+}

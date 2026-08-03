@@ -1,0 +1,30 @@
+# Files the upstream ServerConfigurationUtils_public unpack provides, relative to global/.
+# G13c in tools/cardgen/cards.js reads this to tell hand-authored live-tree files from
+# upstream ones. Regenerate from a pristine unpack with:
+#   (cd <unpack>/global && find . -type f | sort | sed 's|^\./||')
+AugmentTemplates/augment_template_divine_inspireation.json
+AugmentTemplates/augment_template_green.json
+ColliderTemplates/Colonial/galactica.json
+ColliderTemplates/Cylon/basestar.json
+ColliderTemplates/Neutral/comet.json
+LootTemplates/!3_comets_old.json
+LootTemplates/1_static_standard_missile.json
+LootTemplates/2_miningships.json
+MissionTemplateConfiguration/colonial/2001_colonial_platform1.json
+MissionTemplateConfiguration/cylon/1001_cylon_platform1.json
+SectorTemplates/sectorTemplate0_AlphaCeti.json_v3.json
+SectorTemplates/sectorTemplate10.json_Tannhauser_v3.json
+SectorTemplates/sectorTemplate6_Appolid.json_v3.json
+ShipConfigTemplates/ancient/100_40_drone_small.json
+ShipConfigTemplates/colonial/10_mk2_10.json
+ShipConfigTemplates/colonial/11_mk2_20.json
+ShipConfigTemplates/colonial/12_mk2_75.json
+ShipConfigTemplates/colonial/13_raptor_10.json
+ShipConfigTemplates/colonial/14_raptor_20.json
+ShipConfigTemplates/colonial/15_raptor_75.json
+ShipConfigTemplates/cylon/34_raider_10.json
+ShipConfigTemplates/cylon/35_raider_20.json
+ShipConfigTemplates/cylon/36_raider_75.json
+ShipConfigTemplates/cylon/37_heavyRaider_10.json
+ShipConfigTemplates/cylon/38_heavyRaider_20.json
+ShipConfigTemplates/cylon/39_heavyRaider_75.json

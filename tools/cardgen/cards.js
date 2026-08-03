@@ -542,7 +542,50 @@ const NPC_HEAVIES = [
  * See hulls-real.js for what each one replaced and why. Generated - regenerate with
  * `py tools/cardgen/gen-hulls-real.py` against a fresh card dump. */
 const { HULLS_REAL, LAYOUTS_REAL } = require('./hulls-real');
-const { EQUIPMENT_REAL } = require('./equipment-real.js');
+
+/* The original's whole fittable catalogue - 219 ship systems with their real stats, prices, GUI
+ * keys and ability cards, read out of the same dump, ten upgrade levels each. Generated -
+ * regenerate with `node tools/cardgen/gen-systems-real.js`.
+ *
+ * LADDER is {levels, maxLevel, userUpgradeable} - the three constants every rung of every chain
+ * shares. They come from the module rather than being restated here so that shortening or
+ * lengthening the ladder is one edit in the generator.
+ *
+ * FLAGS records the staging state the module was generated under, and the two switches live in the
+ * GENERATOR, not in the generated file, so regenerating cannot silently revert them. The
+ * assertions further down check the emitted cards against what FLAGS says, which is the thing that
+ * notices if the module and this file ever disagree.
+ *
+ * SYSTEMS_DROPPED is the fifteen candidates the generator refused: items whose ability ActionType
+ * AbilityActionFactory cannot build, plus one projectile with no rotation stats. That is
+ * player-visible content - four complete tiered families - so it is printed on every run rather
+ * than buried in a data file nobody opens. */
+const { SYSTEMS_REAL, FLAGS: SYSTEMS_FLAGS, LADDER } = require('./systems-real.js');
+const SYSTEMS_DROPPED = require('./systems-dropped.json');
+
+/* The 97 ship paints - 93 read out of the same dump plus 4 hand-authored `advanced` skins that
+ * close the last four per-hull gaps. Generated - regenerate with `node tools/cardgen/gen-paints-real.js`,
+ * which reads THIS file's output, so run cards.js first if hull guids or slot layouts have moved.
+ * PAINTS_DROPPED is the single paint we refuse (a Raptor FR skin, and we do not fly that hull). */
+const { PAINTS_REAL, PAINTS_DROPPED } = require('./paints-real.js');
+
+/* The two families the dump has no cards for at all, hand-authored from the client's own loca
+ * strings, the wiki and the server code that consumes them. The dump is empty of avionics because
+ * ShopProtocol de-stocks an avionics module the player already owns and the dumping pilot owned
+ * theirs; it is empty of a tier-2 role module because the only role card the original shipped in
+ * that dump is the tier-4 Spawn Mode one. See avionics.js for the evidence and the arithmetic. */
+const { AVIONICS_CAMS, C31_LEVELS } = require('./avionics.js');
+
+/* The original's whole countable catalogue - 165 ShipConsumable cards with the real
+ * ConsumableType/Tier pairing key, buff multipliers, consumableAttributes, click size and prices,
+ * plus the corrections for the ten guids that are ours and the three nuclear projectile object
+ * card sets. Generated - regenerate with `node tools/cardgen/gen-consumables-real.js`.
+ *
+ * CONSUMABLES_DROPPED is the one card the import refuses: consumable_mega_rounds, a dev item with
+ * no price at either end and buyCount 0. Printed on every run for the same reason the dropped
+ * systems and paints are. */
+const { CONSUMABLES_REAL, LEGACY_CONSUMABLES, CONSUMABLES_DROPPED,
+        NUKE_PROJECTILES } = require('./consumables-real.js');
 
 const HARDPOINTS = {
   humant1fighter: {    // Viper Mk II
@@ -1472,6 +1515,142 @@ function shipCards(hull) {
   ];
 }
 
+/* ================================================================ HULL IDENTITY CARDS
+ *
+ * A card set at guid == ShipObjectKey, one per hull family. Nothing owns one, nothing spawns one,
+ * nothing buys one. They exist so that ShipObjectKeyRestrictions can be non-empty.
+ *
+ * The two ends of a restriction entry read the same number differently. The SERVER compares it
+ * against the active hull's ShipObjectKey (ShipSystemCard.isObjectKeyRestrictionsBlocked, called
+ * from ContainerVisitor.java:134-135). The CLIENT treats it as a card guid: ShipSystemCard.cs:100
+ * does FetchCard(entry, CardView.Ship) and :102 IsLoaded.Depend()s on the result, so the parent
+ * system card is not loaded until that Ship card arrives. There is no timeout anywhere and
+ * Catalogue.cs:17-31 has already cached an empty placeholder, so an entry with no card behind it
+ * is a permanent loading screen, not an error. This file has shipped that once already - the
+ * recorded `Card should not be send because it's null! 268081382 10`, which is guid 268081382
+ * (the Banshee's objKey) and view 10 (Ship).
+ *
+ * Twelve of our 42 object keys already satisfy both readings, because platforms, outposts and the
+ * two capitals set ShipObjectKey = their own card guid - that is why the six SENTRY-restricted
+ * platform weapons have worked all along. The other 30 are the hulls a player flies, where the
+ * objKey is a separate identity number shared by the base card, its Advanced twin and any NPC
+ * clones of the same prefab. Those 30 get a card set here.
+ *
+ * SOURCE: the family's single ShipList member, i.e. the base, player-flyable, level-1 hull. That
+ * choice is asserted, not assumed - the function refuses to run if a family has anything other
+ * than exactly one - because up to five of our Ship cards share one objKey (107780547 and
+ * 117312163 have five each) and they do NOT all describe the same thing. The NPC clones sit on
+ * HangarID 12, and HangarID is what GuiAdvancedRequirementsPanel.cs:98 compares against the active
+ * ship to decide whether "Required ship:" renders white or red. Copy the wrong member and the
+ * requirement reads as unmet while you are sitting in the very hull it names.
+ *
+ * DIVERGENCES FROM THE DUMP'S OWN IDENTITY CARDS (all 33 of them are Level 0 with objKey == guid,
+ * so the shape is theirs; these three fields are not):
+ *   - PaperdollUiLayoutfile is BLANK. Mandatory. The paperdoll rule below runs for every Ship card
+ *     with a layout and errors when the card's Level has no matching UpgradeLevel, and every
+ *     shipped layout file defines only 1 and 2 - so a Level-0 card carrying its hull's layout
+ *     fails the build on all 30. Blanking it is safe: ShipCard.cs:146 skips the load, and
+ *     PaperdollLayoutBig is dereferenced only through Game.Me.ActiveShip, which this can never be.
+ *     The dump embeds its layouts in the card and ours are loaded by filename, which is why they
+ *     could afford to keep it and we cannot.
+ *   - nextShipCardGuid is 0. The base card chains to its Advanced twin; following that from here
+ *     would drag a second Ship card and its whole view set into every restricted item's load.
+ *   - The Price card's Faction is Neutral. Everything else about the price is the dump's shape
+ *     (Category Ship, empty BuyPrice), and an empty BuyPrice is enough to keep the card out of the
+ *     shop (ShopProtocol.java:214 skips it). It is NOT enough to keep it out of the hangar:
+ *     PlayerProtocol.addShip:1099 calls isEnoughInContainer directly, and that loops over
+ *     zero price entries and returns true - the guard checkItemToBuy:698 has for exactly this
+ *     ("An empty BuyPrice means NOT FOR SALE") is missing on the ship path. A crafted ShipAddShip
+ *     naming one of these guids would then put a free hull in the hangar at the REAL hull's
+ *     HangarID, and Hangar.addHangarShip:63 is a map put, so it would displace the ship already
+ *     there. Faction Neutral closes that: PlayerProtocol.java:1080-1086 refuses any purchase whose
+ *     ShopItemCard.Faction is not the player's. Nothing reads a Price card's Faction for a card
+ *     that never reaches the shop, and the tooltip reads the SHIP card's Faction
+ *     (GuiAdvancedRequirementsPanel.cs:93), which stays Colonial/Cylon.
+ *
+ * Level 0 is the dump's own value and it is load-bearing here for a second reason:
+ * HangarShip.java:100 instantiates a slot only when shipCard.getLevel() >= slot.getLevel(), and
+ * every slot is level 1 or 2, so even a hangar ship built from one of these has no slots at all.
+ *
+ * Derived from the cards already built rather than from a list, so a hull added to HULLS gets its
+ * identity card with no edit here, and a hull removed takes its identity card with it. */
+function hullIdentityCards(built) {
+  const clone = c => JSON.parse(JSON.stringify(c));
+  const at = (guid, view) => built.find(c => c.cardGUID === guid && c.cardView2 === view);
+  const taken = new Set(built.map(c => c.cardGUID));
+  const listed = new Set(built.filter(c => c.cardView2 === 'ShipList')
+                              .flatMap(c => c.shipCardGuids || []));
+  const byKey = new Map();
+  built.filter(c => c.cardView2 === 'Ship').forEach(s => {
+    if (!byKey.has(s.ShipObjectKey)) byKey.set(s.ShipObjectKey, []);
+    byKey.get(s.ShipObjectKey).push(s);
+  });
+
+  const out = [];
+  [...byKey.keys()].sort((a, b) => a - b).forEach(key => {
+    const family = byKey.get(key);
+    const ids = family.map(s => s.cardGUID).join('/');
+    // The family already carries its own identity - platforms, outposts, cruisers, the two
+    // capitals. Nothing to add.
+    if (at(key, 'Ship')) return;
+    // Non-Ship cards at the objKey guid mean the number is doing two jobs. Emitting on top of them
+    // would collide, and skipping would leave the restriction dangling, so stop.
+    if (taken.has(key))
+      throw new Error(`ShipObjectKey ${key} (Ship cards ${ids}) already carries non-Ship cards at ` +
+        `that guid - an identity card cannot be emitted there and a restriction naming it would ` +
+        `dereference to whatever is`);
+
+    const base = family.filter(s => listed.has(s.cardGUID));
+    if (base.length !== 1)
+      throw new Error(`ShipObjectKey ${key}: ${base.length} of its Ship cards (${ids}) are in a ` +
+        `ShipList. The identity card copies the one player-flyable member and there is no rule ` +
+        `for picking between ${base.length}`);
+    const src = base[0];
+    /* Tier is checked family-wide because the SERVER unlocks a restricted item for every hull
+     * carrying this objKey while the store filters by the ACTIVE hull's tier - two members at
+     * different tiers means the item is visible on one and invisible on the other with nothing
+     * saying why. HangarID deliberately is NOT checked family-wide: the NPC clones legitimately
+     * park on 12, and which card the client renders is not ambiguous anyway - FetchCard resolves
+     * by guid, so it is the card built here and nothing else. G16 checks that one against src. */
+    const tiers = [...new Set(family.map(s => s.Tier))];
+    if (tiers.length > 1)
+      throw new Error(`ShipObjectKey ${key}: Ship cards ${ids} disagree on Tier (${tiers.join(', ')}) - ` +
+        `a restriction naming this key would unlock the item for all of them but the store's ` +
+        `equipable filter would only show it at one tier`);
+
+    const world = at(src.cardGUID, 'World');
+    const gui = at(src.cardGUID, 'GUI');
+    if (!world || !gui)
+      throw new Error(`ShipObjectKey ${key}: source hull ${src.cardGUID} has no ${world ? 'GUI' : 'World'} card to copy`);
+
+    out.push(
+      /* ShipCard.Read Depends on the World card at its own guid and, through GameItemCard.Read, on
+       * the GUI and Price cards there too - all four have to exist or the restricted item never
+       * finishes loading. The World card is copied whole: ApplicationBootstrap.java:120-127 folds
+       * World prefab names into a Set, so a duplicate prefab is inert. */
+      Object.assign(clone(src), {
+        cardGUID: key, Level: 0, nextShipCardGuid: 0, PaperdollUiLayoutfile: '',
+      }),
+      Object.assign(clone(world), { cardGUID: key }),
+      // The GUI card is what names the hull in the tooltip: BsgoLocalization.GetShipName reads
+      // ItemGUICard.Key and resolves bgo.<key>.Name_1, which is the form our hull keys ship.
+      Object.assign(clone(gui), { cardGUID: key }),
+      card(key, 'Price', {
+        Category: 'Ship', ItemType: 'Ship', Tier: src.Tier, Faction: 'Neutral',
+        SortingNames: [], SortingWeight: 0,
+        BuyPrice: price({}), UpgradePrice: price({}), SellPrice: price({}), CanBeSold: false,
+      }),
+      // Not a client card dependency - Ship.cs:65-69 needs it only for a spawned object, which this
+      // never is - but the Ship/ShipLight rule below holds for every Ship card and it costs nothing.
+      card(key, 'ShipLight', {
+        ShipObjectKey: key, Tier: src.Tier,
+        ShipRoles: (src.ShipRoles || []).slice(), ShipRoleDeprecated: src.ShipRoleDeprecated,
+      }),
+    );
+  });
+  return out;
+}
+
 const shipSystem = (guid, slotType, extra) => card(guid, 'ShipSystem', Object.assign({
   Level: 1, MaxLevel: 1, nextShipSystemCardGuid: 0,
   SlotType: slotType, Tier: 1,
@@ -1557,30 +1736,17 @@ function sectorCards() {
      * If one sector ever needs a different sectorMapEnabled, give THAT sector its own guid - do not
      * re-expand the whole table. */
     card(SHARED_REGULATION, 'Regulation', {
-      // KEY = ShipAbilityCard.AbilityGroupId. The client uses the RAW dictionary indexer on it,
-      // so a group with no entry here is a KeyNotFoundException the first time you validate a
-      // target - on the per-frame path. The server also indexes abilityTargetTypes by the
-      // RELATIONS keyset unguarded, so both maps must carry the SAME keys.
-      // Values are raw bitmask ints, not enum names:
-      //   side:   Self=1 Any=2 Neutral=4 Friend=8 Enemy=16
-      //   target: Asteroid=1 Ship=2 Any=4 Missile=8 Planetoid=16 Mine=32 JTT=64 Comet=128
-      // Asteroids are Faction.Neutral, so Enemy alone would NOT let you shoot rocks.
-      // Group 0 is seeded as a safety net for any ability that ships with AbilityGroupId 0.
-      /* Group 3 is GROUP_DEFENSIVE - flak and point defence. It is Enemy-only (16) and deliberately
-       * NOT Neutral (4): a flak screen that chewed through every asteroid the ship drifted past
-       * would strip the field and spam loot. Target types stay Ship+Asteroid-capable (1,2) because
-       * the pair of maps must carry identical keysets - the server indexes abilityTargetTypes by
-       * the RELATIONS keyset with no guard - but the relation is what actually gates it. */
-      /* GROUP 2 IS MISSILES, AND THEY MAY NOT BE AIMED AT ROCKS. Target type 1 is Asteroid and 2
-       * is Ship; missiles get Ship only, and the relation drops Neutral (4) for Enemy (16) alone,
-       * because asteroids are Faction.Neutral and either gate on its own would still let them
-       * through. Cannons keep both - shooting rocks is how mining works - so this is the one group
-       * that differs.
-       * A missile that CLIPS an asteroid in flight is a separate matter and still resolves:
-       * CollisionResolution.resolveMissileOther destroys both. This only stops you selecting a rock
-       * and launching at it. */
-      abilityTargetRelations: { 0: [4, 16], 1: [4, 16], 2: [16], 3: [16] },
-      abilityTargetTypes: { 0: [1, 2], 1: [1, 2], 2: [2], 3: [1, 2] },
+      /* BOTH MAPS ARE FILLED IN BY applyRegulationTargeting() AFTER EVERY CARD EXISTS, and are
+       * deliberately left empty here. Their keyset is the set of AbilityGroupIds actually emitted,
+       * which is not knowable at this point in the file - the abilities are built later, by
+       * weaponCards() and moduleCards(). Hand-listing the keys is how this card goes wrong: the
+       * client indexes abilityTargetRelations with the RAW dictionary indexer
+       * (ShipAbstractAbility.cs:35 and :61), so one group id that never made it into the list is a
+       * KeyNotFoundException on the per-frame target check, and the server indexes
+       * abilityTargetTypes by the RELATIONS keyset with no guard, so the two must agree exactly.
+       * Deriving it makes both impossible by construction. Edit the policy, not the keys. */
+      abilityTargetRelations: {},
+      abilityTargetTypes: {},
       targetBracketMode: 'Default', sectorMapEnabled: true,
       // The client sizes this array from the RELATION count, so it must stay <= 3 long.
       effectTypeBlacklist: [],
@@ -1625,13 +1791,113 @@ function sectorCards() {
   ]));
 }
 
-/* ================================================================ WEAPONS
- * Five card views per weapon across TWO guids:
- *   sysGuid: ShipSystem(2) + GUI(1) + Price(23)
- *   abGuid : ShipAbility(6) + GUI(1)
+/* ---------------------------------------------------------------- REGULATION TARGETING
+ * Fills every Regulation card's two maps from the abilities that actually shipped.
+ *
+ * Values are raw bitmask ints, not enum names:
+ *   relation:  Self=1  Any=2  Neutral=4  Friend=8  Enemy=16
+ *   target:    Asteroid=1  Ship=2  Any=4  Missile=8  Planetoid=16  Mine=32  JTT=64  Comet=128
+ * Asteroids are Faction.Neutral, so Enemy alone would NOT let you shoot rocks - a group that needs
+ * to mine needs Neutral(4) in its relation AND Asteroid(1) in its target types.
+ *
+ * The policy is keyed on the ability's ActionType, NOT on its AbilityGroupId. Group ids are opaque
+ * 32-bit hashes in the original data (3162894, 26082229, ...), so a table keyed on them is a list
+ * of magic numbers that silently stops covering anything the moment a new family is imported - and
+ * the failure mode of a miss is the client's per-frame KeyNotFoundException. Keyed on the action
+ * type, a newly imported family is classified the day it arrives.
+ *
+ * A group takes the UNION of every action type in it, which is the safe direction: an over-broad
+ * relation lets you aim at something harmless, while an over-narrow one silently disarms the
+ * weapon. Missiles are the one restrictive arm - Ship only, Enemy only.
+ */
+const REGULATION_POLICY = [
+  /* MISSILES MAY NOT BE AIMED AT ROCKS. A missile that CLIPS an asteroid in flight still resolves
+   * (CollisionResolution.resolveMissileOther destroys both); this only stops you selecting a rock
+   * and launching at it, which wastes ammunition and, on a torpedo, an entire cooldown. */
+  { types: ['FireMissle', 'FireTorpedo', 'FireHeavyMissile', 'FireLightMissile'],
+    relations: [16], targets: [2] },
+  // Guns of every description. Shooting rocks is how mining works, so these keep Neutral+Asteroid.
+  { types: ['FireCannon', 'FireMachineGun', 'FireShotgun', 'FireKillCannon', 'FireMining'],
+    relations: [4, 16], targets: [1, 2] },
+  /* Flak and point defence are not aimed - they sweep. Enemy-only and deliberately NOT Neutral: a
+   * flak screen that chewed through every asteroid the ship drifted past would strip the field and
+   * spam loot. The target types stay Ship+Asteroid-capable because the two maps must carry
+   * identical keysets, but the relation is what actually gates it. */
+  { types: ['Flak', 'PointDefence', 'DeflectMissile', 'DropFlare', 'Slide'],
+    relations: [16], targets: [1, 2] },
+];
+// Buffs, debuffs, scans and anything not classified above. Permissive, because a utility ability
+// that cannot be pointed at its own target is simply broken.
+const REGULATION_DEFAULT = { relations: [4, 16], targets: [1, 2] };
+/* 0..3 are seeded unconditionally. 0 is the safety net for any ability that ships with
+ * AbilityGroupId 0; 1/2/3 are GROUP_CANNON / GROUP_MISSILE / GROUP_DEFENSIVE, which the
+ * hand-authored capital, platform and station items use and which must survive even if every
+ * ability using one of them is ever removed. */
+const REGULATION_BASE_GROUPS = [0, 1, 2, 3];
+
+function applyRegulationTargeting(cards) {
+  const byGroup = new Map(REGULATION_BASE_GROUPS.map(g => [String(g), new Set()]));
+  cards.filter(c => c.cardView2 === 'ShipAbility').forEach(a => {
+    const k = String(a.AbilityGroupId);
+    if (!byGroup.has(k)) byGroup.set(k, new Set());
+    byGroup.get(k).add(a.ActionType);
+  });
+  const relations = {}, targets = {};
+  for (const [g, actions] of byGroup) {
+    const rel = new Set(), tgt = new Set();
+    let matched = false;
+    for (const a of actions) {
+      const p = REGULATION_POLICY.find(x => x.types.includes(a));
+      if (!p) continue;
+      matched = true;
+      p.relations.forEach(v => rel.add(v));
+      p.targets.forEach(v => tgt.add(v));
+    }
+    // An unclassified action type, or a base group with no abilities at all, takes the default.
+    if (!matched) { REGULATION_DEFAULT.relations.forEach(v => rel.add(v)); REGULATION_DEFAULT.targets.forEach(v => tgt.add(v)); }
+    relations[g] = [...rel].sort((a, b) => a - b);
+    targets[g] = [...tgt].sort((a, b) => a - b);
+  }
+  cards.filter(c => c.cardView2 === 'Regulation').forEach(c => {
+    c.abilityTargetRelations = Object.assign({}, relations);
+    c.abilityTargetTypes = Object.assign({}, targets);
+  });
+  return Object.keys(relations).length;
+}
+
+/* ================================================================ WEAPONS AND FITTABLE EQUIPMENT
+ *
+ * Nearly everything a player can fit comes from systems-real.js now: the original's own 219 ship
+ * systems, read out of the live-server dump with their real stats, prices, durability, GUI keys and
+ * ability cards. This file used to emit 117 ShipSystem cards and now emits 231. Of the old 117,
+ * 105 are gone: 83 superseded at the SAME GUID by their real dump card (the 75 equipment-real.js
+ * modules, the five station guns, the two starter weapons and the T2 nuke), and 22 deleted outright
+ * - the eighteen 6001-6026 weapons, whose tier-2/3/4 stats were produced by multiplying a tier-1
+ * template, and four "tier-1 weapons" that turned out to be mid-ladder cards of other chains
+ * (4171922670 and 1798343138 are level 5; 3694197064 and 1320617532 are level 15 and cannot exist
+ * under a ten-level ladder at all).
+ *
+ * What is still authored in this file is the set the dump has no counterpart for: the
+ * Pegasus/Basestar battery (CAPITAL_WEAPONS, guids 6031-6034) and the six tiered sentry-platform
+ * weapons (6041/6042 light, 6051-6054 heavy). Both blocks explain themselves below.
+ *
+ * Card views per active system, across TWO guids:
+ *   sysGuid: ShipSystem + GUI + Price
+ *   abGuid : ShipAbility + GUI
  * The system card depends on a Price card at its OWN guid, and the ability card's constructor
- * depends on a GUI card at the ABILITY guid. Miss either and the item never finishes loading.
- * System guids are PINNED by the shipped ShipConfigTemplates - do not renumber them.
+ * depends on a GUI card at the ABILITY guid. Miss either and the item never finishes loading, with
+ * no timeout on the client. 86 of the 219 are passive modules and have no ability guid at all.
+ *
+ * TIER IS A HULL-CLASS LOCK, not a quality grade: the equip check demands the system's Tier equal
+ * the ACTIVE SHIP's Tier exactly, the Store tab force-enables the equipable-only filter and never
+ * clears it for Hold or Locker, and a ShipSystem gets no tier-0 escape (only countables do). Every
+ * hull tier therefore needs its own complete item set. Faking that by scaling one tier-1 template
+ * is what the deleted TIER_WEAPONS table did; the dump's own slot/tier census supplies it properly.
+ *
+ * Guids: an imported item keeps its dump guid. Hand-authored items use 6000+ for systems and
+ * 71002000+ for abilities. Guids named by a shipped ShipConfigTemplate are PINNED - G13 fails the
+ * build if a config points at a card we have stopped emitting, which is the only warning you get
+ * before ShipSystem.fromGUID throws on an NPC spawn deep in a sector nobody is watching.
  */
 const GROUP_CANNON = 1;    // must match a key in EVERY Regulation card
 const GROUP_MISSILE = 2;
@@ -1646,147 +1912,6 @@ const GROUP_DEFENSIVE = 3;
 const TYLIUM = 215278030;
 const TOKEN = 130920111;   // command tokens - the capital-rental currency
 
-/* Tier is a HULL-CLASS LOCK, not a quality grade. The equip check demands the system's tier equal
- * the ACTIVE SHIP's tier exactly, the Store tab force-enables the equipable-only filter and never
- * clears it for Hold or Locker, and the tier filter then hides every system of another tier - a
- * ShipSystem gets no tier-0 escape, only countables do. While every reachable hull is tier 1, a
- * tier-2/3 weapon is invisible in the shop AND invisible in your own hold after you pay for it.
- * These three grades stay a price/stat progression WITHIN tier 1. Restore tier 2 and 3 on the same
- * day the tier-2/3 hulls enter the ShipList, not before. */
-const CANNONS = [
-  { sys: 2645025994, ab: 71000010, tier: 1, key: 'standard_issue_autocannon', frame: 172, abFrame: 93, tyl: 2500, dur: 200,
-    st: { Accuracy: 100, DamageLow: 18, DamageHigh: 26, CriticalOffense: 20, ArmorPiercing: 20,
-          MinRange: 0, OptimalRange: 400, MaxRange: 700, Angle: 40, Cooldown: 1.0, PowerPointCost: 1.5 } },
-  { sys: 4171922670, ab: 71000020, tier: 1, key: 'cyclone_autocannon', frame: 173, abFrame: 101, tyl: 9000, dur: 700,
-    st: { Accuracy: 120, DamageLow: 30, DamageHigh: 44, CriticalOffense: 30, ArmorPiercing: 30,
-          MinRange: 0, OptimalRange: 500, MaxRange: 850, Angle: 40, Cooldown: 0.9, PowerPointCost: 2.0 } },
-  { sys: 3694197064, ab: 71000075, tier: 1, key: 'monsoon_autocannon_x', frame: 208, abFrame: 104, tyl: 26000, dur: 2000,
-    st: { Accuracy: 150, DamageLow: 55, DamageHigh: 80, CriticalOffense: 45, ArmorPiercing: 45,
-          MinRange: 0, OptimalRange: 650, MaxRange: 1100, Angle: 40, Cooldown: 1.1, PowerPointCost: 2.5 } },
-];
-
-/* The missile action copies the ability's ItemBuffAdd wholesale onto the projectile, then reads
- * Speed and MaxHullPoints with a nullable getter that auto-unboxes - so either being absent is
- * an NPE on the first shot. LifeTime is the same, and its timer re-throws EVERY tick.
- * Never add DrainLow here: it branches into the torpedo AoE path, which then filters by an
- * unset radius and the missile does nothing at all.
- *
- * "LAUNCHERS" is the missile FAMILY, not the slot type. In the dump these very guids are SlotType
- * 'weapon' (271446462 is weapon/T1 there): T1-T3 hulls have ZERO launcher slots, so sub-T4
- * missiles competed with cannons for the ordinary weapon hardpoints. Only the tier-4 entries
- * (6024-6026 below, plus capital 6034) emit as 'launcher' - the type exists solely on the four
- * T4 hulls. The emission loop applies the split; typing all nine T1-T3 missiles 'launcher' was
- * the bug that made every one of them unequippable stock. */
-const LAUNCHERS = [
-  { sys: 271446462, ab: 71000110, tier: 1, key: 'light_missile_launcher', frame: 227, abFrame: 98, tyl: 3500, dur: 250,
-    st: { DamageLow: 90, DamageHigh: 130, CriticalOffense: 20, ArmorPiercing: 25,
-          MinRange: 100, MaxRange: 1500, Angle: 45, Cooldown: 8.0, PowerPointCost: 10,
-          Speed: 220, MaxHullPoints: 40, LifeTime: 12,
-          Acceleration: 200, YawAcceleration: 90, YawMaxSpeed: 90,
-          PitchAcceleration: 90, PitchMaxSpeed: 90, RollAcceleration: 90, RollMaxSpeed: 90 } },
-  { sys: 1798343138, ab: 71000120, tier: 1, key: 'skyseeker_missile_launcher', frame: 231, abFrame: 99, tyl: 12000, dur: 900,
-    st: { DamageLow: 150, DamageHigh: 210, CriticalOffense: 30, ArmorPiercing: 35,
-          MinRange: 100, MaxRange: 1800, Angle: 45, Cooldown: 7.5, PowerPointCost: 12,
-          Speed: 250, MaxHullPoints: 60, LifeTime: 14,
-          Acceleration: 220, YawAcceleration: 100, YawMaxSpeed: 100,
-          PitchAcceleration: 100, PitchMaxSpeed: 100, RollAcceleration: 100, RollMaxSpeed: 100 } },
-  { sys: 1320617532, ab: 71000175, tier: 1, key: 'crossbow_missile_launcher', frame: 176, abFrame: 29, tyl: 34000, dur: 2500,
-    st: { DamageLow: 240, DamageHigh: 330, CriticalOffense: 45, ArmorPiercing: 50,
-          MinRange: 100, MaxRange: 2200, Angle: 45, Cooldown: 7.0, PowerPointCost: 15,
-          Speed: 280, MaxHullPoints: 90, LifeTime: 16,
-          Acceleration: 240, YawAcceleration: 110, YawMaxSpeed: 110,
-          PitchAcceleration: 110, PitchMaxSpeed: 110, RollAcceleration: 110, RollMaxSpeed: 110 } },
-];
-
-/* ================================================================ HIGHER WEAPON TIERS
- * Tier is a HULL-CLASS LOCK: the equip check demands the system's tier equal the ACTIVE SHIP's
- * tier EXACTLY, and the Store tab force-enables the equipable-only filter and never clears it for
- * Hold or Locker. A ShipSystem gets no tier-0 escape, only countables do. So every hull tier that
- * exists needs its own full set of weapons, or a player who buys a tier-2 hull finds the shop
- * empty and their tier-1 guns invisible in their own hold.
- *
- * Names are the client's own, resolved from the decompressed locale bundle - Light for tier 1-2,
- * Medium for tier 3, Heavy for the capitals, which is how BSGO itself graded them. Stats and
- * prices scale from the tier-1 templates above rather than being authored per weapon, so the
- * curve stays monotonic by construction.
- *
- * Icons repeat across tiers by design: the tier filter means a player only ever sees ONE tier's
- * weapons at a time, so a shared frame is never visible next to its twin.
- * Guids 6000+ and abilities 71002000+ are free ranges - the tier-1 guids above are PINNED by the
- * shipped ShipConfigTemplates and must not move. */
-const TIER_WEAPONS = {
-  2: {
-    mult: 2.2, range: 1.15, priceMult: 4, durMult: 3, maxCannon: 6, maxLauncher: 3,
-    cannons: [
-      [6001, 71002001, 'hullpiercer_cannon', 174],               // MEC-A9 'Hawk'
-      [6002, 71002002, 'standard_issue_autocannon_crit', 190],   // MEC-A6P 'Fang-P'
-      [6003, 71002003, 'cyclone_autocannon_crit', 222],          // MEC-A8P 'Tornado-P'
-    ],
-    launchers: [
-      [6004, 71002004, 'torpedo_missile_launcher', 189, 'torpedo_launcher'],   // HD-96 'Nova'
-      [6005, 71002005, 'light_missile_launcher_crit', 209],      // HD-70P 'Lightning-P'
-      [6006, 71002006, 'skyseeker_missile_launcher_crit', 230],  // HD-82P 'Longbow-P'
-    ],
-  },
-  3: {
-    mult: 4.5, range: 1.35, priceMult: 10, durMult: 7, maxCannon: 8, maxLauncher: 4,
-    cannons: [
-      [6011, 71002011, 'standard_escort_autocannon', 204],       // MEC-E12(S) 'Claw'
-      [6012, 71002012, 'medium_cannon_defensive', 242],          // MEC-E13(S) 'Hurricane'
-      [6013, 71002013, 'longrange_escort_cannon', 244, 'longrange_escort_autocannon'], // MEC-E17(S) 'Falcon'
-    ],
-    launchers: [
-      [6014, 71002014, 'medium_missile_launcher_2', 23],         // HD-M63(S) 'Scorpio'
-      [6015, 71002015, 'medium_versatile_missile_launcher', 29], // HD-M50(S) 'Thunderbolt'
-      [6016, 71002016, 'mangonel_missile_launcher', 39],         // HD-M70X 'Mangonel-X'
-    ],
-  },
-  4: {
-    mult: 9, range: 1.8, priceMult: 25, durMult: 18, maxCannon: 12, maxLauncher: 6,
-    cannons: [
-      [6021, 71002021, 'heavy_cannon', 16],                      // MEC-L31(M) 'Talon'
-      [6022, 71002022, 'tempest_autocannon_x', 17],              // MEC-L36X 'Tempest-X'
-      [6023, 71002023, 'heavy_cannon_crit', 43],                 // MEC-L31P 'Talon-P'
-    ],
-    launchers: [
-      [6024, 71002024, 'standard_large_launcher', 227],          // HD-H40(M) 'Stormstrike'
-      [6025, 71002025, 'large_long_range_launcher', 231],        // HD-H48(M) 'Ballista'
-      [6026, 71002026, 'trebuchet_missile_launcher', 176],       // HD-H54X 'Trebuchet-X'
-    ],
-  },
-};
-
-/* Scale one tier-1 template into a higher tier. Damage/HP-like stats take the tier multiplier,
- * ranges take a gentler one (a capital that outranges the map is not fun), and everything that is
- * a RATE or a COST is left alone - cooldown and power cost are what keep the curve honest. */
-function scaleWeapon(base, t, sys, ab, key, frame, abFrame) {
-  const SCALED = ['DamageLow', 'DamageHigh', 'CriticalOffense', 'ArmorPiercing', 'Accuracy',
-                  'MaxHullPoints'];
-  const RANGED = ['MinRange', 'OptimalRange', 'MaxRange'];
-  const st = {};
-  for (const [k, v] of Object.entries(base.st)) {
-    if (SCALED.includes(k)) st[k] = Math.round(v * t.mult);
-    else if (RANGED.includes(k)) st[k] = Math.round(v * t.range);
-    else st[k] = v;
-  }
-  return {
-    sys, ab, key, frame, abFrame, tier: null,   // tier filled in by the caller
-    tyl: Math.round(base.tyl * t.priceMult / 100) * 100,
-    dur: Math.round(base.dur * t.durMult / 10) * 10,
-    st,
-  };
-}
-
-/* Build the full per-tier weapon lists. Tier 1 is the authored set above; 2-4 are derived. */
-const CANNONS_BY_TIER = { 1: CANNONS };
-const LAUNCHERS_BY_TIER = { 1: LAUNCHERS };
-for (const [tierStr, t] of Object.entries(TIER_WEAPONS)) {
-  const tier = Number(tierStr);
-  CANNONS_BY_TIER[tier] = t.cannons.map(([sys, ab, key, frame, abKey], i) =>
-    Object.assign(scaleWeapon(CANNONS[i], t, sys, ab, key, frame, CANNONS[i].abFrame), { tier, abKey }));
-  LAUNCHERS_BY_TIER[tier] = t.launchers.map(([sys, ab, key, frame, abKey], i) =>
-    Object.assign(scaleWeapon(LAUNCHERS[i], t, sys, ab, key, frame, LAUNCHERS[i].abFrame), { tier, abKey }));
-}
 /* ============================================ CAPITAL-SHIP WEAPONS (the Pegasus / Basestar set)
  *
  * A battlestar does not carry strike-craft weapons. It carries four families the strike hulls have
@@ -1798,9 +1923,9 @@ for (const [tierStr, t] of Object.entries(TIER_WEAPONS)) {
  *     6 x Pegasus Cannon Battery      2 x Pegasus Point Defence Battery      4 x Pegasus Missile Battery
  * Twelve is exactly our hardpoint count, and the geometry splits 6/4/2 on its own - see HULL_SLOTS.
  *
- * STATS ARE TRANSCRIBED, NOT SCALED. Weapons.txt:1995-2075 gives a full block for all three, so
- * none of them goes through scaleWeapon(). Note how far they are from anything the tier ladder
- * would have produced: the cannon reloads in 4.25s for 325-410 damage at 4,100 m, and the point
+ * STATS ARE TRANSCRIBED, NOT DERIVED. Weapons.txt:1995-2075 gives a full block for all three, so
+ * none of them is scaled off a lower-tier template. Note how far they are from anything a tier
+ * ladder would have produced: the cannon reloads in 4.25s for 325-410 damage at 4,100 m, and the point
  * defence in 0.5s for 8-12 at 1,600 m. A tier-4-scaled fighter autocannon is neither.
  *
  * FLAK IS THE ONE WITHOUT A WIKI BLOCK. The client carries the loca for it (bgo.system_capship_flak
@@ -1876,20 +2001,21 @@ const CAPITAL_WEAPONS = [
           InertiaCompensation: 60 } },
 ];
 
-const MAX_PER_SHIP = { 1: { cannon: 4, launcher: 2 } };
-for (const [tierStr, t] of Object.entries(TIER_WEAPONS))
-  MAX_PER_SHIP[Number(tierStr)] = { cannon: t.maxCannon, launcher: t.maxLauncher };
-
 /* Name resolves as bgo.<Key>.NameCylon -> .Name_<Level> -> .Name, and the final lookup returns
  * its ARGUMENT on a miss - so a dead key prints "%$bgo.<key>.Name%" on screen. Description uses
  * a try-get, so a miss yields NULL, which NREs the two widgets that call .Replace() on it.
  * system_<stem> and ability_<stem> are a PAIR - both guids need a GUI card with the same stem.
  * Default frame 159 is the red "?" tile: an obvious "nobody chose a frame" marker. */
-const gui = (guid, key, frameIndex = 159, avatar = '') => card(guid, 'GUI', {
+/* `extra` overrides individual fields without disturbing any of the ~90 existing call sites. Two
+ * families need it: the paints, which live on their own atlas with a standalone icon texture rather
+ * than on items_atlas, and any ladder, whose GUI card must carry the card's own Level - GUICard.cs
+ * :38-82 looks up bgo.<key>.Name_<Level> before falling back to .Name, so a level-6 card claiming
+ * level 1 would read the level-1 name if the key ever grows per-level variants. */
+const gui = (guid, key, frameIndex = 159, avatar = '', extra) => card(guid, 'GUI', Object.assign({
   key, level: 1,
   guiAtlasTexturePath: 'GUI/Inventory/items_atlas', frameIndex,
   guiIcon: '', guiAvatarSlotTexturePath: avatar, guiTexturePath: '', args: [],
-});
+}, extra || {}));
 
 /* itemType defaults to 'Weapon' so every existing call site is unchanged. The client's shop tabs
  * filter on ItemType, and the dump files equipment under its own types - Hull(17) / Engine(18) /
@@ -1925,12 +2051,311 @@ const abilityCard = (guid, group, action, launch, st, affect, extra) => card(gui
   OnByDefault: false, effectTypeBlacklist: [], AffectedAbilityTypes: [],
 }, extra || {}));
 
+/* The dump's Price shape, which sysPrice above cannot express: several currencies at once, the real
+ * SortingNames/SortingWeight pair the store sorts rows by, a per-item Faction, and real Upgrade and
+ * Sell prices. sysPrice stays exactly as it is for the hand-authored items - re-pricing those is not
+ * part of importing somebody else's catalogue, and negtest case 2 anchors on its body.
+ *
+ * UpgradePrice is copied verbatim and is NEVER synthesised. 136 of the dump's level cards carry a
+ * Cubits entry at amount 0, and ContainerVisitor.upgradeSystemByPack computes
+ * min(1, packCount / (cubits / 1000)) - so an invented zero is a division by zero that hands out a
+ * guaranteed free level for one tuning kit. An absent key is not the same thing and is what the
+ * dump means. */
+const dumpPrice = (guid, tier, p, buy, up, sell) => card(guid, 'Price', {
+  Category: p.category, ItemType: p.itemType, Tier: tier, Faction: p.faction,
+  SortingNames: p.sortingNames, SortingWeight: p.sortingWeight,
+  BuyPrice: price(buy || {}), UpgradePrice: price(up || {}), SellPrice: price(sell || {}),
+  CanBeSold: p.canBeSold,
+});
+
+/* THE THREE STATION-WEAPON ENVELOPE FIXES - carried forward from the STATION_WEAPONS block that
+ * used to emit these five guids by hand. SYSTEMS_REAL now owns their card identity (all five are
+ * ordinary dump level-1 weapon/T3 systems, and emitting them twice is a duplicate-(guid,view) build
+ * failure), so the deliberate divergences survive as this map instead.
+ *
+ *   A 1957961850 Angle 90 -> 180 and C 1277437130 Angle 90 -> 360: per-mount firing cones are
+ *     enforced from each hardpoint's own transform (WeaponAction.java:72-83), so at 90 degrees the
+ *     batteries on a station's far flank never bear and most of its guns sit silent - the field
+ *     report that prompted the fix. C is worse than A: it is a point-defence bubble, and a bubble
+ *     with a cone was the one absurdity the dump shipped. The Pegasus wiki arcs (180 cannon /
+ *     360 point defence) are the precedent.
+ *   B 3756543070 MaxRange 2000 -> 4000, LifeTime 50 -> 55: station aggro is already 3500/4000
+ *     (NpcBehaviourTemplates.java:42-45), so a sniper sitting at 2.1 km could never be answered.
+ *     The dump sized the round for 4 km (LifeTime 50 x Speed 80) but ignored the acceleration ramp:
+ *     from rest at 15 m/s^2 the ramp costs 80^2/(2*15) ~= 213 m, so a 50 s round dies ~3,787 m out.
+ *     55 covers a full 4,000 m shot with margin. B is shared with the outpost, so this doubles the
+ *     outpost's missile envelope too - intended.
+ *   D 4001980506 and E 2936089294 are dump-verbatim and get nothing.
+ *
+ * APPLIED AS A FLOOR, not an assignment. gen-systems-real.js applies the same map the same way down
+ * the whole ladder, and there it matters: assigning LifeTime 55 at every level would SHORTEN B's
+ * level-10 round from the dump's 62.5 s, i.e. make the upgrade worse. Math.max lands exactly on the
+ * three values at level 1 and gets out of the way from level 3 up. It is applied here as well so
+ * that the fixes hold even if a future regeneration of the module drops them; G14 asserts all four
+ * numbers on the emitted ability cards. */
+const STATION_OVERRIDES = {
+  1957961850: { Angle: 180 },
+  3756543070: { MaxRange: 4000, LifeTime: 55 },
+  1277437130: { Angle: 360 },
+};
+
+/* Emit the 219 imported systems, all ten levels of each: ShipSystem + GUI + Price at every level's
+ * own guid, and for the 133 with an ability, ShipAbility + GUI at that level's ability guid. 2,190
+ * system rungs and 1,330 ability rungs, every guid the dump's own.
+ *
+ * TEN LEVELS, NOT FIFTEEN. The original laddered to 15 and the dump carries all fifteen rungs, but
+ * PlayerProtocol.java:797 rejects an upgrade request with `newLevel > 10` as a cheat, so levels
+ * 11-15 are unreachable on this server no matter what the cards say. Stopping at 10 makes MaxLevel
+ * agree with what the server will actually grant; shipping 15 would draw fifteen squares in the
+ * upgrade counter and refuse the last five, with nothing but a server log line to say why. G5 reads
+ * that cap out of PlayerProtocol rather than trusting this comment.
+ *
+ * The chain is what makes it a ladder: each rung's nextShipSystemCardGuid names the rung above,
+ * level 10 terminates at 0, and MaxLevel is 10 on every card in the chain. Catalogue.java:119 walks
+ * the whole chain at boot and RefundProcessor:55 walks it again on a sell, so a gap or a cycle is a
+ * boot hang or an NPE rather than a cosmetic fault - G5 checks all of it.
+ *
+ * BUYPRICE ON LEVEL 1 ONLY, and the dump's own UpgradePrice and SellPrice at every rung.
+ * ShopProtocol.setupShop:258 stocks Level 1 and avionics, so levels 2-9 are never listed and a
+ * price on them is money quoted for something the store does not sell (G4 rejects it outright).
+ * Level 10 IS listed, but only under starterParams().testingMode() - the %dev profile - and that
+ * is where dropping its BuyPrice earns its keep: 75 of the 219 level-10 cards carry a dump tylium
+ * price BELOW their own SellPrice, worst case 1,704,000 tylium a round trip, so stocking them at
+ * the dump's price is a tylium printer on any dev server. With no BuyPrice at all the row still
+ * appears but ContainerVisitor.checkItemToBuy:695-698 refuses the sale outright ("An empty BuyPrice
+ * means NOT FOR SALE"), so the duplicate level-10 rows a dev sees are inert. The upgrade path is
+ * unaffected: it charges UpgradePrice, not BuyPrice.
+ *
+ * UPGRADEPRICE IS THE DUMP'S, VERBATIM, INCLUDING ON LEVEL 10. Level 10's is dead weight - the
+ * original used it to buy level 11 and PlayerProtocol:787 refuses any upgrade from a card whose
+ * getNextCardGuid() is 0 - but zeroing it would be inventing data, and G5 wants a non-empty
+ * UpgradePrice on every upgradeable card anyway. Nothing here synthesises a currency entry: 136 of
+ * the 2,190 rungs price Cubits at exactly 0 and B1's upgradeSystemByPack guard is what makes that
+ * safe (ContainerVisitor:401-409). Adding a zero the dump does not have re-arms the exploit; the
+ * guard turns it into a silently dead button rather than a free level, which is worse to diagnose.
+ *
+ * Fields taken from the dump rather than from our house conventions, and what that changes:
+ *   Indestructible  false on most of the 219, where every hand-authored item here says true. The
+ *     old comment justified true with "this build ships no repair loop", which is not accurate:
+ *     DamageDurabilityModifier spreads incoming damage across every fitted system, ShipSlot
+ *     .isInoperable stops a system below 10% quality from working, and PlayerProtocol's RepairAll
+ *     arm repairs the hull and every slot for titanium or cubits. Nothing is ever destroyed. (The
+ *     per-item RepairSystem arm IS stubbed - PlayerProtocol.java:408 returns "Not implemented" -
+ *     so Repair All is the only working button.) The ladder is what makes wear comfortable:
+ *     Durability roughly doubles from rung 1 to rung 10, so an upgraded module survives twice the
+ *     punishment. Revert by forcing Indestructible: true on the line below.
+ *   MaxCountPerShip 0 on 195 of the 219, and 0 means UNLIMITED (ShopWindow.cs:1043 applies the cap
+ *     only when it is > 0). The deleted MAX_PER_SHIP table capped guns per tier to stop a cap from
+ *     stranding a bay; unlimited cannot strand one.
+ *   AbilityGroupId is the dump's own 32-bit hash on all 133. That used to be impossible - a group
+ *     with no key in the Regulation card is a KeyNotFoundException on the client's per-frame target
+ *     check - but applyRegulationTargeting() now derives the keyset from the abilities that
+ *     actually shipped, so the ids are safe and the ability's real targeting policy survives.
+ *
+ * SkillHashes stays []: the dump's are SkillCard.Hash values on a hashing scheme our Skill cards do
+ * not share, so porting them would dangle 222 references. */
+function realSystemCards() {
+  const out = [];
+  for (const r of SYSTEMS_REAL) {
+    /* H1. Both staging switches live in gen-systems-real.js and are stamped into the generated
+     * module as data. Check the module against its own stamp before emitting anything: if a
+     * regeneration flips one and this file does not notice, the symptom is silent - either a whole
+     * family of weapons that refuses to fire with nothing in the log, or a client that waits
+     * forever on a Ship card behind a restriction entry. */
+    if (!SYSTEMS_FLAGS.using && r.ability && r.ability.consumableOption !== 'NotUsing')
+      throw new Error(`systems-real.js: FLAGS.using is false but ${r.sys}'s ability is ${r.ability.consumableOption} - regenerate the module or fix the flag`);
+    if (SYSTEMS_FLAGS.using && r.ability && r.ability.consumableOption !== r.ability.dumpConsumableOption)
+      throw new Error(`systems-real.js: FLAGS.using is true but ${r.sys}'s ability is ${r.ability.consumableOption} where the dump says ${r.ability.dumpConsumableOption}`);
+    if (!SYSTEMS_FLAGS.restrictions && r.restrictions.length)
+      throw new Error(`systems-real.js: FLAGS.restrictions is false but ${r.sys} carries ${r.restrictions.length} restriction(s) - the client fetches a Ship card at each entry and hangs on one that never arrives`);
+    if (SYSTEMS_FLAGS.restrictions && String(r.restrictions) !== String(r.ourRestrictions))
+      throw new Error(`systems-real.js: FLAGS.restrictions is true but ${r.sys}'s emitted list differs from ourRestrictions`);
+    /* A short chain would terminate below MaxLevel, which G5 reads as a chain that dead-ends early;
+     * a long one would run past the server's own newLevel > 10 cheat check. Neither is recoverable
+     * downstream, so refuse the module rather than emit half a ladder. */
+    if (r.levels.length !== LADDER.levels)
+      throw new Error(`systems-real.js: ${r.sys} has ${r.levels.length} level(s) where LADDER.levels says ${LADDER.levels}`);
+
+    r.levels.forEach((lv, i) => {
+      const level = i + 1;
+      out.push(
+        shipSystem(lv.guid, r.slot, {
+          Tier: r.tier,
+          Level: level, MaxLevel: LADDER.maxLevel,
+          // 0 on the top rung. G5 checks this against Level === MaxLevel in both directions,
+          // because a chain that runs past its own MaxLevel and one that stops short are both
+          // walked to death by Catalogue.java:119.
+          nextShipSystemCardGuid: i + 1 < r.levels.length ? r.levels[i + 1].guid : 0,
+          UserUpgradeable: LADDER.userUpgradeable,
+          // THIS level's ability, not level 1's - the whole point of the ladder is that the
+          // damage, range and cooldown numbers move, and they live on the ability card.
+          shipAbilityCards: lv.ab ? [lv.ab.guid] : [],
+          ShipObjectKeyRestrictions: r.restrictions,
+          StaticBuffs: stats(lv.st || {}), MultiplyBuffs: stats(lv.mu || {}),
+          Durability: lv.dur, Class: r.cls, Views: r.views,
+          Unique: r.unique, ReplaceableOnly: r.replaceableOnly,
+          Trashable: r.trashable, Indestructible: r.indestructible,
+          MaxCountPerShip: r.maxPerShip,
+        }),
+        /* Every one of the 219 dump GUI cards uses items_atlas with an empty icon, avatar, texture
+         * and args, so the plain helper is right and no atlas parameter is needed. The only
+         * per-rung field is `level`: GUICard.cs:38-82 resolves bgo.<key>.NameCylon, then
+         * .Name_<Level>, then .Name, so a rung claiming level 1 would read the level-1 name if the
+         * key ever grows per-level variants. None of the 219 keys has one today, which is why the
+         * ladder costs zero new loca keys. */
+        gui(lv.guid, r.key, r.frame, '', { level }),
+        dumpPrice(lv.guid, r.tier, r.price, level === 1 ? lv.buy : {}, lv.up, lv.sell),
+      );
+      if (!lv.ab) return;
+
+      const ovr = STATION_OVERRIDES[r.sys];
+      const add = ovr
+        ? Object.assign({}, lv.ab.add, ...Object.entries(ovr).map(([k, v]) => ({ [k]: Math.max(Number(lv.ab.add[k]) || 0, v) })))
+        : lv.ab.add;
+      const a = r.ability;
+      out.push(
+        abilityCard(lv.ab.guid, a.abilityGroupId, a.actionType, a.launch, add, a.affect, {
+          /* The ability's Level tracks its system's. Checked against the dump: of its 2,223
+           * system-to-ability pairs, 2,214 agree and the nine that do not are all rungs of the
+           * role/t4 Spawn Mode family, which puts its ability at the SAME guid as the system and
+           * stamps Level 10 on every rung - a family we drop anyway (no Fortify arm in the
+           * factory). Nothing dispatches on this byte; the client reads it and only prints it. But
+           * a wrong one is a lie in every diagnostic that dumps the card. */
+          Level: level,
+          TargetTiers: a.targetTiers,
+          ConsumableType: a.consumableType, ConsumableTier: a.consumableTier,
+          /* Constant down the chain, and it has to be: the ammunition pairing key is
+           * (ConsumableType, ConsumableTier), so a rung that changed either would demand a
+           * different countable halfway up the ladder and go silently unable to fire. */
+          ConsumableOption: a.consumableOption,
+          /* One chain in the whole import carries a non-None OverwriteActionType: 2392349058, a
+           * computer/t2 weapon-speed debuff whose Buff is filed as Debuff on all fifteen of the
+           * dump's rungs and so on all ten of ours. Server-side the field is read once, by
+           * FireCannonAction, and only compared against FireCannon, so it cannot reroute anything
+           * for a Buff; on the client it picks the cast FX. Kept because it is what the card said. */
+          OverwriteActionType: a.overwriteActionType,
+          GUIBuffAtlas: a.guiBuffAtlas, GUIBuffIndex: a.guiBuffIndex,
+          OnByDefault: a.onByDefault, effectTypeBlacklist: a.effectTypeBlacklist,
+          // 45 of the 133 buff the TARGET rather than the caster. Dropping these would leave the
+          // debuff and support families visibly firing and doing nothing. They vary down 43 of the
+          // chains, so they are read per rung.
+          RemoteBuffAdd: stats(lv.ab.radd || {}), RemoteBuffMultiply: stats(lv.ab.rmul || {}),
+        }),
+        gui(lv.ab.guid, a.key, a.frame, '', { level }),
+      );
+    });
+  }
+  return out;
+}
+
+/* ============================================================================ SHIP PAINTS
+ *
+ * Four views at one guid, which is the dump's own shape on all 94 of its paints - there is no
+ * separate paint entity, a paint IS a ship_paint ShipSystem that happens to carry a ShipPaint card.
+ * ShipSystem.cs:109-112 fetches it at the system's own guid and IsLoaded.Depend()s on it, so the four
+ * always ship together.
+ *
+ * THE PER-HULL LOCK IS shipCardGuid, NOT ShipObjectKeyRestrictions. All 94 dump paints carry a
+ * restriction list and we emit none, because ShipSystemCard.cs:96-102 fetches a SHIP card at every
+ * restriction entry and blocks the parent card's IsLoaded on it - and our hull objKeys have no card
+ * at that guid. That is the historical "Card should not be send because it's null! 268081382 10",
+ * which with no client-side timeout is an infinite loading screen rather than an error. Nothing is
+ * lost: ItemList.cs:129 admits a paint when the active ship's guid equals paint.shipCard.CardGUID or
+ * paint.shipCard.NextCard.CardGUID, which is how one paint covers a family's base and Advanced hull
+ * off a single level-1 guid, and GuiAdvancedRequirementsPanel.cs:77 skips the restriction block for
+ * paints entirely.
+ *
+ * The GUI card is the one place the plain gui() helper is not enough: every dump paint sits on
+ * GUI/AbilityToolbar/abilities_atlas at frame 129 with a real standalone GUIIcon texture, not on
+ * items_atlas with an empty icon.
+ *
+ * Price is CanBeSold false with an empty SellPrice on all 97 - the dump's own setting, and the
+ * pairing matters: an empty SellPrice with CanBeSold true destroys the item for nothing. */
+function paintCards() {
+  const out = [];
+  for (const p of PAINTS_REAL) {
+    out.push(
+      shipSystem(p.sys, 'ship_paint', {
+        Tier: p.tier,
+        // Paints do not ladder - MaxLevel 1 on all 94 in the dump - so the shipSystem() defaults
+        // for Level/MaxLevel/next are already right and only the divergences are spelled out.
+        Durability: 1, Class: 'Standart',
+        Views: ['Cooldown', 'BuffCost', 'Durability'],
+        // Unique because a second copy of a skin is meaningless, and MaxCountPerShip 0 rather than
+        // 1 because 0 means unlimited (ShopWindow.cs:1043 applies the cap only when it is > 0) and
+        // Unique already carries the real constraint. Both are the dump's values.
+        Unique: true, MaxCountPerShip: 0,
+      }),
+      gui(p.sys, p.key, p.frameIndex, '', { guiAtlasTexturePath: p.guiAtlas, guiIcon: p.guiIcon }),
+      /* SortingWeight 9000 sinks paints below every functional module in the store list, which is
+       * where the dump puts them. Faction is OUR hull's, not the dump Price card's: the two
+       * disagree on 2426179296 (an Advanced Halberd skin filed under Cylon on a Colonial hull), and
+       * a paint whose Price faction and hull faction disagree is hidden from Colonials by
+       * ShopWindow.cs:1010-1013 and from Cylons by ItemList.cs:144 - visible to nobody. */
+      dumpPrice(p.sys, p.tier, {
+        category: 'System', itemType: 'ShipPaint', faction: p.faction,
+        sortingNames: p.sortingNames, sortingWeight: 9000, canBeSold: false,
+      }, p.price, {}, {}),
+      card(p.sys, 'ShipPaint', {
+        model: p.model, paintTexture: p.paintTexture, shipCardGuid: p.ourShipCardGuid,
+      }),
+    );
+  }
+  return out;
+}
+
+/* ================================================== AVIONICS AND THE C-31 ROLE MODULE
+ *
+ * The two hand-authored families from avionics.js. Both arrays carry identical field names, so one
+ * mapper emits either; every value and the reason for it lives in that file, not here.
+ *
+ * BUYPRICE ON LEVEL 1 ONLY. avionics.js gives the C-31 the same merit price at every rung, which
+ * is what the dump's own role ladder does - but ShopProtocol.setupShop (:258) stocks Level 1 and
+ * avionics and nothing else, so a price on levels 2-9 is money quoted for an item the store never
+ * lists, and G4 rejects it. Level 10 is stocked as well under starterParams().testingMode(), i.e.
+ * on a %dev profile; an empty BuyPrice there means it is stocked for free, which is the same
+ * dev-only hole the 219 imported ladders will have when W5 lands and is not worth inventing a
+ * price to paper over. The UpgradePrice is what the player actually pays, on every rung.
+ *
+ * The Price card is built with dumpPrice rather than sysPrice because sysPrice hardcodes a single
+ * tylium BuyPrice, an empty UpgradePrice and a tyl/4 sell, none of which the C-31's merit-and-cubit
+ * ladder can express. For the six avionics modules the two produce byte-identical cards. */
+function handAuthoredSystemCards() {
+  const out = [];
+  for (const r of [...AVIONICS_CAMS, ...C31_LEVELS]) {
+    out.push(
+      shipSystem(r.sys, r.slot, {
+        Tier: r.tier,
+        Level: r.level, MaxLevel: r.maxLevel, nextShipSystemCardGuid: r.next,
+        UserUpgradeable: r.userUpgradeable,
+        /* Gated on the SAME constant as the 219 imported systems - gen-systems-real.js stamps its
+         * RESTRICTIONS_ENABLED into the module as FLAGS.restrictions - so the whole catalogue's
+         * restrictions turn on and off together and there is one thing to revert, not two. The
+         * lists themselves live in avionics.js: two object keys each, which is four hull cards,
+         * because a hull and its Advanced twin share one key. */
+        ShipObjectKeyRestrictions: SYSTEMS_FLAGS.restrictions ? r.ourRestrictions : [],
+        StaticBuffs: stats(r.st), MultiplyBuffs: stats(r.mul),
+        Durability: r.dur, Class: r.class, Views: r.views,
+        Unique: r.unique, ReplaceableOnly: r.replaceableOnly,
+        Trashable: r.trashable, Indestructible: r.indestructible,
+        MaxCountPerShip: r.max,
+      }),
+      gui(r.sys, r.key, r.frame, '', { level: r.level }),
+      dumpPrice(r.sys, r.tier, {
+        category: 'System', itemType: r.itemType, faction: 'Neutral',
+        sortingNames: [r.sort], sortingWeight: 10, canBeSold: true,
+      }, r.level === 1 ? r.buy : {}, r.upgrade, r.sell),
+    );
+  }
+  return out;
+}
+
 function weaponCards() {
   const out = [];
 
-  /* Capital weapons first. These are authored per-weapon rather than derived, so they sit outside
-   * the tier loop: nothing about a 4.25-second 325-410 damage battery comes from scaling a fighter
-   * autocannon. All four are Tier 4 - ShopWindow.CheckSystemForSlot requires
+  /* Capital weapons first. These are authored per-weapon rather than imported: nothing about a
+   * 4.25-second 325-410 damage battery comes from anywhere in the dump, and the wiki gives the
+   * Pegasus's own stat block. All four are Tier 4 - ShopWindow.CheckSystemForSlot requires
    * system.Card.Tier == ActiveShip.Card.Tier exactly, so a tier-3 capital gun would be unfittable
    * on a tier-4 hull no matter what its slot type said. */
   CAPITAL_WEAPONS.forEach(w => out.push(
@@ -1955,55 +2380,34 @@ function weaponCards() {
     gui(w.ab, 'ability_' + w.key, w.abFrame),
   ));
 
-  /* STATION WEAPONS - the outpost and sentry-platform batteries.
+  /* SENTRY-PLATFORM WEAPONS - the tiered light/heavy batteries.
    *
-   * EVERY NUMBER ON A-E BELOW IS TRANSCRIBED VERBATIM from the level-1 card in
-   * research/dumps/cards_20260729_223813.json: stats, GUI key, GUI frame, buy price, durability and
-   * item class - EXCEPT three deliberate envelope fixes on the fitted A/B/C set, called out inline
-   * and in the divergences note below. The guids are the LIVE guids, which are free here - all ten
-   * were checked against JsonCards/*.json and this file, zero hits. The six TIERED entries that
-   * follow them (6041+) are NOT verbatim - see their own block comment.
+   * This block used to open with five entries transcribed verbatim from the dump (guids
+   * 1957961850, 3756543070, 1277437130, 4001980506, 2936089294 with their dump ability guids).
+   * Those are dump level-1 weapon/T3 systems, so importing the catalogue meant emitting them twice
+   * - a duplicate (guid,view) build failure. They now arrive from SYSTEMS_REAL like everything else
+   * imported, and the three deliberate envelope fixes on them live in STATION_OVERRIDES above.
+   * Nothing was lost: the outpost and medium-platform configs still name the same guids, and they
+   * carry the same stats, the same GUI keys and the same 20,000 tylium price they always did.
+   * They are also, correctly, five of the nineteen tier-3 player line weapons in the original.
    *
-   * WHY NOT CAPITAL_WEAPONS, which already exist above. Three reasons, all attested:
-   *  (1) SLOT TYPE. ShipBindings.setSlots emits a turret ShipModuleBinding only for weapon-bearing
-   *      slot types. 6031 is 'gun' and 6032/6033 'defensive_weapon' - the CAPITAL types - and until
-   *      the guard was widened this session those emitted no binding and no turret model at all.
-   *      Every NPC and station weapon in the live dump is SlotType 'weapon', so these sidestep the
-   *      question entirely; Update 06.txt:50 ("the turrets on Colonial Outposts have been turned in
-   *      the wrong direction") proves outposts had visible, oriented turrets.
-   *  (2) RANGE. The dump's tier-4 capital long-range families carry MinRange 2300 / 2250, which
-   *      WeaponAction.java:78-82 enforces as a HARD FLOOR - a station armed with them literally
-   *      cannot shoot anything inside 2.25 km, i.e. anything actually attacking it.
-   *  (3) PROVENANCE. The CAPITAL_WEAPONS block carries the wiki's Pegasus stat line, which is
-   *      correct for the Pegasus and wrong for a station. These are the game's own station-class
-   *      weapons, three of which still carry surviving display names.
-   *
-   * AbilityGroupId stays 1/2/3. The dump's real ids (3162894 / 26082229 / 124095957) would fail the
-   * Regulation validator in this file and then KeyNotFoundException the client on its first target
-   * check, so they are deliberately not used.
-   *
-   * Affect: MultiWeaponTarget is the dump's own value and is INERT server-side - the enum constant
-   * in ShipAbilityAffect.java is its only occurrence in BSGOCore, and NpcStaticTimer.java:76 branches
-   * only on == Area - so these behave as Selected. Kept because it is what the card said.
-   * DELIBERATE DIVERGENCES FROM THE DUMP: MaxLevel 1 / UserUpgradeable false (we ship no level ladder
-   * and nextShipSystemCardGuid is 0, so a client upgrade button would dead-end); Indestructible true
-   * (durability is a hangar-repair concept an NPC has no path to); SkillHashes [] (the dump's
-   * 38471110 / 75107830 are player skill hooks and no matching Skill card exists here).
-   * THREE ENVELOPE FIXES on the fitted A/B/C set (2026-07-31, the tiered-platform pass) - damage,
-   * cooldowns and every other stat untouched, the fitted medium loadout is approved as-is:
-   *   A Angle 90 -> 180, C Angle 90 -> 360: per-mount cones are enforced from each hardpoint's own
-   *     transform (WeaponAction.java:72-83), so at 90 degrees the batteries on the far flank never
-   *     bear and most of a station's guns sit silent (the field-report symptom). The Pegasus wiki
-   *     arcs above (180 cannon / 360 PD) are the precedent.
-   *   B MaxRange 2000 -> 4000, LifeTime 50 -> 55: station aggro is already 3500/4000
-   *     (NpcBehaviourTemplates.java:42-45; emit-sector-templates.js AGGRO_AUTO/AGGRO_MAX), so a
-   *     sniper at 2.1 km could never be answered. The dump itself sized the round for 4 km
-   *     (LifeTime 50 x Speed 80 = 4,000 m) - but that ignores the acceleration ramp: spawning at
-   *     rest and accelerating at 15 m/s^2 costs 80^2/(2*15) ~= 213 m, so a 50 s round dies ~3,787 m
-   *     out, just short of a full 4,000 m shot (needs ~52.7 s). 55 covers it with margin. B is
-   *     shared with the outpost, so this also doubles the outpost's missile envelope - intended.
-   * Range ladder after the fixes: cannons 1,600 light < 2,000 medium < 4,000 heavy; missiles
-   * 3,500 / 4,000 / 4,000 - every platform can answer fire anywhere inside its own leash. */
+   * The six below stay hand-authored because the dump has no counterpart: the wiki's Light and
+   * Heavy Sentry loadouts (Outposts.txt:37/:39) map name-for-name onto dump FAMILIES, but the
+   * stats needed adjusting for an immobile station, so they take new guids from the free 6000+ /
+   * 71002000+ ranges rather than dump guids, which stay reserved for verbatim transcriptions.
+   * AbilityGroupId stays 1/2/3 here - these are our cards, not the original's, and the three
+   * hand-authored groups are seeded in the Regulation card unconditionally.
+   * GUI keys are the dump family's FULL keys, emitted with no system_/ability_ stem prefixing, and
+   * the ability key is the system key with '_system_' -> '_ability_' - one rule covers all six, and
+   * all 12 keys resolve .name in loca-keys.txt. System and ability share the atlas frame (dump
+   * convention).
+   * ShipObjectKeyRestrictions = SENTRY_HULLS on all six: for a ShipSystem the Price card merely
+   * existing puts it in the shop, and an empty BuyPrice means FREE, not hidden - a 4 km capital gun
+   * on a player tier-3 hull would be broken, and tier 3 is now a tier players actually reach. The
+   * gate is safe on both sides: the client fetches a Ship card per entry and every entry is an
+   * emitted platform Ship card whose ShipObjectKey equals its guid, and setupWeaponConfig never
+   * consults restrictions when fitting NPC ships (isObjectKeyRestrictionsBlocked's only caller is
+   * the player-equip path, ContainerVisitor.java:133) - so the platforms themselves still arm. */
   const STATION_VIEWS_GUN = ['DMGLow', 'DMGHigh', 'DrainHigh', 'DrainLow', 'ArmorPiercing',
     'MinRange', 'MaxRange', 'OptimalRange', 'Accuracy', 'CriticalOffense', 'Cooldown', 'BuffCost',
     'Angle', 'Durability'];
@@ -2011,92 +2415,15 @@ function weaponCards() {
     'TurnSpeed', 'Speed', 'CriticalOffense', 'Cooldown', 'BuffCost', 'Angle', 'Durability'];
   /* The four tiered-platform hulls (PLATFORMS light/heavy below) - the shop gate for the six
    * tiered weapons. Every entry is an emitted Ship card whose ShipObjectKey EQUALS its guid
-   * (platform Ship cards set ShipObjectKey = guid), which is the rule the NUKE block documents and
-   * the restriction validator enforces. */
+   * (platform Ship cards set ShipObjectKey = guid), which is the rule G16 enforces. */
   const SENTRY_HULLS = [1783473190, 1783473192, 1783473196, 1783473198];
-  const STATION_WEAPONS = [
-    // A - the outpost's "long range cannons" (Outposts.txt:104). 2,000 m matches Platforms.txt:1
-    // "for heavy platforms is around 2,000 metres"; the heavy set below (6051/6052) now reaches
-    // 4,000. Angle 90 -> 180 is the flank-battery cone fix - divergences note above.
-    { sys: 1957961850, ab: 2805480538, key: 'long_range_cruiser_cannon', frame: 100,
-      action: 'FireCannon', affect: 'MultiWeaponTarget', group: GROUP_CANNON,
-      sort: 'cannon', tyl: 20000, dur: 17500, views: STATION_VIEWS_GUN,
-      st: { Accuracy: 125, Angle: 180, ArmorPiercing: 35, Cooldown: 4.8, CriticalOffense: 100,
-            DamageLow: 35, DamageHigh: 70, MinRange: 0, OptimalRange: 800, MaxRange: 2000,
-            PowerPointCost: 25 } },
-
-    // B - the outpost's "long range missile launchers". All six rotation stats are present, so the
-    // `roll is NaN` sector-killer (MovementSimulation divides by RollMaxSpeed) cannot occur.
-    // MaxRange 2000 -> 4000 and LifeTime 50 -> 55: the dump sized the round for 4 km (50 s x
-    // 80 m/s) but the 15 m/s^2 acceleration ramp costs ~213 m, so 50 s falls just short of a
-    // 4,000 m shot - divergences note above.
-    { sys: 3756543070, ab: 1849929854, key: 'large_long_range_launcher', frame: 98,
-      action: 'FireMissle', affect: 'MultiWeaponTarget', group: GROUP_MISSILE,
-      sort: 'missile', tyl: 20000, dur: 17500, views: STATION_VIEWS_MSL,
-      st: { Angle: 90, ArmorPiercing: 35, Cooldown: 18, CriticalOffense: 100,
-            DamageLow: 55, DamageHigh: 150, MinRange: 200, MaxRange: 4000, PowerPointCost: 100,
-            Speed: 80, Acceleration: 15, LifeTime: 55, MaxHullPoints: 15, Avoidance: 650,
-            InertiaCompensation: 100,
-            YawAcceleration: 30, YawMaxSpeed: 30, PitchAcceleration: 30, PitchMaxSpeed: 30,
-            RollAcceleration: 30, RollMaxSpeed: 30 } },
-
-    // C - the outpost's "point defence systems". Affect: Area, exactly as every defensive family in
-    // the dump. NOTE the reach really is 540 m - this is a last-ditch bubble, not a turret.
-    // Angle 90 -> 360: a bubble with a cone was the one absurdity the dump shipped - note above.
-    { sys: 1277437130, ab: 3400376042, key: 'perimiter_cannon', frame: 26,
-      action: 'PointDefence', affect: 'Area', group: GROUP_DEFENSIVE,
-      sort: 'pd', tyl: 20000, dur: 17500, views: STATION_VIEWS_GUN,
-      st: { Accuracy: 500, Angle: 360, ArmorPiercing: 5, Cooldown: 0.5, CriticalOffense: 100,
-            DamageLow: 1, DamageHigh: 5, MinRange: 0, OptimalRange: 400, MaxRange: 540,
-            PowerPointCost: 3.5 } },
-
-    // D - authored as the Medium Sentry Platform's "8 x 127 mm autocannon turrets" (Outposts.txt:38)
-    // but fitted by NO ShipConfigTemplate - 202/203 arm the medium platform with A/B above. Kept
-    // dump-verbatim as deliberate dead stock for a future medium re-fit.
-    { sys: 4001980506, ab: 2260225690, key: 'heavy_cannon', frame: 92,
-      action: 'FireCannon', affect: 'MultiWeaponTarget', group: GROUP_CANNON,
-      sort: 'cannon', tyl: 20000, dur: 17500, views: STATION_VIEWS_GUN,
-      st: { Accuracy: 125, Angle: 90, ArmorPiercing: 35, Cooldown: 4, CriticalOffense: 100,
-            DamageLow: 35, DamageHigh: 70, MinRange: 0, OptimalRange: 675, MaxRange: 1700,
-            PowerPointCost: 25 } },
-
-    // E - authored as the Medium Sentry Platform's "5 x Medium Missile Launchers" (Outposts.txt:38).
-    // Dead stock like D: fitted by no template, kept dump-verbatim.
-    { sys: 2936089294, ab: 1754528990, key: 'standard_large_launcher', frame: 99,
-      action: 'FireMissle', affect: 'MultiWeaponTarget', group: GROUP_MISSILE,
-      sort: 'missile', tyl: 20000, dur: 17500, views: STATION_VIEWS_MSL,
-      st: { Angle: 90, ArmorPiercing: 35, Cooldown: 15, CriticalOffense: 100,
-            DamageLow: 55, DamageHigh: 150, MinRange: 200, MaxRange: 1800, PowerPointCost: 100,
-            Speed: 80, Acceleration: 15, LifeTime: 33.75, MaxHullPoints: 15, Avoidance: 650,
-            InertiaCompensation: 100,
-            YawAcceleration: 30, YawMaxSpeed: 30, PitchAcceleration: 30, PitchMaxSpeed: 30,
-            RollAcceleration: 30, RollMaxSpeed: 30 } },
-
-    /* ---- TIERED SENTRY WEAPONS (2026-07-31). The wiki's Light/Heavy Sentry loadouts
-     * (Outposts.txt:37/:39) map name-for-name onto dump families; stats are transcribed from the
-     * level-1 family cards with the adjustments documented per entry - so these get NEW guids from
-     * the free 6000+/71002000+ ranges (6041/6042 light, 6051-6054 heavy; all verified zero hits
-     * across cards.js and JsonCards) rather than the dump guids, which stay reserved for verbatim
-     * transcriptions. AbilityGroupId stays 1/2/3, as everywhere in this file.
-     * GUI keys are the dump's FULL keys (no system_/ability_ stem prefixing): fullKey: true routes
-     * the emit below through the NUKE-precedent unprefixed form, and the ability key is the system
-     * key with '_system_' -> '_ability_' - one rule covers all six, all 12 keys resolve .name in
-     * loca-keys.txt. System and ability share the atlas frame (dump convention).
-     * ShipObjectKeyRestrictions = SENTRY_HULLS on all six: for a ShipSystem the Price card merely
-     * existing puts it in the shop, and an empty BuyPrice means FREE, not hidden - a 4 km capital
-     * gun on a player tier-3 hull would be broken. The gate is safe on both sides: the client
-     * fetches a Ship card per entry and every entry is an emitted platform Ship card whose
-     * ShipObjectKey equals its guid, and setupWeaponConfig never consults restrictions when
-     * fitting NPC ships (isObjectKeyRestrictionsBlocked's only caller is the player-equip path,
-     * ContainerVisitor.java:133) - so the platforms themselves still arm. A/B/C above stay
-     * ungated: weaker than player T3 guns, pre-existing exposure. */
-
+  const PLATFORM_WEAPONS = [
     // LIGHT - the Light Sentry's "8 x 20 mm autocannon turrets" (Outposts.txt:37), from dump family
     // item_slot_strike_stealth_weapon_system_20mm_autocannon (gun/T1: 9-18 @ 0.4 s, 0/400/650).
     // Damage x2.2 at station cadence (0.4 -> 3.5 s); Accuracy 400 KEPT - the anti-strike identity;
     // Angle 360 (turret); MaxRange 1600 is Platforms.txt:1's attested light-platform gun range.
     { sys: 6041, ab: 71002041, key: 'item_slot_strike_stealth_weapon_system_20mm_autocannon',
-      fullKey: true, restrict: SENTRY_HULLS, frame: 173,
+      restrict: SENTRY_HULLS, frame: 173,
       action: 'FireCannon', affect: 'MultiWeaponTarget', group: GROUP_CANNON,
       sort: 'cannon', tyl: 20000, dur: 17500, views: STATION_VIEWS_GUN,
       st: { Accuracy: 400, Angle: 360, ArmorPiercing: 10, Cooldown: 3.5, CriticalOffense: 100,
@@ -2107,10 +2434,10 @@ function weaponCards() {
     // family item_slot_strike_stealth_weapon_system_interceptor_missile (launcher/T1: 300 @ 30 s,
     // 300-1000). Damage x2; MaxRange 3500 attested (Platforms.txt:1); MinRange 200 (station floor,
     // not the dump's 300). LifeTime 30, NOT the naive 3500/150 ~= 23.3 s: the 15 m/s^2 ramp to
-    // 150 m/s costs 150^2/(2*15) = 750 m, so a full 3,500 m shot needs ~28.3 s - same physics as
-    // the B fix above. 30 covers it with margin.
+    // 150 m/s costs 150^2/(2*15) = 750 m, so a full 3,500 m shot needs ~28.3 s - the same physics
+    // as the B override above. 30 covers it with margin.
     { sys: 6042, ab: 71002042, key: 'item_slot_strike_stealth_weapon_system_interceptor_missile',
-      fullKey: true, restrict: SENTRY_HULLS, frame: 177,
+      restrict: SENTRY_HULLS, frame: 177,
       action: 'FireMissle', affect: 'MultiWeaponTarget', group: GROUP_MISSILE,
       sort: 'missile', tyl: 20000, dur: 17500, views: STATION_VIEWS_MSL,
       st: { Angle: 180, ArmorPiercing: 15, Cooldown: 45, CriticalOffense: 100,
@@ -2123,12 +2450,12 @@ function weaponCards() {
     // HEAVY - the Heavy Sentry's "8 x 40.6 cm cannon turrets" (Outposts.txt:39), from dump family
     // item_slot_capital_system_gun_long_range_cc (gun/T4: 75-135 @ 8 s, MinRange 2300/2750/4000).
     // Damage x1.5 (~ the family's own L12 values); MinRange 2300 -> 0 NEUTRALIZED: the hard floor
-    // (WeaponAction.java:78-82) would leave a campable dead zone on an immobile station - the
-    // exact trap reason (2) above documents, and 6031/6033 in CAPITAL_WEAPONS are the in-file
-    // precedent. Capital feel survives via Accuracy 125 + OptimalRange 2750 (a close, fast strike
-    // craft is still mostly missed); the close-in deterrent is the flak/PD pair's design role.
+    // (WeaponAction.java:78-82) would leave a campable dead zone on an immobile station, and
+    // 6031/6033 in CAPITAL_WEAPONS are the in-file precedent. Capital feel survives via
+    // Accuracy 125 + OptimalRange 2750 (a close, fast strike craft is still mostly missed); the
+    // close-in deterrent is the flak/PD pair's design role.
     { sys: 6051, ab: 71002051, key: 'item_slot_capital_system_gun_long_range_cc',
-      fullKey: true, restrict: SENTRY_HULLS, frame: 43,
+      restrict: SENTRY_HULLS, frame: 43,
       action: 'FireCannon', affect: 'MultiWeaponTarget', group: GROUP_CANNON,
       sort: 'cannon', tyl: 20000, dur: 17500, views: STATION_VIEWS_GUN,
       st: { Accuracy: 125, Angle: 180, ArmorPiercing: 35, Cooldown: 8.0, CriticalOffense: 100,
@@ -2140,7 +2467,7 @@ function weaponCards() {
     // Damage x1.5; MinRange 2250 -> 200 (same neutralization, missile floor); LifeTime 50 covers
     // 4,000 m at Speed 110 including the ~403 m acceleration ramp (needs ~40 s).
     { sys: 6052, ab: 71002052, key: 'item_slot_capital_system_launcher_long_range',
-      fullKey: true, restrict: SENTRY_HULLS, frame: 209,
+      restrict: SENTRY_HULLS, frame: 209,
       action: 'FireMissle', affect: 'MultiWeaponTarget', group: GROUP_MISSILE,
       sort: 'missile', tyl: 20000, dur: 17500, views: STATION_VIEWS_MSL,
       st: { Angle: 180, ArmorPiercing: 35, Cooldown: 30, CriticalOffense: 100,
@@ -2153,11 +2480,11 @@ function weaponCards() {
     // HEAVY - the Heavy Sentry's "2 x 63 mm Flak Cannons" (Outposts.txt:39), from dump family
     // item_slot_capital_system_dw_aoe_flak (dw/T4: 10-28 @ 1 s, MinRange 900) - the same family
     // 6033 above already transcribes at MinRange 0. Damage x2 (the defensive pair's buff).
-    // Flak + Affect Area: AbilityActionFactory implements Flak (:89-91 -> FlakAction), and
+    // Flak + Affect Area: AbilityActionFactory implements Flak (-> FlakAction), and
     // NpcStaticTimer's Area branch (NpcStaticTimer.java:96-107) feeds it every enemy in the
     // station's list rather than one target - the kill-box that punishes divers.
     { sys: 6053, ab: 71002053, key: 'item_slot_capital_system_dw_aoe_flak',
-      fullKey: true, restrict: SENTRY_HULLS, frame: 89,
+      restrict: SENTRY_HULLS, frame: 89,
       action: 'Flak', affect: 'Area', group: GROUP_DEFENSIVE,
       sort: 'pd', tyl: 20000, dur: 17500, views: STATION_VIEWS_GUN,
       st: { Accuracy: 300, Angle: 360, ArmorPiercing: 15, Cooldown: 1.0, CriticalOffense: 100,
@@ -2166,230 +2493,35 @@ function weaponCards() {
 
     // HEAVY - the Heavy Sentry's "2 x 15 mm Point Defence turrets" (Outposts.txt:39), from dump
     // family item_slot_capital_system_dw_point_defence (dw/T4: 3-7 @ 0.5 s). Damage x2; same Area
-    // path as C and the flak above.
+    // path as the flak above.
     { sys: 6054, ab: 71002054, key: 'item_slot_capital_system_dw_point_defence',
-      fullKey: true, restrict: SENTRY_HULLS, frame: 26,
+      restrict: SENTRY_HULLS, frame: 26,
       action: 'PointDefence', affect: 'Area', group: GROUP_DEFENSIVE,
       sort: 'pd', tyl: 20000, dur: 17500, views: STATION_VIEWS_GUN,
       st: { Accuracy: 500, Angle: 360, ArmorPiercing: 5, Cooldown: 0.5, CriticalOffense: 100,
             DamageLow: 6, DamageHigh: 14, MinRange: 0, OptimalRange: 500, MaxRange: 1200,
             PowerPointCost: 3.5 } },
   ];
-  /* Tier 3 is what the dump has them at, so per this file's own tier-lock rule they stay invisible
-   * in the shop while every reachable hull is Tier 1 - which is what we want for NPC hardware.
-   * The six tiered entries additionally carry ShipObjectKeyRestrictions (SENTRY_HULLS), so even a
-   * future tier-3 player hull cannot equip them - see their block comment. */
-  STATION_WEAPONS.forEach(w => out.push(
+  /* Tier 3 and SlotType 'weapon', matching the five imported station guns these were modelled on.
+   * ShipBindings.setSlots only emits a turret ShipModuleBinding for weapon-bearing slot types, and
+   * every NPC and station weapon in the dump is SlotType 'weapon', so this sidesteps the question
+   * the capital 'gun'/'defensive_weapon' types raise. Indestructible true here, unlike the imported
+   * systems: these are fitted only on stations, which have no repair path of any kind. */
+  PLATFORM_WEAPONS.forEach(w => out.push(
     shipSystem(w.sys, 'weapon', {
       Tier: 3, shipAbilityCards: [w.ab],
       Durability: w.dur, Class: 'Elite',
       Indestructible: true, Trashable: false, MaxCountPerShip: 0,
-      ShipObjectKeyRestrictions: w.restrict || [],
+      ShipObjectKeyRestrictions: w.restrict,
       Views: w.views,
     }),
-    /* fullKey entries carry the dump's FULL GUI key; the ability key is the system key with
-     * '_system_' -> '_ability_' (one rule, all six) - the NUKE emit is the exact precedent. The
-     * legacy five keep the system_/ability_ stem prefixing. */
-    gui(w.sys, w.fullKey ? w.key : 'system_' + w.key, w.frame),
+    gui(w.sys, w.key, w.frame),
     sysPrice(w.sys, 3, w.tyl, w.sort),
     abilityCard(w.ab, w.group, w.action, 'Auto', w.st, w.affect),
-    // The dump gives the system card and its ability card the SAME atlas frame on all five.
-    gui(w.ab, w.fullKey ? w.key.replace('_system_', '_ability_') : 'ability_' + w.key, w.frame),
+    // The system card and its ability card share an atlas frame, which is the dump's convention.
+    gui(w.ab, w.key.replace('_system_', '_ability_'), w.frame),
   ));
 
-  for (const tier of [1, 2, 3, 4]) {
-    const cap = MAX_PER_SHIP[tier];
-    CANNONS_BY_TIER[tier].forEach(w => out.push(
-      shipSystem(w.sys, 'weapon', {
-        Tier: w.tier, shipAbilityCards: [w.ab],
-        // Durability is the repair pool: one titanium per point. A flat 1000 made a fully worn
-        // starter cannon cost 2000 T to repair - 80% of its own purchase price and 2.5x a full
-        // hull repair. Scale it to the weapon instead: ~8% of price in titanium.
-        // MaxCountPerShip has to grow with tier too: a carrier has ten gun slots, and a cap of
-        // four would leave six of them permanently empty with no way to tell why.
-        Durability: w.dur, Indestructible: true, Trashable: true, MaxCountPerShip: cap.cannon,
-        Views: ['Target', 'DMGHigh', 'MaxRange', 'OptimalRange', 'Accuracy', 'CriticalOffense',
-                'ArmorPiercing', 'Angle', 'Cooldown', 'BuffCost'],
-      }),
-      gui(w.sys, 'system_' + w.key, w.frame),
-      sysPrice(w.sys, w.tier, w.tyl, 'cannon'),
-      abilityCard(w.ab, GROUP_CANNON, 'FireCannon', 'Auto', w.st),
-      gui(w.ab, 'ability_' + (w.abKey || w.key), w.abFrame),
-    ));
-    LAUNCHERS_BY_TIER[tier].forEach(w => out.push(
-      /* SlotType is 'weapon' below tier 4, exactly as the dump types these guids: T1-T3 hulls
-       * have no launcher slots at all, so their missiles compete with cannons for the weapon
-       * hardpoints. Only tier 4 keeps 'launcher' - the slot type the four T4 hulls carry. */
-      shipSystem(w.sys, tier < 4 ? 'weapon' : 'launcher', {
-        Tier: w.tier, shipAbilityCards: [w.ab],
-        Durability: w.dur, Indestructible: true, Trashable: true, MaxCountPerShip: cap.launcher,
-        Views: ['Target', 'DMGHigh', 'MaxRange', 'Angle', 'Cooldown', 'BuffCost',
-                'Speed', 'HP', 'LifeTime', 'ArmorPiercing', 'CriticalOffense'],
-      }),
-      gui(w.sys, 'system_' + w.key, w.frame),
-      sysPrice(w.sys, w.tier, w.tyl, 'missile'),
-      // "FireMissle" is the real spelling - the typo is in both the server enum and the client.
-      abilityCard(w.ab, GROUP_MISSILE, 'FireMissle', 'Manual', w.st),
-      gui(w.ab, 'ability_' + (w.abKey || w.key), w.abFrame),
-    ));
-  }
-  return out;
-}
-
-/* ================================================================ EQUIPMENT (hull / engine / computer / special_weapon)
- *
- * The passive fit-out the roster flew without: every hull, engine and computer bay on every ship
- * was empty fleet-wide (338 slots), because no ShipSystem of those types existed. One family per
- * slot type per tier fills all of them - the tier lock (system tier == active ship tier, exactly)
- * means a single family covers every hull of its tier, and every family here is faction-Neutral,
- * exactly as the dump prices them.
- *
- * EVERY NUMBER IS TRANSCRIBED VERBATIM from the level-1 card of its family in
- * research/dumps/cards_20260729_223813.json: guids (all 13 checked against JsonCards - zero
- * collisions, same convention as STATION_WEAPONS), stats, durability, GUI keys and frames, buy
- * prices, item class. GUI frames repeat within a slot type by design (armor 15/15/15/205, jets
- * 18/18/18/3, battery 49x4) - the tier filter means only one tier is ever on screen at a time.
- *
- * ArmorValue and TurnAcceleration are transcribed but INERT server-side: they are real ObjectStat
- * constants (so the validator passes them), but no emitted hull Stats block seeds either key and
- * ObjectStats.applyStatsAddTo only updates keys already present - and ArmorAlgorithmV0 returns a
- * constant 1 anyway. The client tooltip still shows them, which is why they stay.
- *
- * DELIBERATE DIVERGENCES FROM THE DUMP, same set as STATION_WEAPONS: MaxLevel 1 /
- * UserUpgradeable false (we ship no level ladder), Indestructible true, SkillHashes [] (the
- * dump's hooks reference Skill cards we do not emit). MaxCountPerShip: the dump says 0
- * (unlimited, client-enforced only - the server never reads the field); we cap at the slot count
- * of the largest bay of that type per tier (5, except the T4 hull/engine bays at 4) so the cap
- * can never strand a bay.
- *
- * SHIP RESTRICTIONS ARE DROPPED ON ALL TWELVE: the dump restricts only the three T1 families, to
- * the full T1 roster of both factions BY DUMP SHIP GUIDS (dump viper = 107780547, ours = 50) -
- * porting the list verbatim would reference nonexistent ships, and the tier lock already encodes
- * the exact same gate. The nuke below is the one item that keeps a restriction list, re-pointed
- * at OUR hull guids.
- *
- * DELIBERATELY LEFT EMPTY - both are what the dump itself shows:
- *   role (4 slots, T2+T4): the dump's only role family (item_slot_capital_system_role_spawn_mode,
- *     395660941) needs ActionType Fortify, and AbilityActionFactory has NO Fortify case - casting
- *     it server-side throws IllegalArgumentException. Defer until a FortifyAction exists.
- *   avionics (18 slots, T1): the dump contains ZERO avionics ShipSystem cards - the original
- *     game's own T1 ships flew with the slot present and nothing to put in it.
- */
-const EQUIP_META = {
-  hull:     { itemType: 'Hull',     sort: 'armor' },
-  engine:   { itemType: 'Engine',   sort: 'thruster' },
-  computer: { itemType: 'Computer', sort: 'power' },
-};
-const EQUIPMENT = [
-  // hull - the armour-plating ladder. HP for a speed/agility penalty.
-  { sys: 3710683484, slot: 'hull', tier: 1, key: 'system_light_armor_hp', frame: 15, tyl: 8000, dur: 2500, max: 5,
-    st: { Acceleration: -0.3, ArmorValue: 2.25, MaxHullPoints: 22.5, TurnAcceleration: -0.75 } },
-  { sys: 3036094828, slot: 'hull', tier: 2, key: 'system_medium_armor_hp', frame: 15, tyl: 12000, dur: 7500, max: 5,
-    st: { Acceleration: -0.15, ArmorValue: 2.125, MaxHullPoints: 82.5, TurnAcceleration: -0.375 } },
-  { sys: 4123900252, slot: 'hull', tier: 3, key: 'system_large_armor_hp', frame: 15, tyl: 16000, dur: 17500, max: 5,
-    st: { Acceleration: -0.075, ArmorValue: 1.75, MaxHullPoints: 175, TurnAcceleration: -0.15 } },
-  { sys: 2812496040, slot: 'hull', tier: 4, key: 'item_slot_capital_system_hull_plating_hull', frame: 205, tyl: 350000, dur: 20000, max: 4,
-    st: { Acceleration: -0.4, PowerRecovery: -6, MaxHullPoints: 1000 } },
-
-  // engine - the jets ladder. Straight speed, cheapest of the three types per tier.
-  { sys: 3490637135, slot: 'engine', tier: 1, key: 'system_strike_craft_jets', frame: 18, tyl: 5000, dur: 2500, max: 5,
-    st: { BoostSpeed: 1.25, Speed: 1.25 } },
-  { sys: 2410760927, slot: 'engine', tier: 2, key: 'system_escort_jets', frame: 18, tyl: 7500, dur: 7500, max: 5,
-    st: { BoostSpeed: 1, Speed: 1 } },
-  { sys: 295091983, slot: 'engine', tier: 3, key: 'system_cruiser_jets', frame: 18, tyl: 10000, dur: 17500, max: 5,
-    st: { BoostSpeed: 0.75, Speed: 0.75 } },
-  { sys: 3138986623, slot: 'engine', tier: 4, key: 'item_slot_capital_system_engine_turbo_boosters', frame: 3, tyl: 400000, dur: 20000, max: 4,
-    st: { Acceleration: 0.2, BoostSpeed: 1.5 } },
-
-  // computer - the battery ladder. Flat power-pool extension.
-  { sys: 3027494597, slot: 'computer', tier: 1, key: 'system_battery', frame: 49, tyl: 3000, dur: 2500, max: 5,
-    st: { MaxPowerPoints: 5 } },
-  { sys: 4263239493, slot: 'computer', tier: 2, key: 'system_medium_battery', frame: 49, tyl: 4500, dur: 7500, max: 5,
-    st: { MaxPowerPoints: 10 } },
-  { sys: 1125637509, slot: 'computer', tier: 3, key: 'system_large_battery', frame: 49, tyl: 6000, dur: 17500, max: 5,
-    st: { MaxPowerPoints: 25 } },
-  { sys: 858754334, slot: 'computer', tier: 4, key: 'item_slot_capital_system_computer_high_density_capacitor', frame: 49, tyl: 350000, dur: 15000, max: 5,
-    st: { MaxPowerPoints: 200 } },
-];
-
-/* THE T2 NUKE - the one special_weapon family in the dump, and the item that closes the two
- * special_weapon slots (dominator 5008 / banshee 5108, one each). An anti-carrier siege missile:
- * Elite class, targets Tier4 ONLY (TargetTiers, dump verbatim - it cannot be fired at a fighter),
- * 1800-2100 damage, min range 1350. ItemBuffAdd is the dump's level-1 block verbatim; it already
- * carries Speed + all six rotation stats + LifeTime + MaxHullPoints, so the projectile validator
- * passes it untouched.
- *
- * THREE DELIBERATE ADJUSTMENTS, none optional:
- *   AbilityGroupId: the dump's hash (22860668) fails this file's Regulation validator and then
- *     KeyNotFoundException-crashes the client on its first target check - same story as every
- *     other dump group id. GROUP_MISSILE, like every missile family here.
- *   ConsumableOption NotUsing + ConsumableType 0 (dump: Using / 662): the dump nuke burns an ammo
- *     item per shot (ShipConsumable 92998406, ConsumableType 662) that we do not emit. NotUsing
- *     per the launcher convention above makes the ammo check a no-op; switch to Using only once
- *     that consumable is ported AND buyable.
- *   ShipObjectKeyRestrictions [] (dump: [268081382, 218289587]): in the dump a ship's card guid
- *     EQUALS its ShipObjectKey, so one list serves both the server gate (compares objKey,
- *     ShipSystemCard.isObjectKeyRestrictionsBlocked) and the client, which fetches a SHIP card at
- *     each entry (observed live: "Card should not be send because it's null! 268081382 10" when
- *     the list carried objKeys, and objKey-vs-card-guid is split in OUR data). Emitting the
- *     restriction empty is safe because the gate is structural anyway: dominator/banshee are the
- *     ONLY hulls with a special_weapon slot. Do not emit a non-empty list unless every entry is
- *     BOTH an emitted Ship card guid and that ship's objKey. */
-const NUKE = {
-  sys: 2858586174, ab: 1197214302,
-  key: 'item_slot_escort_system_assault_launcher_nuclear_missile_anti_carrier',
-  abKey: 'item_slot_escort_ability_assault_launcher_nuclear_missile_anti_carrier',
-  frame: 244, tyl: 215000, dur: 7500,
-  st: { Acceleration: 20, Angle: 90, ArmorPiercing: 60, Avoidance: 550, Cooldown: 16,
-        CriticalOffense: 200, DamageHigh: 2100, DamageLow: 1800, MaxHullPoints: 850,
-        LifeTime: 105, MaxRange: 1900, MinRange: 1350, PowerPointCost: 42, Speed: 90,
-        InertiaCompensation: 100,
-        PitchAcceleration: 30, PitchMaxSpeed: 30, YawAcceleration: 30, YawMaxSpeed: 30,
-        RollAcceleration: 30, RollMaxSpeed: 30 },
-};
-
-function equipmentCards() {
-  const out = [];
-  /* The twelve passive families are pure static-buff items: ShipSystem + GUI + Price at one guid,
-   * no ability card, no Module, no ShipConfigTemplate. Buffs apply on fit via
-   * ShipSubscribeInfo.applySlotSystemStats. */
-  /* The hand-authored twelve are superseded by equipment-real.js - the original's own 75
-   * hull/engine/computer modules, with real buffs, keys and prices. A hand entry whose guid the
-   * dump also carries is dropped so the two cannot emit the same card twice. */
-  const realGuids = new Set(EQUIPMENT_REAL.map(e => e.sys));
-  [...EQUIPMENT.filter(m => !realGuids.has(m.sys)), ...EQUIPMENT_REAL].forEach(m => {
-    const meta = EQUIP_META[m.slot];
-    out.push(
-      shipSystem(m.sys, m.slot, {
-        Tier: m.tier,
-        StaticBuffs: stats(m.st),
-        Durability: m.dur, Indestructible: true, Trashable: true, MaxCountPerShip: m.max,
-        Views: ['StaticBuff', 'MultiplyBuff', 'Durability'],
-      }),
-      // The dump's GUI key IS the family key here (no system_/ability_ stem split) - all twelve
-      // resolve in loca-keys.txt with .name and .description.
-      gui(m.sys, m.key, m.frame),
-      sysPrice(m.sys, m.tier, m.tyl, meta.sort, meta.itemType),
-    );
-  });
-
-  out.push(
-    shipSystem(NUKE.sys, 'special_weapon', {
-      Tier: 2, shipAbilityCards: [NUKE.ab],
-      ShipObjectKeyRestrictions: [],
-      Durability: NUKE.dur, Class: 'Elite',
-      Indestructible: true, Trashable: true, MaxCountPerShip: 0,
-      // The dump's own Views list - identical to STATION_VIEWS_MSL.
-      Views: ['DMGLow', 'DMGHigh', 'ArmorPiercing', 'MinRange', 'MaxRange', 'TurnSpeed', 'Speed',
-              'CriticalOffense', 'Cooldown', 'BuffCost', 'Angle', 'Durability'],
-    }),
-    gui(NUKE.sys, NUKE.key, NUKE.frame),
-    sysPrice(NUKE.sys, 2, NUKE.tyl, 'missile'),
-    abilityCard(NUKE.ab, GROUP_MISSILE, 'FireMissle', 'Manual', NUKE.st, 'Selected',
-                { TargetTiers: ['Tier4'] }),
-    // The dump gives system and ability GUI cards the same frame (244), like the station weapons.
-    gui(NUKE.ab, NUKE.abKey, NUKE.frame),
-  );
   return out;
 }
 
@@ -2430,28 +2562,91 @@ function cometCards() {
   ];
 }
 
-/* The missile PROJECTILE. The server hard-throws if Owner/World/Movement are missing at this
- * guid, so a launcher without these cards fails the moment it fires. */
+/* The missile PROJECTILES. SpaceObjectFactory.createMissile:481-492 fetches Owner, World and
+ * Movement at the guid and THROWS when any of the three is missing, and that throw escapes into
+ * Sector.run's per-tick catch - so one launcher firing at an unauthored projectile abandons the
+ * timers, the object remover and the zone management for everyone in the sector, every shot.
+ *
+ * FOUR guids, not one, and which of them a shot uses is decided in FireMissileAction.getMissileGUID
+ * :84-140 from the loaded ammunition, not from the weapon:
+ *   MissileCard        117216909  every shot with no ammunition loaded, and every shot whose
+ *                                 ammunition is not effectType DamageNuclear
+ *   MissileTorpedo      29963472  DamageNuclear ammunition carrying NO DamageHigh - the three
+ *                                 torpedo tokens and the escort anti-capital nuke
+ *   MissileMiniNuke    244685066  DamageNuclear with DamageHigh exactly 4.0 - the x5 nukes
+ *   MissileNuke        253392099  DamageNuclear with DamageHigh exactly 19.0 - the x20 nukes
+ * The last three were unreachable while every ability was ConsumableOption NotUsing, because
+ * getMissileGUID takes the useConsumable == false branch straight to MissileCard. They become
+ * reachable in this same package, which is why they are authored here.
+ *
+ * The dump has no cards at any of the four guids - projectiles are server-side objects and the
+ * dumping client never asked for them - so all four are ours, modelled on the one that already
+ * worked. */
 const MISSILE_OBJECT = 117216909;
 
-function missileObjectCards() {
+/* The enum is the server's own source of truth for which guid each branch picks. If somebody
+ * renumbers a constant, the cards stay where they are and every nuclear shot starts throwing
+ * inside the sector tick - so check it here, where the failure is a build error instead. */
+const MISSILE_GUID_NAMES = {
+  117216909: 'MissileCard', 29963472: 'MissileTorpedo',
+  244685066: 'MissileMiniNuke', 253392099: 'MissileNuke',
+};
+
+function checkMissileGuids(byName) {
+  const src = fs.readFileSync(path.join(CORE_SRC, 'enums/StaticCardGUID.java'), 'utf8');
+  Object.entries(byName).forEach(([name, guid]) => {
+    const m = src.match(new RegExp(`^\\s*${name}\\s*\\(\\s*(\\d+)L?\\s*\\)`, 'm'));
+    if (!m) throw new Error(`StaticCardGUID has no constant ${name} - FireMissileAction names it`);
+    if (Number(m[1]) !== guid) throw new Error(
+      `StaticCardGUID.${name} is ${m[1]} but the projectile cards are emitted at ${guid} - `
+      + `createMissile would throw inside the sector tick on every shot that routes here`);
+  });
+}
+
+function projectileCards(guid, key, prefabName, radius, frame, avatar, explosionView, missileType) {
   return [
     // The client overrides this prefab from faction+tier+type, and the server builds an explicit
     // collider rather than looking one up - so this only has to be a real, non-null ASCII string.
-    card(MISSILE_OBJECT, 'World', {
-      prefabName: 'colonialsmallmissile', lodCount: 1, radius: 3.0,
+    card(guid, 'World', {
+      prefabName, lodCount: 1, radius,
       spots: [], systemMapTexutres: '', frameIndex: 0, secondaryFrameIndex: 0,
       targetable: true, showBracketWhenInRange: false, forceShowOnMap: false,
     }),
-    // This object is targetable, so a dead key would print on the HUD bracket.
-    gui(MISSILE_OBJECT, 'missile_normal', 177, 'GUI/Slots/missile'),
-    card(MISSILE_OBJECT, 'Owner', { IsDockable: false, DockRange: 0.0, Level: 1 }),
+    // These objects are targetable, so a dead key would print on the HUD bracket. All four keys
+    // resolve .name in the client's locale bundle.
+    gui(guid, key, frame, avatar),
+    card(guid, 'Owner', { IsDockable: false, DockRange: 0.0, Level: 1 }),
     // maxRoll must not be 0 - it is a divisor in the movement sim and 0/0 puts NaN into position.
-    card(MISSILE_OBJECT, 'Movement', {
+    card(guid, 'Movement', {
       minYawSpeed: 1.0, maxPitch: 360.0, maxRoll: 80.0,
       pitchFading: 2.0, yawFading: 2.0, rollFading: 400.0,
     }),
-    card(MISSILE_OBJECT, 'Missile', { explosionView: 'Standard', missileType: 'Normal' }),
+    /* The Missile card is the client's alone: the server writes it and never reads it, and it is
+     * what picks the explosion effect and the in-flight model class. Both names are real constants
+     * of MissileExplosionView and MissileType - a name that is not makes Gson leave the field null
+     * and the writer NPEs on .value, dropping the socket of whoever is watching. */
+    card(guid, 'Missile', { explosionView, missileType }),
+  ];
+}
+
+function missileObjectCards() {
+  const emitted = [MISSILE_OBJECT, ...NUKE_PROJECTILES.map(p => p.guid)];
+  emitted.forEach(g => {
+    if (!MISSILE_GUID_NAMES[g]) throw new Error(
+      `projectile guid ${g} is not one of the four StaticCardGUID missile constants - `
+      + `FireMissileAction can never select it, so the cards would be dead weight`);
+  });
+  checkMissileGuids(Object.fromEntries(emitted.map(g => [MISSILE_GUID_NAMES[g], g])));
+  return [
+    ...projectileCards(MISSILE_OBJECT, 'missile_normal', 'colonialsmallmissile', 3.0,
+                       177, 'GUI/Slots/missile', 'Standard', 'Normal'),
+    /* The three nuclear projectiles. Their flight envelope is the plain missile's on purpose: the
+     * ability's own ItemBuffAdd is copied onto the spawned object (FireMissileAction:65-70), so
+     * Speed, MaxHullPoints and LifeTime all come from the launcher that fired, and what the
+     * projectile card contributes is the hull, the collider radius and the explosion. */
+    ...NUKE_PROJECTILES.flatMap(p => projectileCards(p.guid, p.key, p.prefabName, p.radius,
+                                                     p.frame, p.avatar, p.explosionView,
+                                                     p.missileType)),
   ];
 }
 
@@ -2469,271 +2664,223 @@ function moduleCards() {
   return out;
 }
 
-/* ================================================================ RESOURCES / CURRENCY
- * Every countable item the client sees needs THREE views at the same guid:
+/* ================================================================ COUNTABLES
+ * Resources, ammunition, repair and power cells, flares, mines, metal plates and the booster tab -
+ * everything that stacks in the Hold rather than bolting into a slot. Every one of them needs
+ * THREE views at the same guid:
  *   GUI(1)            - icon + loca key
  *   ShipConsumable(3) - what ItemCountable.Read fetches; its Read chains the GUI card
- *   Price(23)         - ShopItemCard, needed by the shop and hangar panels
- * Guids are from the server's ResourceType enum and are FIXED. Loca keys are real keys from the
- * client's locale bundle, so these display proper names ("Tylium", "Merits") rather than raw keys.
- * Icon paths are verified Resources paths from the client's mainData container.
- */
-// Loca keys verified present in the client's locale bundle, so these display real names.
-// Anything not listed falls back to a generated key: missing loca renders the raw key on
-// screen, which is cosmetic and obvious in QA - unlike a missing card, which hangs the client.
-/* guid: [locaKey, guiIcon, frameIndex]. EVERY ResourceType guid MUST appear here.
+ *   Price(23)         - ShopItemCard, needed by the shop and the hangar panels
  *
- * locaKey  - verified present with .Name AND .Description in the client's locale bundle. A dead
- *            key prints the raw "%$bgo.<key>.Name%" on screen, and makes Description NULL, which
- *            NREs the widgets that call .Replace() on it without a guard.
- * guiIcon  - loaded as a WHOLE standalone texture with NO atlas fallback by the money bar and
- *            every price row, and the image widget ADOPTS the texture's size. The old
- *            GUI/items/*_box paths are 560x380 shop banners - they inflated the currency bar into
- *            a row of posters. Any guid used as a KEY in a Price items map must keep an icon.
- * frameIndex - tile in GUI/Inventory/items_atlas: 400x946 at 40x35 = 10 cols x 27 rows = 270
- *            frames, 0 = top-left, 269 reserved. Out of range is not fatal (draws unknownItem).
- */
-const RESOURCE_META = {
-  // currencies / materials - frames matched pixel-for-pixel against the GUI/Common/* icons
-  264733124: ['resource_cubits',            'GUI/Common/cubits',     25],
-  207047790: ['resource_titanium',          'GUI/Common/titanium',    4],
-  215278030: ['resource_tylium',            'GUI/Common/thylium',     6],
-  130762195: ['resource_water',             'GUI/Common/water',       5],
-  130920111: ['resource_token',             'GUI/Common/token',     109],
-  254909109: ['resource_tuning_kit',        'GUI/Common/tuningkit', 112],
-  187088612: ['consumable_tech_analysis',   '',                      22],
-  63148366:  ['resource_plutonium',         '',                      12],
-  172582782: ['resource_uranium',           '',                      13],
-  28157328:  ['consumable_radio',           '',                     184],
-  130797813: ['resource_ftl_fragment',      '',                     214],
-  166681557: ['augment_teleport',           '',                     203],
-  92666191:  ['augment_divine_inspiration', '',                     254],
-  // event trade-in boxes - the four red/gold hexes colour-match these names
-  13: ['augment_event_precious_metals', '', 132],
-  11: ['augment_event_sacred_herbs',    '', 131],
-  12: ['augment_event_foodstuffs',      '', 130],
-  10: ['augment_event_pristine_ice',    '', 133],
-  // ammunition. BEST-EFFORT frames: the atlas encodes QUALITY (silver / green tip / red tip),
-  // not calibre, so the light/medium/heavy split is a judgement call. All indices are legal.
-  197609684: ['consumable_standard_issue_rounds',        '',  67],
-  17980086:  ['consumable_standard_issue_missile',       '',  78],
-  101797958: ['consumable_high_quality_missile',         '',  77],
-  126173396: ['consumable_medium_standard_rounds',       '',  69],
-  5:         ['consumable_medium_high_quality_rounds',   '',  68],
-  221436534: ['consumable_medium_standard_missile',      '', 175],
-  228448854: ['consumable_medium_high_quality_missile',  '',  79],
-  59143780:  ['consumable_heavy_standard_issue_rounds',  '', 209],
-  9:         ['consumable_heavy_high_quality_rounds',    '', 120],
-  218608438: ['consumable_heavy_standard_issue_missile', '', 151],
-  228410854: ['consumable_heavy_high_quality_missile',   '', 157],
-  113883533: ['consumable_large_power_cell',             '', 124],
-  // nukes. BEST-EFFORT: 8 tiles for 6 guids; gold -> x20 family, blue -> x5 family, by size.
-  98392991:  ['consumable_torpedo',          '', 260],
-  174428943: ['consumable_medium_torpedo',   '', 262],
-  190162639: ['consumable_large_torpedo',    '', 264],
-  195427878: ['consumable_mini_nuke',        '', 261],
-  57483190:  ['consumable_medium_mini_nuke', '', 263],
-  56189094:  ['consumable_large_mini_nuke',  '', 265],
-};
-
-/* ---------------------------------------------------------------- SHOP STOCK
- * The shop's first pass SKIPS any Price card whose BuyPrice is empty. Empty BuyPrice means
- * "not stocked" for Resource/Consumable/Augment/Ship - it does NOT mean free. (For a ShipSystem
- * the price card only has to EXIST, so there an empty BuyPrice really does mean free.)
+ * 175 of them: the 165 the original's own catalogue carries, read out of the dump into
+ * consumables-real.js, plus the ten guids that are ours and appear on no dump card at any guid.
  *
- * Price VALUES must be integers or negative powers of two: the server charges ceil(value*count)
- * while the client compares the raw float product and derives the buy step as round(1/value).
- * Only those two families make server and client agree exactly.
+ * WHAT THIS REPLACED, AND WHY IT MATTERED. The file used to emit 42, and 40 of those carried
+ * ConsumableType 0, Tier 0 and effectType None - "a general consumable that fits any hull". That
+ * is not a cosmetic defect. The client pairs ammunition to a weapon by matching the countable's
+ * ConsumableType against the ability's (ItemList.cs:135), so with every countable at type 0 no
+ * weapon could ever be loaded with anything at all. Nobody had noticed because every ability was
+ * also ConsumableOption NotUsing, which makes the ammo check a no-op - the two halves hid each
+ * other. Both are fixed together in this package.
  *
- * Keep to tylium/titanium/cubits - the shop row renders at most two currency components, and
- * NREs on a currency whose icon does not resolve.
+ * consumableAttributes is the other field that was silently wrong: it was [] on all 42, and
+ * GuiConsumablePanel.cs:47-62 buckets the in-flight ammo menu into one collapsible header PER
+ * ATTRIBUTE. An item with no attribute is in no bucket, i.e. invisible in the panel you load ammo
+ * from. Every dump record carries at least 'standard', and all nine attribute strings resolve as
+ * bgo.consumable_attribute.<attr> in the client's locale bundle.
  */
 const TIT = 207047790, CUB = 264733124;
-// guid: [Category, ItemType, BuyPrice, SellPrice, CanBeSold, SortingWeight]
-const SHOP_STOCK = {
-  215278030: ['Resource', 'Resource', { [CUB]: 0.03125 }, {}, false, 10],   // Tylium, 32/cubit
-  207047790: ['Resource', 'Resource', { [CUB]: 0.0625 }, {}, false, 11],    // Titanium, 16/cubit
-  130762195: ['Resource', 'Resource', { [TYLIUM]: 2 }, { [TYLIUM]: 1 }, true, 20],      // Water
-  254909109: ['Resource', 'Resource', { [CUB]: 25 }, {}, false, 30],                    // Tuning Kit
-  187088612: ['Resource', 'Resource', { [TYLIUM]: 500 }, { [TYLIUM]: 100 }, true, 31],  // Tech Analysis
-  28157328:  ['Resource', 'Resource', { [TIT]: 250 }, { [TIT]: 50 }, true, 40],         // Comm Access
-  130797813: ['Resource', 'Resource', { [TYLIUM]: 100 }, { [TYLIUM]: 25 }, true, 41],   // FTL fragment
-  63148366:  ['Resource', 'Resource', { [TIT]: 50 }, { [TIT]: 10 }, true, 42],          // Plutonium
-  // 4000, not 500: it grants x2 XP and x2 Loot for 12h (Factors.getMultiplierFor sums from 1, so
-  // a value of 1.0 IS a doubling), and at 500 it paid for itself roughly eight times over.
-  92666191:  ['Augment', 'Augment', { [CUB]: 4000 }, {}, false, 10],                    // Divine Inspiration
 
-  /* Ammo and gear must be Category|ItemType Consumable|<real type>, not the Resource|Resource
-   * fallback. The Consumables tab filters purely on ItemType and its sub-buttons additionally
-   * require Category == Consumable, so a mistyped card is invisible in that tab entirely. */
-  197609684: ['Consumable', 'Round', { [TYLIUM]: 2 }, { [TYLIUM]: 1 }, true, 20],
-  126173396: ['Consumable', 'Round', { [TYLIUM]: 4 }, { [TYLIUM]: 2 }, true, 21],
-  59143780:  ['Consumable', 'Round', { [TYLIUM]: 8 }, { [TYLIUM]: 4 }, true, 22],
-  101797958: ['Consumable', 'Missile', { [CUB]: 1 }, { [TYLIUM]: 3 }, true, 24],
-  113883533: ['Consumable', 'Power', { [TYLIUM]: 200 }, { [TYLIUM]: 50 }, true, 26],
-
-  /* Sell-only: an empty BuyPrice keeps them OUT of the shop while SellPrice and CanBeSold still
-   * apply, so the Hold shows a Salvage button. Without at least one sellable DROP a new player
-   * never sees the sell flow at all - the three starting currencies are all CanBeSold false.
-   * Deliberately NOT giving cubits, merits, tylium, titanium or the event boxes a sell price:
-   * they are in UNTRASHABLE precisely because one misclick would destroy a balance. */
-  172582782: ['Resource', 'Resource', {}, { [TIT]: 25 }, true, 43],       // uranium, a mining drop
-  98392991:  ['Consumable', 'Torpedo', {}, { [TYLIUM]: 250 }, true, 27],
-  195427878: ['Consumable', 'Torpedo', {}, { [TYLIUM]: 250 }, true, 28],
-
-  /* 17980086 (Striker missiles) is deliberately NOT stocked. Every ability card carries
-   * ConsumableOption 'NotUsing', so a launcher fires identically with or without ammo and the
-   * stack is never decremented - stocking it at 5 tylium x a buyCount of 100 is a pure
-   * 500-tylium-per-click trap. Its ShipConsumable card stays (the Wheel of Fortune still hands
-   * out this guid, and a missing card hangs the client). To wire ammo up later, change BOTH
-   * ConsumableType and ConsumableOption in abilityCard() - never one without the other.
-   * Cubits and merits never buy themselves; the event boxes are blacklisted server-side. */
+/* THE SIX CURRENCIES ARE PRICED HERE AND NOWHERE ELSE.
+ * A currency's price is an exchange rate the rest of the economy is tuned against, not an item
+ * price, and the original's is not ours: it sold tylium at 0.1 cubits where we sell it at 0.03125.
+ * 0.1 is not a negative power of two, so the client's buy arrow - round(1/value), in
+ * GUIShopConfirmWindow.GetPurchaseUnit:618-628 - would step in tens while the server charged
+ * ceil(0.1*count), and the two would disagree on every click.
+ *
+ * buyCount belongs with the rate for the same reason: the dump ships buyCount 1 on all six, which
+ * at 0.03125 cubits a unit means one click buys ONE tylium and the server charges ceil(0.03125) =
+ * a whole cubit for it. A currency's click size and its price are one decision.
+ *
+ * consumables-real.js marks exactly these six by leaving price.buy null, and the emitter below
+ * fails the build if that set and this table ever stop naming the same guids - which is what would
+ * happen if a re-import decided a seventh guid was a currency, or dropped one of these six.
+ *   guid: [BuyPrice, SellPrice, CanBeSold, buyCount]
+ */
+const CURRENCY_RATES = {
+  215278030: [{ [CUB]: 0.03125 }, {}, false, 1000],          // Tylium, 32 to the cubit
+  207047790: [{ [CUB]: 0.0625 }, {}, false, 1000],           // Titanium, 16 to the cubit
+  130762195: [{ [TYLIUM]: 2 }, { [TYLIUM]: 1 }, true, 100],  // Water
+  254909109: [{ [CUB]: 25 }, {}, false, 1],                  // Tuning kit - one per click, not 100
+  /* Cubits and merits never buy themselves. An empty BuyPrice keeps them out of the shop's first
+   * pass entirely, and CanBeSold false keeps the Hold from offering a Salvage button on a balance:
+   * selling a countable sells the WHOLE stack, and there is no confirmation. */
+  264733124: [{}, {}, false, 1],
+  130920111: [{}, {}, false, 1],
 };
 
-/* Read every ResourceType guid straight from the server enum. Hand-maintaining this list is how
- * we ended up shipping a client that stalled on Linerx5Nuke: the server hands a resource to the
- * client, the client asks for its card, and a missing one leaves an unloaded placeholder forever. */
-function loadResources() {
-  const f = path.resolve(CORE_SRC, 'enums/ResourceType.java');
-  const src = fs.readFileSync(f, 'utf8');
-  const seen = new Set();
-  const out = [];
+/* THE TEN COUNTABLES THAT ARE OURS. Each of these appears on no dump card at any guid, so
+ * consumables-real.js carries only their corrections (LEGACY_CONSUMABLES) and this table carries
+ * their identity: loca key, atlas frame, sell economics and click size.
+ *
+ * 3, 5 and 9 are the three green-rounds SKUs, and they were among the untyped: Tier 0 and
+ * effectType None on all three, ConsumableType 1 on guid 3 and 0 on the other two, so none of them
+ * paired to any weapon. They now carry ConsumableType 43703 at tiers 1/2/3 with effectType
+ * DamageKinetic, which is what turns the live player's 31x guid 9 into usable heavy rounds. They
+ * keep their empty BuyPrice - they are loot, granted by AugmentTemplates/augment_template_green
+ * .json, not stock.
+ *
+ * NONE OF THE THREE MAY BE DELETED, and an earlier plan to retire them was retracted for three
+ * independent reasons: 5 and 9 are ResourceType.EscortGreen_Rounds and ResourceType
+ * .LinerGreen_Rounds so checkResourceCoverage() below throws without them; augment_template_green
+ * .json grants all three by guid and the validator at the foot of this file errors on a granted
+ * guid with no card; and ItemCountable.fromGUID (ItemCountable.java:34-37) does no catalogue
+ * lookup at all, so a retired countable is not dropped on load the way a retired system is - it
+ * reaches the client and hangs the Hold forever with no timeout.
+ *
+ * 10-13 are the event trade-in boxes; 11 carries the LootItem action that pairs it with
+ * augment_template_green.json. 63148366 / 172582782 / 130797813 are mining drops.
+ *
+ * untrashable: the Hold shows a recycle button purely on Trashable, dropping a countable drops the
+ * ENTIRE stack, and the server has no Trashable check at all. The four event boxes and the FTL
+ * fragment are stacks a misclick should not be able to destroy.
+ */
+const LEGACY_META = {
+  // The three green-rounds SKUs sort at 900, after every buyable round: they cannot be bought, so
+  // putting them at the top of the Round tab would be a row of permanently greyed-out buttons.
+  3:         { key: 'consumable_high_quality_rounds',        frame: 156, weight: 900,
+               sell: { [TYLIUM]: 25 }, canBeSold: true },
+  5:         { key: 'consumable_medium_high_quality_rounds', frame:  68, weight: 900 },
+  9:         { key: 'consumable_heavy_high_quality_rounds',  frame: 120, weight: 900 },
+  10:        { key: 'augment_event_pristine_ice',     frame: 133, weight: 100, untrashable: true },
+  11:        { key: 'augment_event_sacred_herbs',     frame: 131, weight: 100, untrashable: true,
+               action: 'LootItem' },
+  12:        { key: 'augment_event_foodstuffs',       frame: 130, weight: 100, untrashable: true },
+  13:        { key: 'augment_event_precious_metals',  frame: 132, weight: 100, untrashable: true },
+  63148366:  { key: 'resource_plutonium',    frame:  12, weight: 42, buyCount: 10,
+               buy: { [TIT]: 50 }, sell: { [TIT]: 10 }, canBeSold: true },
+  172582782: { key: 'resource_uranium',      frame:  13, weight: 43,
+               sell: { [TIT]: 25 }, canBeSold: true },     // a mining drop, sell-only
+  130797813: { key: 'resource_ftl_fragment', frame: 214, weight: 41, buyCount: 10, untrashable: true,
+               buy: { [TYLIUM]: 100 }, sell: { [TYLIUM]: 25 }, canBeSold: true },
+};
+
+/* Every ResourceType guid MUST end up with a ShipConsumable card. The server hands a resource to
+ * the client by guid, the client asks for its card, and ItemCountable.Read blocks on a card that
+ * never arrives - the Linerx5Nuke stall this check was written for. Checked against the guids
+ * actually emitted rather than against a list kept in this file, because a hand-kept list is
+ * exactly what let that happen. */
+function checkResourceCoverage(emitted) {
+  const src = fs.readFileSync(path.resolve(CORE_SRC, 'enums/ResourceType.java'), 'utf8');
   for (const m of src.matchAll(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*(\d+)L?\s*\)/gm)) {
     const [, name, guid] = m;
-    if (name === 'None' || seen.has(guid)) continue;
-    seen.add(guid);
-    const meta = RESOURCE_META[guid];
-    // Fail LOUDLY. The old fallback synthesised "item_<enumname>", which does not exist in the
-    // client bundle, and shipped cards that rendered a raw %$bgo.item_x.Name% string on screen.
-    if (!meta) throw new Error(
-      `ResourceType.${name} (guid ${guid}) has no RESOURCE_META entry - add one. A generated ` +
-      `"item_${name.toLowerCase()}" key does not exist in the client bundle.`);
-    out.push({ guid: Number(guid), key: meta[0], icon: meta[1], frame: meta[2] });
+    if (name === 'None' || emitted.has(Number(guid))) continue;
+    throw new Error(
+      `ResourceType.${name} (guid ${guid}) gets no ShipConsumable card - consumables-real.js does `
+      + `not carry it and LEGACY_META does not either. The client blocks on it forever.`);
   }
-  return out;
 }
-const RESOURCES = loadResources();
 
-// Currencies and mining resources must NEVER be destructible: the hold shows a recycle button
-// purely on Trashable, dropping a countable drops the ENTIRE stack, and the server has no
-// Trashable check at all. One misclick would destroy a player's whole cubit balance.
-const UNTRASHABLE = new Set([215278030, 207047790, 264733124, 130920111, 130762195,
-                             254909109, 187088612, 28157328, 130797813, 92666191,
-                             166681557, 10, 11, 12, 13]);
+function consumableCards() {
+  /* One row shape for both sources so the emitter below has a single path. The dump record is the
+   * reference; LEGACY_META fills the same fields in for the ten guids the dump has no card for,
+   * and LEGACY_CONSUMABLES supplies the type corrections for 3/5/9. */
+  const rows = CONSUMABLES_REAL.map(r => {
+    const rate = CURRENCY_RATES[r.guid];
+    if (!!rate !== (r.price.buy === null)) throw new Error(
+      `consumables-real.js and CURRENCY_RATES disagree about guid ${r.guid} (${r.key}): the module `
+      + `${r.price.buy === null ? 'defers its price to this file' : 'carries its own price'} and this `
+      + `file ${rate ? 'does' : 'does not'} hold a rate for it. One of the two moved.`);
+    return {
+      guid: r.guid, key: r.key, atlas: r.atlas, frame: r.frame, icon: r.icon,
+      ct: r.ct, tier: r.tier, effect: r.effect, action: r.action, isAugment: r.isAugment,
+      autoConsume: r.autoConsume, trashable: r.trashable, attrs: r.attrs, add: r.add, mul: r.mul,
+      buyCount: rate ? rate[3] : r.buyCount,
+      category: r.price.category, itemType: r.price.itemType, faction: r.price.faction,
+      sortNames: r.price.sortNames, weight: r.price.sortWeight,
+      buy: rate ? rate[0] : r.price.buy,
+      upgrade: rate ? {} : r.price.upgrade,
+      sell: rate ? rate[1] : r.price.sell,
+      canBeSold: rate ? rate[2] : r.price.canBeSold,
+    };
+  });
 
-// The Activate button is gated purely on IsAugment, so without this Divine Inspiration costs
-// 500 cubits and can never be used. Only guids with a matching AugmentTemplate belong here.
-const AUGMENTS = { 92666191: 'None', 11: 'LootItem' };
-
-// One shop click buys exactly this many, with no confirmation dialog. A flat 100 meant 2500
-// cubits per click on tuning kits.
-const BUY_COUNT = {
-  215278030: 1000, 207047790: 1000, 130762195: 100,
-  254909109: 1, 187088612: 5, 28157328: 5, 130797813: 10, 63148366: 10,
-  17980086: 100, 92666191: 1,
-};
-
-// Shop sorting is ItemType -> Tier -> SortingWeight -> guid, so an unset weight left Merits and
-// Cubits sorted above the Tylium they buy.
-const SORT_WEIGHT = { 264733124: 1, 130920111: 2, 215278030: 3, 207047790: 4, 130762195: 5 };
-
-/* Guids granted by the shipped AugmentTemplates/LootTemplates that are NOT in ResourceType.
- * They land in a player's hold as loot, and the client blocks forever on an item whose cards never
- * arrive, so each needs the full GUI + ShipConsumable + Price triple.
- *
- * I previously DELETED these seven from augment_template_green.json, on the reasoning that they
- * had no loca key and no icon so they must be phantoms. That was wrong twice over: the file is
- * upstream data we do not own, and the items are real. The upstream // comments identify each by
- * family and hull class (ammo / dc / ec x striker / escort / liner), and the client ships names
- * and descriptions for all of them - I had looked for the wrong keys.
- *
- * The guid -> key mapping below is INFERRED, not attested: the comments give family+hull-class and
- * the locale uses its own taxonomy, so the join is by meaning. It is a good join - the RC-pack
- * family is literally strike/escort/line, and power cells are light/medium/heavy on the same axis
- * - but if a real dump ever surfaces, check these seven first.
- * Every key below is verified present with BOTH .Name and .Description in locale.lang_en. */
-const LOOT_EXTRAS = {
-  // guid: [locaKey, atlasFrame, consumableType]
-  3:         ['consumable_high_quality_rounds', 156, 1],            // Light HESC Rounds   (striker ammo)
-  2836381:   ['item_consumable_strike_rc_pack', 190, 0],            // Strike RC Pack      (striker dc)
-  103992173: ['item_consumable_escort_rc_pack', 190, 0],            // Escort RC Pack      (escort dc)
-  201509789: ['item_consumable_line_rc_pack', 190, 0],              // Line RC Pack        (liner dc)
-  25398605:  ['consumable_high_quality_power_cell', 128, 0],        // Light Improved Power Cell
-  136433549: ['consumable_medium_hiqh_quality_power_cell', 128, 0], // Medium Improved  (sic: 'hiqh')
-  232850813: ['consumable_large_high_quality_power_cell', 128, 0],  // Heavy Improved Power Cell
-};
-
-function lootExtraCards() {
-  return Object.entries(LOOT_EXTRAS).flatMap(([g, [key, frame, consType]]) => {
+  const fixes = new Map(LEGACY_CONSUMABLES.map(l => [l.guid, l]));
+  Object.entries(LEGACY_META).forEach(([g, m]) => {
     const guid = Number(g);
-    return [
-      card(guid, 'GUI', {
-        // level 0, not 1: these have a plain .Name with no _<level> variant, and GUICard tries
-        // Name_<Level> before Name, so any level works - but 0 matches the other countables.
-        key, level: 0,
-        guiAtlasTexturePath: 'GUI/Inventory/items_atlas', frameIndex: frame,
-        guiIcon: '', guiAvatarSlotTexturePath: '', guiTexturePath: '', args: [],
-      }),
-      card(guid, 'ShipConsumable', {
-        // ConsumableType 1 marks launcher/cannon ammo so the client can pair it to a weapon;
-        // 0 is a general consumable. Tier 0 means "fits every ship tier" - a real tier here
-        // would hide the item on every hull of another tier, including in your own hold.
-        ConsumableType: consType, Tier: 0,
-        ItemBuffMultiply: stats({}), ItemBuffAdd: stats({}),
-        Action: 'None', IsAugment: false, AutoConsume: false,
-        Trashable: true,
-        buyCount: 1, consumableAttributes: [], effectType: 'None',
-      }),
-      // Empty BuyPrice keeps these OUT of the shop (the shop skips an empty buy price for a
-      // countable), which is what we want - they are drops, not stock. They ARE sellable, so a
-      // green box is worth opening.
-      card(guid, 'Price', {
-        Category: 'Consumable', ItemType: 'Consumable', Tier: 0, Faction: 'Neutral',
-        SortingNames: [], SortingWeight: 900,
-        BuyPrice: price({}), UpgradePrice: price({}),
-        SellPrice: price({ [TYLIUM]: 25 }), CanBeSold: true,
-      }),
-    ];
+    const fix = fixes.get(guid);
+    if (!fix) throw new Error(
+      `LEGACY_META has guid ${guid} but consumables-real.js does not list it in `
+      + `LEGACY_CONSUMABLES - one of the two tables was edited without the other`);
+    rows.push({
+      guid, key: m.key, atlas: 'GUI/Inventory/items_atlas', frame: m.frame, icon: '',
+      ct: fix.ct || 0, tier: fix.tier || 0, effect: fix.effect || 'None',
+      action: m.action || 'None', isAugment: m.action !== undefined,
+      autoConsume: false, trashable: !m.untrashable, attrs: fix.attrs || [], add: {}, mul: {},
+      buyCount: m.buyCount || 1,
+      category: (fix.price && fix.price.category) || 'Resource',
+      itemType: (fix.price && fix.price.itemType) || 'Resource',
+      faction: 'Neutral', sortNames: [], weight: m.weight,
+      buy: m.buy || {}, upgrade: {}, sell: m.sell || {}, canBeSold: !!m.canBeSold,
+    });
   });
-}
 
-function resourceCards() {
-  return RESOURCES.flatMap(r => {
-    const s = SHOP_STOCK[r.guid];
-    return [
-      card(r.guid, 'GUI', {
-        // level 0, not 1: a "LEVEL n" chip is rendered whenever Level > 0, which is meaningless
-        // on a stack of water. 0 is safe elsewhere - selling and trashing both allow it.
-        key: r.key, level: 0,
-        guiAtlasTexturePath: 'GUI/Inventory/items_atlas', frameIndex: r.frame,
-        guiIcon: r.icon, guiAvatarSlotTexturePath: '', guiTexturePath: '', args: [],
-      }),
-      card(r.guid, 'ShipConsumable', {
-        // ConsumableType 1 marks launcher ammo; the client pairs ammo to a launcher by
-        // matching this against the ability's ConsumableType.
-        ConsumableType: r.guid === 17980086 ? 1 : 0,
-        // Tier 0 means "any tier". The Store tab force-enables a tier filter against this
-        // field, so Tier 1 would make every consumable vanish on a tier-2 hull.
-        Tier: 0,
-        ItemBuffMultiply: stats({}), ItemBuffAdd: stats({}),
-        Action: AUGMENTS[r.guid] || 'None',
-        IsAugment: AUGMENTS[r.guid] !== undefined,
-        AutoConsume: false,
-        Trashable: !UNTRASHABLE.has(r.guid),
-        buyCount: BUY_COUNT[r.guid] || 1, consumableAttributes: [],
-        // Must not be a nuclear type unless the nuke projectile guids are authored - the fire
-        // action would select an unauthored projectile.
-        effectType: r.guid === 17980086 ? 'DamageExplosion' : 'None',
-      }),
-      card(r.guid, 'Price', {
-        Category: s ? s[0] : 'Resource', ItemType: s ? s[1] : 'Resource',
-        Tier: 1, Faction: 'Neutral',
-        SortingNames: [], SortingWeight: SORT_WEIGHT[r.guid] || (s ? s[5] : 100),
-        BuyPrice: price(s ? s[2] : {}), UpgradePrice: price({}),
-        SellPrice: price(s ? s[3] : {}), CanBeSold: s ? s[4] : false,
-      }),
-    ];
+  const byGuid = new Set();
+  rows.forEach(r => {
+    if (byGuid.has(r.guid)) throw new Error(
+      `countable guid ${r.guid} is emitted twice - the dump import and LEGACY_META both claim it`);
+    byGuid.add(r.guid);
   });
+  checkResourceCoverage(byGuid);
+
+  return rows.flatMap(r => [
+    card(r.guid, 'GUI', {
+      /* level 0, not 1: a "LEVEL n" chip renders whenever Level > 0, which is meaningless on a
+       * stack of water, and none of these keys has a .Name_<n> variant for GUICard.cs to find. */
+      key: r.key, level: 0,
+      guiAtlasTexturePath: r.atlas, frameIndex: r.frame,
+      /* guiIcon is loaded as a WHOLE standalone texture with no atlas fallback by the money bar
+       * and every price row, and the image widget ADOPTS the texture's size - which is why any
+       * guid used as a KEY in a Price items map has to keep one. Only the six currencies have
+       * one; everything else draws from its atlas frame. */
+      guiIcon: r.icon, guiAvatarSlotTexturePath: '', guiTexturePath: '', args: [],
+    }),
+    card(r.guid, 'ShipConsumable', {
+      /* ConsumableType and Tier together are the ammo-pairing key: ItemList.cs:135 passes a
+       * countable to a weapon when Card.ConsumableType matches the ability's and
+       * (Card.Tier == abilityTier || Card.Tier == 0). Tier 0 therefore means "fits every hull
+       * tier", which is right for water and tuning kits and wrong for ammunition - it would put
+       * light rounds in a capital ship's magazine. Every ammunition record here is tier-locked
+       * 1-4 because the dump's own cards are. */
+      ConsumableType: r.ct, Tier: r.tier,
+      /* On a consumable ItemBuffAdd is a FRACTIONAL MULTIPLIER, not an absolute: applyAbilitySlot
+       * Stats runs applyStatsMultToIfBonusExistsInApplyOn against the ability's own stats and adds
+       * the product, so DamageHigh 0.15 is +15%. It also means a consumable can only modify a stat
+       * the ability already has - which is what keeps a mine's DrainLow off a plain missile. */
+      ItemBuffMultiply: stats(r.mul), ItemBuffAdd: stats(r.add),
+      Action: r.action, IsAugment: r.isAugment, AutoConsume: r.autoConsume,
+      Trashable: r.trashable,
+      buyCount: r.buyCount, consumableAttributes: r.attrs, effectType: r.effect,
+    }),
+    card(r.guid, 'Price', {
+      /* Category is a ShopCategory constant and ItemType a ShopItemType one. They are different
+       * enums that both contain 'Resource' and 'Augment', which is how seven of these cards
+       * carried ItemType 'Consumable' until recently - Gson leaves a bad name null and
+       * ShopItemCard.write does bw.writeByte(shopItemType.value), which NPEs and drops the socket.
+       * For the 165 imported countables both names are the dump's own Price card's; for the ten in
+       * LEGACY_META they come from LEGACY_CONSUMABLES, which is where the three green-rounds SKUs
+       * stop being Resource/Resource and become Consumable/Round. */
+      Category: r.category, ItemType: r.itemType, Tier: r.tier, Faction: r.faction,
+      SortingNames: r.sortNames, SortingWeight: r.weight,
+      /* An empty BuyPrice means NOT STOCKED for a countable - setupShop's first pass skips it. It
+       * does not mean free. That is how the loot-only SKUs and the seven boosters with no factor
+       * template stay out of the store while keeping their sell price, which is the whole reason
+       * those seven can ship at all: PlayerProtocol's UseAugment logs "Activated augment but no
+       * template!" and returns, so a stocked one would be a purchase that does nothing. */
+      BuyPrice: price(r.buy), UpgradePrice: price(r.upgrade),
+      SellPrice: price(r.sell), CanBeSold: r.canBeSold,
+    }),
+  ]);
 }
 
 /* ================================================================ SECTOR-SPAWNED OBJECTS
@@ -2894,15 +3041,18 @@ const OUTPOSTS = [
  * (Outposts.txt:37-39, corroborated by Dev Blog 15.txt:75-80 and all six bsgonline per-faction
  * infobox pages):
  *   Light Sentry Platform:  7,500 Hull, 3,000 Energy, 8 x 20 mm autocannon + 2 x Interceptor
- *                           Missile Launcher (STATION_WEAPONS 6041/6042)
+ *                           Missile Launcher (PLATFORM_WEAPONS 6041/6042)
  *   Medium Sentry Platform: 10,000 Hull, 3,000 Energy, 8 x 127 mm autocannon + 5 x Medium Missile
- *                           Launcher (202/203 fit the outpost's A/B - see D/E's dead-stock note)
+ *                           Launcher (202/203 actually fit the outpost's pair, 1957961850 and
+ *                           3756543070; the dump's own medium-class guns 4001980506 / 2936089294
+ *                           now ship as ordinary tier-3 player weapons and no config fits them)
  *   Heavy Sentry Platform:  15,000 Hull, 3,000 Energy, 2 x 63 mm Flak + 2 x 15 mm PD +
  *                           8 x 40.6 cm cannon + 5 x Heavy Missile Launcher (6051-6054)
  * The armament counts are why the prefabs carry exactly 13 / 10 / 16 usable mounts (see
  * HARDPOINTS; large is one short of Heavy's 17, hence the shared-spot 17th slot below). Armour
- * 35/60/75 is attested but NOT shipped: ArmorAlgorithmV0.getMultiplicator returns a constant 1,
- * so ArmorValue is inert.
+ * 35/60/75 is attested but still NOT shipped - these platforms seed no ArmorValue at all. That used
+ * to be free because ArmorAlgorithmV0 returned a constant 1; SectorAlgorithms now runs V1, so
+ * armour is live and every point of it these hulls do not carry is damage they do take.
  * PowerRecovery 110 = 3.667% of 3,000, the same borrowed capital ratio as the outpost - INFERRED.
  * Continuous-fire draw per fit: light 8 x 3/3.5 + 2 x 15/45 = 7.5 pp/s, medium (A/B fit)
  * 8 x 25/4.8 + 5 x 100/18 = 69.4, heavy 8 x 25/8 + 5 x 100/30 + 2 x 7/1 + 2 x 3.5/0.5 = 69.7 -
@@ -3547,8 +3697,15 @@ function bootstrapCards() {
     // shop stocks both paints unconditionally and the client depends on EVERY item before
     // broadcasting, so one unloaded paint kills the whole EventShop reply.
     // model "default" reuses the ship's own World prefab, so this needs no new art.
-    card(226, 'ShipPaint', { model: 'default', paintTexture: '', shipCardGuid: 2366349390 }),
-    card(227, 'ShipPaint', { model: 'default', paintTexture: '', shipCardGuid: 1427261742 }),
+    /* shipCardGuid names the hull the paint belongs to, and both of these named the wrong one. The
+     * loca keys are ..._human_viper_mk3_... and ..._cylon_war_raider_mk2_..., but 2366349390 is
+     * humant1fighter (Viper Mk II) and 1427261742 is cylont1fighter (the plain Raider). Repointed to
+     * the hulls the keys name: 5016 humant1multi2 (Viper Mk III) and 5116 cylont1multi2 ('Cylon War'
+     * Raider Mk II). This is the only gate on where an event paint can be worn - ItemList.cs:129
+     * compares the active ship's guid against shipCardGuid and its NextCard - so before the repoint
+     * the two skins fitted the wrong ship and could not be fitted to the right one. */
+    card(226, 'ShipPaint', { model: 'default', paintTexture: '', shipCardGuid: 5016 }),
+    card(227, 'ShipPaint', { model: 'default', paintTexture: '', shipCardGuid: 5116 }),
 
     // A brand-new player is routed to GameLocation.Starter, not Avatar. StarterLocation emits
     // NeutralRewardCard (guid 1) for both factions, and the client's StarterLevelProfile blocks
@@ -3833,21 +3990,105 @@ function progressionCards() {
  * entry.getKey().value and NPEs - which the server catches by CLOSING THE CLIENT'S SOCKET.
  * The symptom is a mid-session disconnect with no client-side clue, so validate the names
  * against the server's own enum source rather than trusting them. */
+const stripJavaComments = src => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+
+/* Parse the CONSTANT LIST of a Java enum out of its source.
+ *
+ * The old version matched /^\s*NAME\s*\(/ line by line, which is only right for an enum whose
+ * constants all take arguments and which has nothing else in it. It also swallowed the enum's own
+ * constructor and any `this(...)` delegation, so ObjectStat.java parsed to 296 "constants" of which
+ * three - ObjectStat, getMappings, this - are not constants at all. Nothing failed because those
+ * extra names only ever made the check MORE permissive, but a validator that accepts
+ * `stats: { this: 1 }` is not doing its job.
+ *
+ * A Java enum's constant list is everything from the opening brace up to the first `;` at brace and
+ * paren depth zero (or the closing brace when the enum has no members at all, e.g. SkillGroup).
+ * Splitting that on depth-zero commas gets both spellings - `MaxHullPoints(1)` and a bare `Weapon` -
+ * with one parser, and cannot reach a method or a constructor because those live past the `;`. */
+function enumConstants(src) {
+  const s = stripJavaComments(src);
+  const m = /\benum\s+\w+/.exec(s);
+  if (!m) return null;
+  const open = s.indexOf('{', m.index);
+  if (open < 0) return null;
+  const out = [];
+  let depth = 0, cur = '';
+  for (let i = open + 1; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === '(' || ch === '{' || ch === '[') { depth++; continue; }
+    if (ch === ')' || ch === '}' || ch === ']') { if (depth === 0) break; depth--; continue; }
+    if (depth > 0) continue;
+    if (ch === ';') { out.push(cur); cur = ''; break; }
+    if (ch === ',') { out.push(cur); cur = ''; continue; }
+    cur += ch;
+  }
+  if (cur.trim()) out.push(cur);
+  const names = new Set(out.map(t => (t.trim().match(/^[A-Za-z_]\w*/) || [])[0]).filter(Boolean));
+  return names.size ? names : null;
+}
+
 function loadEnumNames(relPath) {
-  const f = path.resolve(CORE_SRC, relPath);
-  try {
-    const src = fs.readFileSync(f, 'utf8');
-    const body = src.slice(src.indexOf('{') + 1);
-    const names = new Set();
-    for (const m of body.matchAll(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(/gm)) names.add(m[1]);
-    return names.size ? names : null;
-  } catch { return null; }
+  try { return enumConstants(fs.readFileSync(path.resolve(CORE_SRC, relPath), 'utf8')); }
+  catch { return null; }
 }
 const OBJECT_STATS = loadEnumNames('templates/utils/ObjectStat.java');
+
+/* Every enum under templates/ and enums/, indexed by SIMPLE NAME - which is how the card classes
+ * spell them, because they all import io.github.luigeneric.templates.utils.*. The card-field
+ * validator below uses this to check any enum-typed field on any card, so a new card view or a new
+ * enum-valued field is covered the day it lands rather than the day somebody remembers to add a
+ * rule for it. First definition wins on a duplicate simple name; templates/ is scanned first
+ * because that is where the card classes resolve from. */
+const JAVA_ENUM_PROBLEMS = [];
+const JAVA_ENUMS = (() => {
+  const idx = new Map(), from = new Map();
+  const walk = d => {
+    let ents;
+    try { ents = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+    for (const e of ents) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) { walk(p); continue; }
+      if (!e.name.endsWith('.java')) continue;
+      let src;
+      try { src = fs.readFileSync(p, 'utf8'); } catch { continue; }
+      const m = /\benum\s+(\w+)/.exec(stripJavaComments(src));
+      if (!m) continue;
+      const rel = path.relative(CORE_SRC, p).replace(/\\/g, '/');
+      if (idx.has(m[1])) {
+        /* Two enums with the same SIMPLE name: a card field naming that type would be checked
+         * against whichever file was scanned first, which is a coin toss. Report it rather than
+         * validate against the wrong constant set. */
+        JAVA_ENUM_PROBLEMS.push(`enum "${m[1]}" is declared in both ${from.get(m[1])} and ${rel} - a card field of that type would be checked against whichever was scanned first`);
+        continue;
+      }
+      const names = enumConstants(src);
+      /* A file that says `enum X` and yields no constants means the parser broke, not that the
+       * enum is empty. Left unreported it would silently turn every check on that type into a
+       * no-op, which is the worst possible outcome for a validator. */
+      if (!names) { JAVA_ENUM_PROBLEMS.push(`${rel} declares "enum ${m[1]}" but its constant list parsed to nothing - every check against that type would silently pass`); continue; }
+      idx.set(m[1], names);
+      from.set(m[1], rel);
+    }
+  };
+  walk(path.join(CORE_SRC, 'templates'));
+  walk(path.join(CORE_SRC, 'enums'));
+  return idx.size ? idx : null;
+})();
 
 function validate(cards) {
   const errs = [];
   const seen = new Map();
+
+  /* "Is there a card of view V at guid G?" is the single most-asked question in here, and the
+   * ladder made it expensive: a linear scan per question was fine over 1,800 cards and is 80
+   * million comparisons over 11,500. Index it once. */
+  const viewsOf = new Map();
+  cards.forEach(c => {
+    let s = viewsOf.get(c.cardGUID);
+    if (!s) viewsOf.set(c.cardGUID, s = new Set());
+    s.add(c.cardView2);
+  });
+  const hasView = (guid, view) => { const s = viewsOf.get(guid); return !!s && s.has(view); };
 
   if (!OBJECT_STATS) {
     errs.push('could not read ObjectStat.java - cannot verify stat names (refusing to emit blind)');
@@ -3869,39 +4110,19 @@ function validate(cards) {
     });
   }
 
-  /* StatView is a PLAIN enum (no constructor args) so the generic loader's regex misses it.
-   * An unknown name in a Views array becomes a null enum and NPEs on write - which the server
-   * answers by closing the client's socket, with no clue on the client side. */
-  const STAT_VIEWS = (() => {
-    try {
-      const src = fs.readFileSync(path.resolve(CORE_SRC, 'templates/utils/StatView.java'), 'utf8');
-      // Start at the enum's opening brace - the package declaration's semicolon comes BEFORE it,
-      // so searching for the first ';' in the whole file inverts the slice and yields nothing.
-      const open = src.indexOf('{');
-      const semi = src.indexOf(';', open);
-      const body = src.slice(open + 1, semi === -1 ? src.lastIndexOf('}') : semi);
-      const names = new Set();
-      for (const m of body.matchAll(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:,|$)/gm)) names.add(m[1]);
-      return names.size ? names : null;
-    } catch { return null; }
-  })();
-  if (!STAT_VIEWS) errs.push('could not read StatView.java - refusing to emit blind');
-  else cards.filter(c => Array.isArray(c.Views)).forEach(c =>
-    c.Views.forEach(v => {
-      if (!STAT_VIEWS.has(v))
-        errs.push(`ShipSystem ${c.cardGUID}: "${v}" is not a StatView constant - null enum, NPE on write`);
-    }));
+  /* The StatView check that used to live here is gone: G17 below now checks EVERY enum-typed field
+   * on every card view against the enum's own source, and ShipSystemCard.Views is one of them. */
 
   /* An equip that references a missing ability card sets the slot FIRST and then throws, after
    * the item has already left the hold - so the item silently vanishes. Catch it here instead. */
   cards.filter(c => c.cardView2 === 'ShipSystem').forEach(c => {
     (c.shipAbilityCards || []).forEach(ab => {
-      if (!cards.some(x => x.cardGUID === ab && x.cardView2 === 'ShipAbility'))
+      if (!hasView(ab, 'ShipAbility'))
         errs.push(`ShipSystem ${c.cardGUID}: ability ${ab} has no ShipAbility card - equipping it destroys the item`);
-      if (!cards.some(x => x.cardGUID === ab && x.cardView2 === 'GUI'))
+      if (!hasView(ab, 'GUI'))
         errs.push(`ShipAbility ${ab}: no GUI card at the ability guid - the item never finishes loading`);
     });
-    if (!cards.some(x => x.cardGUID === c.cardGUID && x.cardView2 === 'Price'))
+    if (!hasView(c.cardGUID, 'Price'))
       errs.push(`ShipSystem ${c.cardGUID}: no Price card at its own guid - the item never finishes loading`);
     /* The server gate (ShipSystemCard.isObjectKeyRestrictionsBlocked) compares the hull's
      * ShipObjectKey, NOT the ship card guid. A restriction entry matching no emitted Ship's
@@ -5251,7 +5472,8 @@ function validate(cards) {
   const SLOT_TYPES = ['undefined','computer','engine','hull','weapon','ship_paint','avionics',
                       'launcher','defensive_weapon','gun','role','special_weapon'];
   const shipsAll = cards.filter(c => c.cardView2 === 'Ship');
-  const sysTypes = new Set(cards.filter(c => c.cardView2 === 'ShipSystem').map(c => c.SlotType));
+  const sysAll = cards.filter(c => c.cardView2 === 'ShipSystem');
+  const sysTypes = new Set(sysAll.map(c => c.SlotType));
   shipsAll.forEach(c => (c.Slots || []).forEach(s => {
     if (!SLOT_TYPES.includes(s.SystemType))
       errs.push(`Ship ${c.cardGUID} slot ${s.SlotId}: "${s.SystemType}" is not a ShipSlotType - null enum, NPE on write`);
@@ -5259,8 +5481,8 @@ function validate(cards) {
       errs.push(`Ship ${c.cardGUID} slot ${s.SlotId}: undefined has no bgo.shop.undefined loca and renders "[]"`);
   }));
 
-  /* A SLOT TYPE WITH NO SYSTEMS AT ALL IS A CONTENT GAP, NOT A DATA DEFECT - and it is reported
-   * once per TYPE, not once per slot.
+  /* A BAY A PLAYER CANNOT FILL IS A CONTENT GAP, NOT A DATA DEFECT - reported once per
+   * (slot type, tier) cell, not once per slot.
    *
    * This used to be an error per slot. That was right while the slot table was hand-written, where
    * an unfillable slot meant somebody had invented a slot type. It is wrong now that the layouts
@@ -5268,22 +5490,99 @@ function validate(cards) {
    * we have simply never authored a single module to put in them, and the previous rule turned that
    * one missing feature into 380 identical error lines that failed the build.
    *
-   * The distinction that still matters is kept below: a type we DO stock, on a hull where nothing
-   * fits, is a real defect and stays an error. */
-  const gapTypes = new Map();
-  shipsAll.forEach(c => (c.Slots || []).forEach(s => {
-    if (SLOT_TYPES.includes(s.SystemType) && s.SystemType !== 'undefined' && !sysTypes.has(s.SystemType))
-      gapTypes.set(s.SystemType, (gapTypes.get(s.SystemType) || 0) + 1);
+   * TIER IS PART OF THE CELL because it is part of the lock. ContainerVisitor refuses a system
+   * whose Tier is not exactly the active ship's, and the store's equipable-only filter is forced on
+   * in the equip view - so "we stock SOME role modules" says nothing about whether a tier-4 carrier
+   * can fill its role bay. Reporting per type alone is what let 84 empty paint bays sit behind two
+   * tier-1 event skins without a word.
+   *
+   * SCOPED TO HULLS A PLAYER CAN REACH: every hull in a ShipList plus the Advanced twin each one
+   * chains to. An NPC hull's bays are filled by guid from ShipConfigTemplates, which never consults
+   * slot type or tier (BLOCK-5) and is checked by G13 instead; counting them here would report the
+   * outposts' 24 tier-4 weapon bays as missing content when the dump has no weapon/t4 family at all
+   * and their configs name tier-3 guns that install fine. */
+  const shipByGuid = new Map(shipsAll.map(c => [c.cardGUID, c]));
+  const flyable = (() => {
+    const seen = new Set();
+    cards.filter(c => c.cardView2 === 'ShipList').forEach(l => (l.shipCardGuids || []).forEach(g => {
+      for (let s = shipByGuid.get(g); s && !seen.has(s.cardGUID); s = shipByGuid.get(s.nextShipCardGuid))
+        seen.add(s.cardGUID);
+    }));
+    return [...seen].map(g => shipByGuid.get(g));
+  })();
+  const stockedCells = new Set(sysAll.map(c => `${c.SlotType}/t${c.Tier}`));
+  const gapCells = new Map();
+  flyable.forEach(c => (c.Slots || []).forEach(s => {
+    if (!SLOT_TYPES.includes(s.SystemType) || s.SystemType === 'undefined') return;
+    const cell = `${s.SystemType}/t${c.Tier}`;
+    if (stockedCells.has(cell)) return;
+    if (!gapCells.has(cell)) gapCells.set(cell, { bays: 0, hulls: new Set() });
+    gapCells.get(cell).bays++;
+    gapCells.get(cell).hulls.add(c.cardGUID);
   }));
-  [...gapTypes.entries()].sort((a, b) => b[1] - a[1]).forEach(([t, n]) => {
-    console.warn(`CONTENT GAP: ${n} slot(s) of type "${t}" across the roster, and the catalogue has `
-      + `no ShipSystem of that type - those slots render empty and nothing can be fitted to them. `
-      + `The dump has 3,607 ShipSystem cards to draw the missing families from.`);
+  [...gapCells.entries()].sort().forEach(([cell, g]) => {
+    console.warn(`CONTENT GAP: ${g.bays} bay(s) of "${cell}" across ${g.hulls.size} player-flyable hull(s) `
+      + `(${[...g.hulls].sort((a, b) => a - b).join(', ')}), and the catalogue has no ShipSystem of that `
+      + `slot type at that tier - those bays render empty and nothing can be fitted to them.`);
   });
   sysTypes.forEach(t => {
-    if (t !== 'ship_paint' && !shipsAll.some(c => (c.Slots || []).some(s => s.SystemType === t)))
+    if (!shipsAll.some(c => (c.Slots || []).some(s => s.SystemType === t)))
       errs.push(`ShipSystem type ${t} exists but no ship declares a ${t} slot - unequippable`);
   });
+
+  /* ---- EVERY FLYABLE PAINT BAY HAS SOMETHING TO PUT IN IT.
+   *
+   * Per HULL CARD, because for a paint the tier is the loose half of the lock and the hull is the
+   * tight one. ItemList.FilterByTier (ItemList.cs:129) does not even look at Tier for an item
+   * carrying a PaintCard: it admits the paint when the ACTIVE SHIP's guid equals the paint's
+   * shipCardGuid or equals the NextCard of the card at that guid, which is how one paint pointed at
+   * a level-1 hull covers that hull and its Advanced twin and nothing else. CheckSystemForSlot
+   * (ShopWindow.cs:1039) then demands PaintCard.shipCard.Equals(ActiveShip.Card), and ShipCard
+   * .Equals compares Tier + ShipRoleDeprecated + HangarID - per family, not per tier, again.
+   * So the cell check above cannot see this: ONE tier-2 paint keeps "ship_paint/t2" stocked while
+   * fifteen of the sixteen tier-2 hull cards still have nothing to wear. That is exactly how two
+   * whole Cylon families ended up paintless with a green build.
+   *
+   * Faction is not part of the test. It is guaranteed by construction (gen-paints-real.js takes a
+   * paint's faction from the hull it points at, which is the only way ShopWindow.cs:1010-1013 and
+   * ItemList.cs:144 can both let it through) and G16 already checks that everything sharing a hull
+   * family agrees. */
+  {
+    const painted = new Set();         // hull guids some emitted paint points at
+    const paintGuids = new Set(cards.filter(c => c.cardView2 === 'ShipPaint').map(c => c.cardGUID));
+    cards.filter(c => c.cardView2 === 'ShipPaint').forEach(p => {
+      const target = shipByGuid.get(p.shipCardGuid);
+      if (!target) {
+        errs.push(`ShipPaint ${p.cardGUID}: shipCardGuid ${p.shipCardGuid} has no Ship card - ItemList.cs:129 dereferences it on every hangar filter pass and it fits no hull at all`);
+        return;
+      }
+      painted.add(target.cardGUID);
+      if (target.nextShipCardGuid) painted.add(target.nextShipCardGuid);
+    });
+    const withBay = flyable.filter(c => (c.Slots || []).some(s => s.SystemType === 'ship_paint'));
+    const bare = withBay.filter(c => !painted.has(c.cardGUID));
+    bare.forEach(c => errs.push(
+      `Ship ${c.cardGUID} (tier ${c.Tier}) has a ship_paint bay and NO paint points at it - the bay `
+      + `is unfillable, and the per-cell check above cannot see it because any other paint at tier `
+      + `${c.Tier} satisfies that cell`));
+    console.log(`  paint coverage: ${withBay.length - bare.length}/${withBay.length} player-flyable `
+      + `hull card(s) with a ship_paint bay have at least one fittable paint`);
+
+    /* ---- AND A PAINT NEVER CARRIES ShipObjectKeyRestrictions.
+     * The dump's own paints all carry one, so a future re-import will offer them, and now that
+     * restrictions are live for every other family the obvious move is to "finish the job". Do not.
+     * The per-hull lock for a paint is shipCardGuid, checked immediately above and at ItemList.cs
+     * :129, ShopWindow.cs:1039 and GUIShopPaperDoll.cs:159. A restriction list adds nothing the
+     * player can see - GuiAdvancedRequirementsPanel.cs:60-77 renders the PaintCard's ship name
+     * instead and skips the restriction block entirely - and can only subtract: the server gate at
+     * ContainerVisitor.java:134-135 applies to a paint like anything else, so an entry that does not
+     * exactly match the hull shipCardGuid already names is a paint nothing can wear. */
+    cards.filter(c => c.cardView2 === 'ShipSystem' && paintGuids.has(c.cardGUID)
+                   && (c.ShipObjectKeyRestrictions || []).length).forEach(c => errs.push(
+      `ShipSystem ${c.cardGUID} carries a ShipPaint card AND ShipObjectKeyRestrictions - a paint's `
+      + `per-hull lock is shipCardGuid; the restriction list is invisible in the tooltip and can `
+      + `only make the paint unwearable`));
+  }
 
   /* The server keys the hangar by serverId and copies serverId from ShipCard.HangarID at purchase,
    * so two sellable ships of one faction sharing a HangarID overwrite each other in the hangar. */
@@ -5298,18 +5597,45 @@ function validate(cards) {
     });
   });
 
-  /* Price VALUES must be integers or NEGATIVE POWERS OF TWO: the server charges ceil(value*count)
-   * while the client compares the raw float and derives the buy-arrow step as round(1/value).
-   * Only those two families make the two sides agree exactly. And at most TWO currency components:
-   * the shop row has exactly two icon/label pairs and the loop silently overwrites the second. */
-  const priceOk = v => Number.isInteger(v) ||
-    (v > 0 && Number.isInteger(1 / v) && ((1 / v) & ((1 / v) - 1)) === 0);
+  /* Price VALUES must be DYADIC RATIONALS - an integer plus some sum of negative powers of two.
+   *
+   * Three pieces of arithmetic run over the same number and they have to land on the same answer:
+   * the server charges ceil(value * count) (ContainerVisitor:245) and credits (long)(value * count)
+   * on a sale (:576); the client refuses the purchase when Count < value * count with an INTEGER
+   * Count (Price.cs:70); and the tooltip prints the raw product. Any integer count of a dyadic
+   * value is computed exactly in binary floating point, so all three agree. 0.03 is the canonical
+   * failure - 0.03 * 33 is 0.9900000000000001, and the three sides round it three ways.
+   *
+   * The rule used to be "integer, or a negative power of two", which is the same idea drawn too
+   * tight: it rejected 1.5 tylium a round and 22.5 cubits a repair cell, which are 19 of the
+   * original's own prices and are perfectly exact. Sums of powers of two are admitted now; a
+   * denominator finer than 2^20 is not, because nothing in a shop is priced in millionths and the
+   * cutoff is what stops the test degenerating into "is representable at all".
+   *
+   * Values BELOW 1 get a warning as well as the test. GUIShopConfirmWindow.GetPurchaseUnit:618-628
+   * takes the smallest price component and, when it is under 1, makes the buy arrow step
+   * round(1/value) - so 1/2^n steps to a whole unit of currency and anything else (3/4 steps by 1
+   * and charges 0.75) leaves the server rounding a fraction on every click. It is a rounding
+   * nuisance, not a disagreement, so it must not fail the build: the dump prices standard rounds
+   * to sell at 0.75 tylium each.
+   *
+   * And at most TWO currency components: the shop row has exactly two icon/label pairs and the
+   * loop silently overwrites the second. */
+  /* Zero is allowed and is not the same as an absent key. 136 of the dump's own level cards carry
+   * Cubits at exactly 0, and ContainerVisitor.upgradeSystemByPack reads that key - so removing the
+   * zero and synthesising one are both wrong in different directions, and the rule must not push
+   * anyone toward either. */
+  const priceOk = v => v >= 0 && Number.isInteger(v * 1048576);
   cards.filter(c => c.cardView2 === 'Price').forEach(c => {
     ['BuyPrice', 'UpgradePrice', 'SellPrice'].forEach(k => {
       const items = (c[k] && c[k].items) || {};
       Object.entries(items).forEach(([g, v]) => {
         if (!priceOk(v))
-          errs.push(`Price ${c.cardGUID}.${k}[${g}] = ${v} is neither an integer nor a negative power of two - ceil() vs raw float disagree`);
+          errs.push(`Price ${c.cardGUID}.${k}[${g}] = ${v} is neither an integer nor a negative power of two nor a sum of the two - ceil() vs raw float disagree`);
+        else if (v > 0 && v < 1 && !Number.isInteger(1 / v))
+          console.warn(`WARN Price ${c.cardGUID}.${k}[${g}] = ${v}: under 1 and not 1/2^n, so the `
+            + `buy arrow steps by round(1/${v}) = ${Math.round(1 / v)} and each step charges `
+            + `${v * Math.round(1 / v)} - the server rounds that, the tooltip does not`);
       });
       if (Object.keys(items).length > 2)
         errs.push(`Price ${c.cardGUID}.${k} has ${Object.keys(items).length} currency components - the shop row only renders two`);
@@ -5320,6 +5646,714 @@ function validate(cards) {
     if (c.CanBeSold && nSell === 0)
       errs.push(`Price ${c.cardGUID}: CanBeSold with an empty SellPrice - selling destroys the item for zero`);
   });
+
+  /* ============================================================ ITEM AND ABILITY INTEGRITY  G1-G17
+   *
+   * The equipment pass multiplies the catalogue roughly sevenfold and adds a ten-level upgrade
+   * ladder, so most of what follows is vacuous on today's content and has teeth the moment a
+   * content package lands. That is deliberate: a rule written after the bug it would have caught is
+   * a rule that already cost a debugging session. Where a rule IS live today it says so.
+   *
+   * Everything here is derived from the server's own sources - the Java card classes, the Java
+   * enums, the ability factory's switch, the shipped ShipConfigTemplates - rather than from lists
+   * kept in this file. A hardcoded list stops covering the thing it was written for as soon as the
+   * source moves, and does it silently.
+   */
+  {
+    const sysCards = cards.filter(c => c.cardView2 === 'ShipSystem');
+    const abCards = cards.filter(c => c.cardView2 === 'ShipAbility');
+    const conCards = cards.filter(c => c.cardView2 === 'ShipConsumable');
+    const shipCardList = cards.filter(c => c.cardView2 === 'Ship');
+    const priceOfGuid = new Map(cards.filter(c => c.cardView2 === 'Price').map(c => [c.cardGUID, c]));
+    const buyCount = p => Object.keys((p && p.BuyPrice && p.BuyPrice.items) || {}).length;
+
+    /* ---- G17  EVERY CARD CARRIES EVERY FIELD ITS JAVA CLASS DECLARES, AND EVERY ENUM-TYPED FIELD
+     * NAMES A REAL CONSTANT.
+     *
+     * Gson allocates through UnsafeAllocator, so a field the JSON omits is left null (or at the
+     * primitive default) and no constructor ever runs to fix it. The card writers dereference their
+     * fields unguarded - ShopItemCard.write does bw.writeByte(shopItemType.value) - so an omitted
+     * reference field or an enum name that is not a real constant is an NPE inside the catalogue
+     * push, which the server answers by closing that player's socket mid-session with nothing on
+     * the client to explain it.
+     *
+     * Both the view -> class map and the field list are parsed out of the server, not restated
+     * here: CardBuilder's own deserialize switch gives the class, and the class's source gives the
+     * fields and their types. Only depth-zero declarations count, so the nested Sticker / RoomDoor /
+     * RoomNpc / AvatarIndex helper classes do not leak in as phantom card fields.
+     *
+     * LIVE TODAY: this is the rule that catches ItemType 'Consumable' on the seven LOOT_EXTRAS
+     * Price cards - 'Consumable' is a ShopCategory constant and not a ShopItemType one. */
+    {
+      const CARD_SRC = path.join(CORE_SRC, 'templates/cards');
+      const viewClass = (() => {
+        try {
+          const src = fs.readFileSync(path.join(CORE_SRC, 'templates/templates/readers/CardBuilder.java'), 'utf8');
+          const m = {};
+          for (const x of src.matchAll(/case\s+(\w+)\s*->\s*card\s*=\s*context\.deserialize\(json,\s*(\w+)\.class\)/g))
+            m[x[1]] = x[2];
+          return Object.keys(m).length ? m : null;
+        } catch { return null; }
+      })();
+
+      const fieldCache = new Map();
+      const declaredFields = (cls, depth = 0) => {
+        if (fieldCache.has(cls)) return fieldCache.get(cls);
+        let src;
+        try { src = stripJavaComments(fs.readFileSync(path.join(CARD_SRC, cls + '.java'), 'utf8')); }
+        catch { return null; }
+        const open = src.indexOf('{', src.search(/\bclass\s+\w+/));
+        // Keep only the text at brace depth zero inside the class body: that excludes method
+        // bodies, constructors and nested classes in one pass.
+        let d = 0, shallow = '';
+        for (let i = open + 1; i < src.length; i++) {
+          const ch = src[i];
+          if (ch === '{') { d++; continue; }
+          if (ch === '}') { if (d === 0) break; d--; continue; }
+          if (d === 0) shallow += ch;
+        }
+        const out = [];
+        const re = /(?:@SerializedName\(\s*"([^"]+)"\s*\)\s*)?(?:public|protected|private)\s+(?!static\b)(?:final\s+)?([\w.]+(?:\s*<[^;]*?>)?(?:\s*\[\s*\])?)\s+(\w+)\s*(?:=[^;]*)?;/g;
+        for (const m of shallow.matchAll(re))
+          out.push({ json: m[1] || m[3], type: m[2].replace(/\s+/g, '') });
+        const ext = /\bclass\s+\w+\s+extends\s+(\w+)/.exec(src);
+        if (ext && depth < 5) { const sup = declaredFields(ext[1], depth + 1); if (sup) out.push(...sup); }
+        if (depth === 0) fieldCache.set(cls, out);
+        return out;
+      };
+      // Set<X> / List<X> / X[] all check their ELEMENT type; the wrapper is irrelevant here.
+      const elemType = t => ((t.match(/<([\w.]+)>/) || [])[1] || t.replace(/\[\]$/, '')).replace(/^.*\./, '');
+
+      JAVA_ENUM_PROBLEMS.forEach(p => errs.push(`enum index: ${p}`));
+      if (!viewClass) errs.push('could not parse CardBuilder.java\'s deserialize switch - refusing to emit cards whose field lists were never checked');
+      else if (!JAVA_ENUMS) errs.push('could not index the server\'s enums - refusing to emit enum-valued fields blind');
+      else {
+        const views = new Set(cards.map(c => c.cardView2));
+        views.forEach(v => {
+          const cls = viewClass[v];
+          if (!cls) { errs.push(`card view ${v} has no arm in CardBuilder's deserialize switch - every card of that view deserialises to null and the whole catalogue load aborts`); return; }
+          const fields = declaredFields(cls);
+          if (!fields || !fields.length) { errs.push(`could not parse the field list of ${cls}.java (view ${v}) - refusing to emit ${v} cards unchecked`); return; }
+          cards.filter(c => c.cardView2 === v).forEach(c => {
+            fields.forEach(f => {
+              if (!(f.json in c)) {
+                errs.push(`${v} ${c.cardGUID}: no "${f.json}" field, which ${cls} declares as ${f.type} - Gson leaves it null and the card writer NPEs, closing the player's socket`);
+                return;
+              }
+              const et = elemType(f.type);
+              if (!JAVA_ENUMS.has(et)) return;
+              const vals = Array.isArray(c[f.json]) ? c[f.json] : [c[f.json]];
+              vals.forEach(x => {
+                if (typeof x !== 'string')
+                  errs.push(`${v} ${c.cardGUID}.${f.json}: ${JSON.stringify(x)} is not a string, but ${cls} declares it as ${et} - Gson needs the enum's NAME`);
+                else if (!JAVA_ENUMS.get(et).has(x))
+                  errs.push(`${v} ${c.cardGUID}.${f.json}: "${x}" is not a ${et} constant - null enum, NPE on write, socket closed`);
+              });
+            });
+          });
+        });
+      }
+    }
+
+    /* ---- G1  A ShipSystem NEEDS A GUI CARD AT ITS OWN GUID.
+     * GameItemCard.Read fetches GUI and Price by the item's own guid and IsLoaded.Depend()s on
+     * both. The Price half is already checked above; without the GUI half the shop row and the hold
+     * tile never finish loading, and there is no timeout on the client. */
+    sysCards.forEach(c => {
+      if (!hasView(c.cardGUID, 'GUI'))
+        errs.push(`ShipSystem ${c.cardGUID}: no GUI card at its own guid - GameItemCard.Read depends on it and the row never finishes loading`);
+    });
+
+    /* ---- G3  SLOT IDS ARE UNIQUE WITHIN ONE HULL.
+     * ShipSlots.addSlot keys by SlotId, so a duplicate silently overwrites the earlier slot: the
+     * hull ends up with fewer bays than its own card lists and the paperdoll draws a control for a
+     * slot the server does not have. */
+    shipCardList.forEach(c => {
+      const seenIds = new Set();
+      (c.Slots || []).forEach(s => {
+        if (seenIds.has(s.SlotId))
+          errs.push(`Ship ${c.cardGUID}: SlotId ${s.SlotId} appears twice - ShipSlots.addSlot keys by SlotId, so the second silently replaces the first`);
+        seenIds.add(s.SlotId);
+      });
+    });
+
+    /* ---- G4  A PRICED SYSTEM MUST BE ONE THE SHOP CAN ACTUALLY STOCK.
+     * ShopProtocol.setupShop:258 stocks Level 1 and avionics unconditionally, and :267-271 also
+     * stocks Level 10 and Level 15 when starterParams().testingMode() is on, which the %dev profile
+     * sets. So a BuyPrice at any other level is money quoted for an item the store never lists.
+     *
+     * Levels 10 and 15 warn rather than error because they ARE reachable on a dev profile, and the
+     * reachable case is the dangerous one: 75 of the dump's 219 level-10 cards price themselves in
+     * tylium BELOW their own SellPrice. W5 answered that by shipping BuyPrice on level 1 only, so
+     * this branch is silent today and stays as the tripwire for a future import that reinstates a
+     * mid-ladder price. Do not "fix" a level-10 warning by inventing a price above the sell value -
+     * an absent BuyPrice already refuses the sale at ContainerVisitor:695-698. */
+    sysCards.forEach(c => {
+      if (!buyCount(priceOfGuid.get(c.cardGUID)) || c.Level === 1 || c.SlotType === 'avionics') return;
+      if (c.Level === 10 || c.Level === 15)
+        console.warn(`WARN ShipSystem ${c.cardGUID}: Level ${c.Level} with a non-empty BuyPrice - invisible in the store on a normal profile, but ShopProtocol.java:267-271 stocks it under testingMode(), where a dump-priced upgrade level can be worth more sold than bought`);
+      else
+        errs.push(`ShipSystem ${c.cardGUID}: Level ${c.Level} with a non-empty BuyPrice - ShopProtocol.setupShop stocks only Level 1, avionics, and (under testingMode) 10 and 15, so this is priced dead stock`);
+    });
+
+    /* ---- G5  THE UPGRADE CHAIN IS ACYCLIC, GAPLESS AND FULLY CARDED.
+     * Catalogue.java:119 and RefundProcessor:55 both WALK the NextCard chain to its end. A cycle is
+     * an infinite loop inside a request thread; a link with no card behind it is an NPE in the
+     * refund path and a client that waits forever for a card that never arrives. Level must step by
+     * exactly one because ContainerVisitor charges THIS card's UpgradePrice and installs the next
+     * one, so a skipped level is a level the player pays for and never gets.
+     *
+     * LIVE: 220 chains of ten rungs each (the 219 imported systems and the C-31) plus 356 items
+     * that do not ladder. Everything else in the catalogue is still Level 1 / MaxLevel 1 / next 0
+     * and passes the same rules trivially.
+     *
+     * The MaxLevel ceiling is READ OUT OF PlayerProtocol, not restated here, because the server's
+     * own cheat check is the real limit: a card claiming MaxLevel 15 would draw fifteen squares in
+     * the client's upgrade counter and then be refused at the eleventh with nothing but a server
+     * log line to say why. The dump has all fifteen rungs and re-importing them is a one-constant
+     * change in gen-systems-real.js, so this needs to be a build failure and not a comment. */
+    {
+      const upgradeCap = (() => {
+        try {
+          const m = /\bnewLevel\s*>\s*(\d+)\b/.exec(stripJavaComments(
+            fs.readFileSync(path.join(CORE_SRC, 'core/protocols/player/PlayerProtocol.java'), 'utf8')));
+          return m ? Number(m[1]) : null;
+        } catch { return null; }
+      })();
+      if (upgradeCap === null)
+        errs.push('could not find PlayerProtocol\'s "newLevel > N" upgrade cheat check - refusing to ship an upgrade ladder whose ceiling was never checked against the server\'s');
+
+      const sysByGuid = new Map(sysCards.map(c => [c.cardGUID, c]));
+      sysCards.forEach(c => {
+        if (upgradeCap !== null && c.MaxLevel > upgradeCap)
+          errs.push(`ShipSystem ${c.cardGUID}: MaxLevel ${c.MaxLevel} but PlayerProtocol refuses any upgrade to a level above ${upgradeCap} as a cheat - the top ${c.MaxLevel - upgradeCap} rung(s) are unreachable and the client still draws them`);
+        if ((c.nextShipSystemCardGuid === 0) !== (c.Level === c.MaxLevel))
+          errs.push(`ShipSystem ${c.cardGUID}: Level ${c.Level}/MaxLevel ${c.MaxLevel} disagrees with nextShipSystemCardGuid ${c.nextShipSystemCardGuid} - the chain either dead-ends early or runs past its own MaxLevel`);
+        if (!c.nextShipSystemCardGuid) return;
+        const next = sysByGuid.get(c.nextShipSystemCardGuid);
+        if (!next) {
+          errs.push(`ShipSystem ${c.cardGUID}: nextShipSystemCardGuid ${c.nextShipSystemCardGuid} has no ShipSystem card - Catalogue.java:119 walks this chain at boot and RefundProcessor:55 NPEs on it`);
+          return;
+        }
+        ['GUI', 'Price'].forEach(v => {
+          if (!hasView(next.cardGUID, v))
+            errs.push(`ShipSystem ${c.cardGUID}: upgrades to ${next.cardGUID}, which has no ${v} card - the upgraded item never finishes loading`);
+        });
+        if (next.Level !== c.Level + 1)
+          errs.push(`ShipSystem ${c.cardGUID}: Level ${c.Level} upgrades to ${next.cardGUID} at Level ${next.Level} - must be exactly +1 or the player pays for a level they never receive`);
+        if (next.MaxLevel !== c.MaxLevel)
+          errs.push(`ShipSystem ${c.cardGUID}: MaxLevel ${c.MaxLevel} but its successor ${next.cardGUID} says ${next.MaxLevel} - the client draws the ladder from whichever card it happens to hold`);
+        /* ContainerVisitor charges THIS card's UpgradePrice and installs the next one. An empty
+         * UpgradePrice is not "free by design" anywhere in the original's data - it is a level the
+         * player gets for nothing, on an item that then sells for the higher level's price. */
+        const p = priceOfGuid.get(c.cardGUID);
+        if (p && !Object.keys((p.UpgradePrice && p.UpgradePrice.items) || {}).length)
+          errs.push(`ShipSystem ${c.cardGUID}: upgradeable to ${next.cardGUID} but its Price card has an empty UpgradePrice - ContainerVisitor charges nothing and the level is free`);
+        // Walk to the end from here; a cycle shows up as a repeat within one walk.
+        const walked = new Set([c.cardGUID]);
+        let cur = next;
+        while (cur && cur.nextShipSystemCardGuid) {
+          if (walked.has(cur.cardGUID)) {
+            errs.push(`ShipSystem ${c.cardGUID}: its upgrade chain loops back to ${cur.cardGUID} - Catalogue.java:119 never terminates and the server hangs at boot`);
+            break;
+          }
+          walked.add(cur.cardGUID);
+          cur = sysByGuid.get(cur.nextShipSystemCardGuid);
+        }
+      });
+
+      /* ---- G5b  A RUNG FITS ITS OWN LEVEL'S ABILITY.
+       * Everything a weapon does lives on its ability card - damage, range, cooldown, power cost -
+       * so a level-10 gun carrying the level-1 ability guid IS a level-1 gun. It would load, equip
+       * and fire; nothing anywhere would complain; the player would just have paid nine upgrades
+       * for numbers that never moved. The only rule that catches it is this one, and it is cheap
+       * because the dump agrees the two Levels track on all 15 rungs of all 234 of its chains. */
+      const abByGuid = new Map(abCards.map(c => [c.cardGUID, c]));
+      sysCards.forEach(c => (c.shipAbilityCards || []).forEach(g => {
+        const a = abByGuid.get(g);
+        if (a && a.Level !== c.Level)
+          errs.push(`ShipSystem ${c.cardGUID} is Level ${c.Level} but fits ability ${g}, which is Level ${a.Level} - the item's whole stat block comes off the ability card, so this rung performs at Level ${a.Level}`);
+      }));
+    }
+
+    /* ---- G6/G7  WIRE-FORMAT AND DIVISOR LIMITS ON A ShipSystem.
+     * MaxCountPerShip is written as a byte, so 256 becomes 0 - which means UNLIMITED
+     * (ShopWindow.cs:1043 only applies the cap when it is > 0), turning a one-per-ship item into a
+     * fill-every-bay item. Durability is the DIVISOR in ShipSlot.quality(); at 0 the quotient is
+     * NaN, every comparison against it is false, and the repair cost calculator charges nothing. */
+    sysCards.forEach(c => {
+      if (!(Number.isInteger(c.MaxCountPerShip) && c.MaxCountPerShip >= 0 && c.MaxCountPerShip <= 255))
+        errs.push(`ShipSystem ${c.cardGUID}: MaxCountPerShip ${c.MaxCountPerShip} does not survive writeByte (0..255) - 256 wraps to 0, which means unlimited`);
+      if (!(Number(c.Durability) > 0))
+        errs.push(`ShipSystem ${c.cardGUID}: Durability ${c.Durability} - ShipSlot.quality() divides by it, so 0 gives NaN and repair becomes free`);
+    });
+
+    /* ---- G9  AN ABILITY'S ActionType MUST BE ONE AbilityActionFactory CAN BUILD.
+     * The factory's default arm throws IllegalArgumentException, and the throw escapes through
+     * AbilityCastRequestQueue.run into Sector.run's per-tick catch - which abandons timerUpdater,
+     * spaceObjectRemover and sectorZoneManagement for that tick FOR EVERYONE IN THE SECTOR. One
+     * unbuildable ability is a sector-wide stutter every time anybody presses the button.
+     * The set is PARSED from the factory's own case labels, so adding an arm ships the abilities
+     * that needed it and removing one fails this build instead of arming the outage. */
+    {
+      const dispatchable = (() => {
+        try {
+          const src = stripJavaComments(fs.readFileSync(path.join(CORE_SRC,
+            'core/sector/management/abilities/AbilityActionFactory.java'), 'utf8'));
+          // Scoped to the one switch over `type` and stopped at its default arm, so a second
+          // switch added to this file later cannot silently widen the accepted set.
+          const start = src.search(/\bswitch\s*\(\s*type\s*\)/);
+          if (start < 0) return null;
+          const end = src.indexOf('default', start);
+          const body = src.slice(start, end === -1 ? src.length : end);
+          const out = new Set();
+          for (const m of body.matchAll(/\bcase\s+([A-Za-z0-9_,\s]+?)\s*->/g))
+            m[1].split(',').forEach(s => { if (s.trim()) out.add(s.trim()); });
+          return out;
+        } catch { return null; }
+      })();
+      const ACTION_TYPES = JAVA_ENUMS && JAVA_ENUMS.get('AbilityActionType');
+      if (!dispatchable || dispatchable.size < 14)
+        errs.push(`could not parse AbilityActionFactory's case labels (got ${dispatchable ? dispatchable.size : 0}) - refusing to emit abilities whose dispatch was never checked`);
+      else {
+        // A case label that is not a real enum constant means the parse drifted, not that the
+        // server grew a new type; fail rather than quietly widening the accepted set.
+        if (ACTION_TYPES) dispatchable.forEach(t => {
+          if (!ACTION_TYPES.has(t))
+            errs.push(`AbilityActionFactory has a case for "${t}", which is not an AbilityActionType constant - the case-label parse has drifted and this rule is no longer checking anything`);
+        });
+        abCards.forEach(c => {
+          if (!dispatchable.has(c.ActionType))
+            errs.push(`ShipAbility ${c.cardGUID}: ActionType ${c.ActionType} has no arm in AbilityActionFactory - create() throws and the exception truncates the whole sector's tick every time this ability is cast`);
+        });
+      }
+    }
+
+    /* ---- G10  TargetTiers MUST BE NON-EMPTY.
+     * ShipAbility.canAffect tests membership, so an empty set matches no ship at any tier: the
+     * ability is castable, costs power, and can never resolve against a target. */
+    abCards.forEach(c => {
+      if (!Array.isArray(c.TargetTiers) || !c.TargetTiers.length)
+        errs.push(`ShipAbility ${c.cardGUID}: TargetTiers is empty - the ability can never affect a Ship of any tier`);
+    });
+
+    /* ---- G10b  A MISSILE ABILITY MUST FULLY DESCRIBE THE PROJECTILE IT SPAWNS.
+     *
+     * FireMissileAction:65-70 copies the ability's whole ItemBuffAdd onto the spawned object and
+     * then reads Speed and MaxHullPoints straight back off it through nullable getters, so an
+     * absent key is an unboxing NPE on the FIRST SHOT. LifeTime is worse than that: it arms a timer
+     * that re-throws every tick for as long as the round would have lived. And MovementSimulation
+     * .moveToDirection:60 divides by RollMaxSpeed, so a zero in any of the six rotation stats puts
+     * NaN into the Euler3 constructor and throws inside SectorMovementUpdater every frame - which
+     * is exactly why the Rocket Pack is on the drop list rather than in the catalogue.
+     *
+     * DrainLow is the other half of the rule and it points the other way. DamageMediator
+     * .dealDamageFromMissile:209-221 decides between the single-target path and the torpedo AoE
+     * path purely on whether the projectile carries DrainLow, so a plain missile that happens to
+     * have one silently stops damaging what it hit. Torpedoes are meant to be on that path and are
+     * exempt. (A consumable cannot introduce the key: applyStatsMultToIfBonusExistsInApplyOn and
+     * applyStatsAddTo both only write keys the target already has.) */
+    {
+      const MISSILE_ACTIONS = ['FireMissle', 'FireTorpedo', 'FireHeavyMissile', 'FireLightMissile'];
+      const NEEDED = ['Speed', 'MaxHullPoints', 'LifeTime', 'YawMaxSpeed', 'YawAcceleration',
+                      'PitchMaxSpeed', 'PitchAcceleration', 'RollMaxSpeed', 'RollAcceleration'];
+      abCards.filter(c => MISSILE_ACTIONS.includes(c.ActionType)).forEach(c => {
+        const s = (c.ItemBuffAdd || {}).stats || {};
+        const missing = NEEDED.filter(k => !s[k]);
+        if (missing.length)
+          errs.push(`ShipAbility ${c.cardGUID} (${c.ActionType}): ItemBuffAdd has no non-zero ${missing.join(', ')} - the spawned projectile NPEs or divides to NaN inside the sector tick on the first shot`);
+        if (c.ActionType !== 'FireTorpedo' && s.DrainLow !== undefined)
+          errs.push(`ShipAbility ${c.cardGUID} (${c.ActionType}): carries DrainLow, which routes it into dealDamageFromMissile's torpedo AoE branch - the missile hits and does nothing`);
+      });
+    }
+
+    /* ---- G11  ConsumableOption 'Using' DEMANDS AMMUNITION THAT EXISTS AND CAN BE BOUGHT.
+     * With 'Using' the weapon refuses to fire unless a matching countable is in the slot, and the
+     * refusal is silent - the trigger simply does nothing. The demand set is COMPUTED from the
+     * emitted abilities rather than restated, so it tracks whatever the ammo packages ship.
+     * ItemList.cs:135 accepts a countable when Card.Tier == tier || Card.Tier == 0, so a tier-0
+     * consumable satisfies every tier.
+     *
+     * LIVE. 78 of the 133 imported abilities are 'Using' and between them demand 30 distinct
+     * (ConsumableType, ConsumableTier) pairs. Both sides of that number are derived - the demand
+     * from the emitted ability cards here, and the supply from the emitted ShipConsumable cards -
+     * so neither the pair count nor the roster is written down anywhere it could go stale. The
+     * cross-check below compares this file's count against the one gen-systems-real.js measured
+     * independently out of the dump; they are two different derivations of the same fact, and a
+     * disagreement means a system or a whole family stopped being emitted. */
+    abCards.filter(c => c.ConsumableOption === 'Using').forEach(a => {
+      const match = conCards.filter(k => k.ConsumableType === a.ConsumableType
+        && (k.Tier === a.ConsumableTier || k.Tier === 0));
+      if (!match.length)
+        errs.push(`ShipAbility ${a.cardGUID}: ConsumableOption Using with ConsumableType ${a.ConsumableType} / ConsumableTier ${a.ConsumableTier}, and no ShipConsumable matches - the weapon silently cannot fire`);
+      else if (!match.some(k => buyCount(priceOfGuid.get(k.cardGUID))))
+        errs.push(`ShipAbility ${a.cardGUID}: its ammunition (ConsumableType ${a.ConsumableType} tier ${a.ConsumableTier}, guid(s) ${match.map(k => k.cardGUID).join('/')}) has an empty BuyPrice, so the shop never stocks it and the weapon can never be loaded`);
+    });
+
+    /* ---- G11b  WARN: a stocked consumable that no emitted ability can load.
+     * Not an error - mines and jump transponders are real, sellable, and drop from loot even while
+     * every system that fires them sits on the drop list. The point is that the set is reviewed
+     * rather than discovered, which means the list has to stay short enough to read: three classes
+     * of countable are excluded because their consumer provably is not an ability slot.
+     *   - Augments and Category Resource: consumed by the shop or by UseAugment.
+     *   - Anything setupShop (ShopProtocol.java:227-232) never stocks. It adds only Consumable,
+     *     Resource and Augment, so the one Category None card is not on sale whatever its price.
+     *   - ItemType Radio and TechAnalysis: their consumers are protocols, not slots - fleet chat
+     *     and ContainerVisitor.augmentMassActivationIsFineAndRemove respectively. */
+    const SLOTLESS_ITEM_TYPES = new Set(['Radio', 'TechAnalysis']);
+    const STOCKED_CATEGORIES = new Set(['Consumable', 'Resource', 'Augment']);
+    {
+      const demanded = new Set();
+      abCards.forEach(a => { if (a.ConsumableOption === 'Using') demanded.add(`${a.ConsumableType}/${a.ConsumableTier}`); });
+      /* Cross-check against gen-systems-real.js's own count, measured out of the dump by a
+       * different route. Never assert a literal here: the number is 30 today and is a property of
+       * which systems survived the import, so hardcoding it would turn a real regression - a
+       * dropped weapon family taking its demand with it - into a passing build. */
+      if (demanded.size !== new Set(SYSTEMS_REAL.filter(r => r.ability
+          && r.ability.dumpConsumableOption === 'Using')
+        .map(r => `${r.ability.consumableType}/${r.ability.consumableTier}`)).size)
+        errs.push(`demanded (ConsumableType, ConsumableTier) pairs: this file derives ${demanded.size} `
+          + `from the emitted ability cards, systems-real.js derives a different count from the dump - `
+          + `an ability family is being emitted with the wrong pairing key, or has stopped being emitted`);
+      console.log(`  ammunition: ${demanded.size} demanded (ConsumableType, ConsumableTier) pair(s) `
+        + `across ${abCards.filter(a => a.ConsumableOption === 'Using').length} 'Using' abilities, all supplied`);
+      const orphan = conCards.filter(k => {
+        if (k.IsAugment) return false;
+        const p = priceOfGuid.get(k.cardGUID);
+        if (!p || !buyCount(p) || p.Category === 'Resource') return false;
+        if (!STOCKED_CATEGORIES.has(p.Category) || SLOTLESS_ITEM_TYPES.has(p.ItemType)) return false;
+        return !demanded.has(`${k.ConsumableType}/${k.Tier}`) && !demanded.has(`${k.ConsumableType}/0`);
+      });
+      if (orphan.length)
+        console.warn(`WARN: ${orphan.length} stocked ShipConsumable(s) that no emitted ability demands - `
+          + `they are buyable and sellable but no weapon can load them: ${orphan.map(k => k.cardGUID).join(', ')}`
+          + (demanded.size ? '' : `. NOTE every emitted ability is still ConsumableOption NotUsing, so the demand set is `
+            + `empty and this list is the whole priced consumable roster rather than a genuine orphan set. It becomes `
+            + `meaningful when USING_ENABLED flips in gen-systems-real.js.`));
+    }
+
+    /* ---- G11c  NUCLEAR AMMUNITION MUST ROUTE TO A PROJECTILE THAT EXISTS.
+     * FireMissileAction.getMissileGUID:104-129 picks the projectile guid off the loaded countable:
+     * effectType DamageNuclear with no DamageHigh goes to MissileTorpedo, DamageHigh exactly 4.0 to
+     * MissileMiniNuke, exactly 19.0 to MissileNuke, and anything else falls out of the branch with
+     * the guid still 0. SpaceObjectFactory.createMissile throws on a guid it cannot resolve and
+     * that throw escapes into Sector.run's per-tick catch, so it is not one player's problem - it
+     * abandons the timers and the object remover for everyone in the sector, on every shot.
+     *
+     * Three emitted countables sit in that hole: the merit mines, at DamageHigh 0.3. They are safe
+     * only because FireMissileAction carries an explicit `missileGUID == 0` fallback to
+     * StaticCardGUID.MissileCard, and SelectConsumable (PlayerProtocol.java:718-743) validates
+     * neither ConsumableType nor Tier, so a crafted packet can put any countable in any slot -
+     * this is reachable on purpose, not only by accident. Check the fallback is still there. */
+    {
+      const routed = { 0: 29963472, 4: 244685066, 19: 253392099 };
+      const src = fs.readFileSync(path.join(CORE_SRC,
+        'core/sector/management/abilities/actions/FireMissileAction.java'), 'utf8');
+      const hasFallback = /missileGUID\s*==\s*0/.test(src);
+      conCards.filter(k => k.effectType === 'DamageNuclear').forEach(k => {
+        const dh = k.ItemBuffAdd.stats.DamageHigh;
+        const guid = routed[dh === undefined ? 0 : dh];
+        if (guid && !cards.some(c => c.cardGUID === guid && c.cardView2 === 'World'))
+          errs.push(`ShipConsumable ${k.cardGUID}: DamageNuclear with DamageHigh ${dh} routes to projectile ${guid}, which has no World card - createMissile throws and truncates the sector tick on every shot`);
+        if (!guid && !hasFallback)
+          errs.push(`ShipConsumable ${k.cardGUID}: DamageNuclear with DamageHigh ${dh} matches none of getMissileGUID's three cases, and FireMissileAction no longer carries the missileGUID == 0 fallback - firing it truncates the whole sector's tick`);
+      });
+    }
+
+    /* ---- G12  WARN: a module buffing a stat no hull of its tier seeds.
+     *
+     * ObjectStats.applyStatsAddTo and applyStatsMultTo (ObjectStats.java:148-180) only write keys
+     * the TARGET map already contains, and statsWithSlots is seeded solely from the Ship card's
+     * Stats block and never gains a key. So a buff on a stat the hull does not seed does nothing at
+     * all - no error, no log, the tooltip still shows the number.
+     *
+     * WARN AND NEVER ERROR. Nine of the keys real modules buff are seeded by no hull in the
+     * ORIGINAL's own data either, so no amount of extraction can ever satisfy this rule for them -
+     * it is a property of the game, not of our port. They are allowlisted below with the two CAMS
+     * keys, which are a different mechanism again.
+     *
+     * TurnSpeed and TurnAcceleration are NOT allowlisted and must never be: ObjectStats
+     * .mapObjectStats (:106-119) rewrites them to the Pitch/Yaw pairs BEFORE the containsKey test,
+     * and those four keys are seeded, so the buffs are live. They are expanded here for the same
+     * reason. */
+    {
+      const EXPAND = { TurnSpeed: ['PitchMaxSpeed', 'YawMaxSpeed'], TurnAcceleration: ['PitchAcceleration', 'YawAcceleration'] };
+      /* The nine, cross-joined from every dump ShipSystem's StaticBuffs/MultiplyBuffs keys against
+       * the union of all 95 dump Ship Stats blocks: buffed by real modules, seeded by no hull.
+       * SkillBook.java:261 maps MissileCooldown to Cooldown for SKILLS only, and
+       * RestoreBuffAction.java:37-39 reads PowerPointRestore off the ABILITY's ItemBuffAdd, so
+       * neither ever reaches ship stats. */
+      const UNSEEDABLE_BUFF_STATS = new Set([
+        'DrainResistance', 'PowerPointRestore', 'ToggleSystemCooldown',
+        'MissileCooldown', 'MissilePowerPointCost',
+        'LightMissileCooldown', 'LightMissilePowerPointCost',
+        'HeavyMissileCooldown', 'HeavyMissilePowerPointCost',
+        /* CannonAngle and MiningAngle are NOT hull stats and are not meant to be.
+         * ShipSubscribeInfo.java:97-130 - the block commented "cams system stats on abilities" -
+         * reads them straight off a fitted system's MultiplyBuffs and multiplies the FireCannon /
+         * FireMining ability's Angle by them. They never go near applyStatsAddTo. */
+        'CannonAngle', 'MiningAngle',
+      ]);
+      const seededByTier = new Map();
+      shipCardList.forEach(s => {
+        if (!seededByTier.has(s.Tier)) seededByTier.set(s.Tier, new Set());
+        Object.keys((s.Stats && s.Stats.stats) || {}).forEach(k => seededByTier.get(s.Tier).add(k));
+      });
+      const dead = new Map();
+      sysCards.forEach(c => {
+        const seed = seededByTier.get(c.Tier) || new Set();
+        ['StaticBuffs', 'MultiplyBuffs'].forEach(b => {
+          Object.entries((c[b] && c[b].stats) || {}).forEach(([k, v]) => {
+            if (b === 'MultiplyBuffs' && Number(v) === 0)
+              errs.push(`ShipSystem ${c.cardGUID}: MultiplyBuffs.${k} is 0 - applyStatsMultTo multiplies the hull's stat by it, so fitting this zeroes ${k} outright`);
+            (EXPAND[k] || [k]).forEach(key => {
+              if (seed.has(key) || UNSEEDABLE_BUFF_STATS.has(key)) return;
+              const id = `${key}|${c.Tier}`;
+              if (!dead.has(id)) dead.set(id, { stat: key, tier: c.Tier, guids: [] });
+              dead.get(id).guids.push(c.cardGUID);
+            });
+          });
+        });
+      });
+      [...dead.values()].sort((a, b) => (a.tier - b.tier) || a.stat.localeCompare(b.stat)).forEach(d =>
+        console.warn(`WARN dead buff: ${d.stat} is buffed by ${d.guids.length} tier-${d.tier} system(s) `
+          + `(${d.guids.slice(0, 6).join(', ')}${d.guids.length > 6 ? ', ...' : ''}) but no emitted tier-${d.tier} hull SEEDS `
+          + `that stat, so applyStatsAddTo/applyStatsMultTo skip it and the module does nothing`));
+    }
+
+    /* ---- G13/G15  EVERY GUID A SHIPPED ShipConfigTemplate NAMES MUST EXIST.
+     *
+     * SpaceObjectFactory.java:698 calls ShipSystem.fromGUID OUTSIDE setupWeaponConfig's try, so a
+     * config naming a guid we do not emit throws on NPC SPAWN - not at boot, not in this build, but
+     * the first time somebody flies into that sector. Every faction directory is walked, ancient/
+     * included, in both the live tree (the only one ShipConfigReader.java:17 actually reads) and
+     * the tracked config/ mirror, because a repoint applied to one and not the other is a bug that
+     * survives the next regeneration.
+     * ServerConfigurationUtils_public/ is deliberately NOT walked: it is a pristine upstream copy
+     * kept for diffing and it is not ours to keep in step.
+     *
+     * A shipGUID with no Ship card is tolerated with a warning - ancient/100_40_drone_small.json
+     * has one today and the drone spawns from a Ship card we do not emit. */
+    {
+      const roots = [
+        path.join(CORE_ROOT, 'ServerConfigurationUtils/global/ShipConfigTemplates'),
+        path.resolve(__dirname, '../../config/ShipConfigTemplates'),
+      ].filter(d => fs.existsSync(d));
+      if (!roots.length) {
+        errs.push('no ShipConfigTemplates directory found in either the live tree or config/ - refusing to bless the catalogue without checking what the NPC configs reference');
+      } else {
+        const files = [];
+        const walk = d => {
+          for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+            const p = path.join(d, e.name);
+            if (e.isDirectory()) walk(p);
+            else if (e.name.endsWith('.json') && !e.name.startsWith('!')) files.push(p);
+          }
+        };
+        roots.forEach(walk);
+        const pinnedItems = new Map(), pinnedCons = new Map(), armedSlots = [];
+        files.forEach(f => {
+          const rel = path.relative(path.resolve(__dirname, '../..'), f).replace(/\\/g, '/');
+          let parsed;
+          try { parsed = JSON.parse(fs.readFileSync(f, 'utf8').replace(/^﻿/, '')); }
+          catch (e) {
+            errs.push(`ShipConfigTemplates ${rel} does not parse: ${e.message} - ShipConfigReader takes the server down at boot on it`);
+            return;
+          }
+          (Array.isArray(parsed) ? parsed : [parsed]).forEach(cfg => {
+            if (cfg.shipGUID != null && !cards.some(c => c.cardGUID === cfg.shipGUID && c.cardView2 === 'Ship'))
+              console.warn(`WARN ${rel}: shipGUID ${cfg.shipGUID} has no emitted Ship card - that NPC cannot spawn (tolerated: ancient/100_40_drone_small.json is like this today)`);
+            (cfg.slotConfigs || []).forEach(s => {
+              if (s.itemGUID != null) { if (!pinnedItems.has(s.itemGUID)) pinnedItems.set(s.itemGUID, []); pinnedItems.get(s.itemGUID).push(rel); }
+              if (s.consumableGUID != null) { if (!pinnedCons.has(s.consumableGUID)) pinnedCons.set(s.consumableGUID, []); pinnedCons.get(s.consumableGUID).push(rel); }
+              if (s.itemGUID != null) armedSlots.push({ rel, slot: s });
+            });
+          });
+        });
+        pinnedItems.forEach((where, g) => {
+          if (!cards.some(c => c.cardGUID === g && c.cardView2 === 'ShipSystem'))
+            errs.push(`ShipConfigTemplates: itemGUID ${g} (${[...new Set(where)].join(', ')}) has no emitted ShipSystem card - ShipSystem.fromGUID at SpaceObjectFactory.java:698 is outside setupWeaponConfig's try, so this throws the first time that NPC spawns, not at boot`);
+          // G15: the guid is spoken for. If a hull ever lands on it the config silently arms a slot
+          // with something that is not a weapon.
+          if (cards.some(c => c.cardGUID === g && c.cardView2 === 'Ship'))
+            errs.push(`ShipConfigTemplates: itemGUID ${g} (${[...new Set(where)].join(', ')}) is also an emitted Ship card guid - a pinned item guid has been reused for a hull`);
+        });
+        pinnedCons.forEach((where, g) => {
+          if (!cards.some(c => c.cardGUID === g && c.cardView2 === 'ShipConsumable'))
+            errs.push(`ShipConfigTemplates: consumableGUID ${g} (${[...new Set(where)].join(', ')}) has no emitted ShipConsumable card - the NPC's weapon has no ammunition card and cannot fire`);
+        });
+
+        /* ---- G13b  AN NPC MISSILE LAUNCHER MUST BE HANDED ITS AMMUNITION IN THE CONFIG.
+         *
+         * NPCs are exempt from the ammo CHECK - AbilityAction.checkConsumablesSatisfied:143 and
+         * processConsumables:166 both return early for a non-player - but FireMissileAction is not
+         * an ability check, it is the shot itself, and getMissileGUID reads the loaded countable to
+         * decide which projectile to spawn. With ConsumableOption Using and an empty slot the card
+         * is null, the method logs and returns -1, and the mount silently never fires. That is how
+         * the outposts and weapon platforms lost their missile batteries the moment USING_ENABLED
+         * went true: setupWeaponConfig only calls setCurrentConsumable when consumableGUID != 0.
+         *
+         * Only the missile family reads the countable. Cannons, point defence and flak go through
+         * WeaponAction and never touch it, which is why they need nothing here. */
+        const MISSILE_ACTIONS = new Set(['FireMissle', 'FireTorpedo', 'FireHeavyMissile', 'FireLightMissile']);
+        armedSlots.forEach(({ rel, slot }) => {
+          const sys = cards.find(c => c.cardGUID === slot.itemGUID && c.cardView2 === 'ShipSystem');
+          if (!sys) return;   // already reported above
+          (sys.shipAbilityCards || []).forEach(ag => {
+            const a = cards.find(c => c.cardGUID === ag && c.cardView2 === 'ShipAbility');
+            if (!a || a.ConsumableOption !== 'Using' || !MISSILE_ACTIONS.has(a.ActionType)) return;
+            const ammo = slot.consumableGUID
+              && cards.find(c => c.cardGUID === slot.consumableGUID && c.cardView2 === 'ShipConsumable');
+            if (!ammo) {
+              errs.push(`${rel} slot ${slot.slotID}: ${slot.itemGUID} fires ${a.ActionType} with ConsumableOption Using and the slot has no consumableGUID - FireMissileAction.getMissileGUID reads a null card, returns -1, and the mount never fires`);
+              return;
+            }
+            if (ammo.ConsumableType !== a.ConsumableType || (ammo.Tier !== a.ConsumableTier && ammo.Tier !== 0))
+              errs.push(`${rel} slot ${slot.slotID}: ammunition ${slot.consumableGUID} is ConsumableType ${ammo.ConsumableType}/tier ${ammo.Tier} but the weapon wants ${a.ConsumableType}/${a.ConsumableTier}`);
+            if (ammo.effectType === 'DamageNuclear')
+              console.warn(`WARN ${rel} slot ${slot.slotID}: armed with nuclear ammunition ${slot.consumableGUID} - `
+                + `every shot from this NPC spawns a nuke, and SelectConsumable does not gate NPCs at all`);
+          });
+        });
+      }
+    }
+
+    /* ---- G13c  A HAND-AUTHORED CONFIG FILE MUST SURVIVE A FRESH UNPACK.
+     *
+     * The server reads ONLY the live tree, the live tree is gitignored, and a fresh checkout
+     * rebuilds it as upstream unpack + config/ overlay + the generators. A file that exists only
+     * in the live tree therefore works today and silently vanishes on the next machine - which is
+     * exactly how the outposts (200-203) and then the light/heavy platforms (204-207) shipped
+     * unarmed, twice. config/upstream-manifest.txt lists what the upstream unpack provides, taken
+     * from a pristine copy; its own header says how to regenerate it. Directories a generator
+     * owns wholesale are skipped: JsonCards (cards.js), SectorTemplates
+     * (emit-sector-templates.js), MissionTemplateConfiguration (emitMissionTemplates above). */
+    {
+      const manifestPath = path.resolve(__dirname, '../../config/upstream-manifest.txt');
+      const liveRoot = path.join(CORE_ROOT, 'ServerConfigurationUtils/global');
+      const cfgRoot = path.resolve(__dirname, '../../config');
+      if (!fs.existsSync(manifestPath)) {
+        errs.push('config/upstream-manifest.txt is missing - cannot tell hand-authored live-tree files from upstream ones');
+      } else if (fs.existsSync(liveRoot)) {
+        const upstream = new Set(fs.readFileSync(manifestPath, 'utf8').split('\n')
+          .map(s => s.trim()).filter(s => s && !s.startsWith('#')));
+        const GENERATED = new Set(['JsonCards', 'SectorTemplates', 'MissionTemplateConfiguration']);
+        const walkLive = (d, rel) => {
+          for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+            const r = rel ? rel + '/' + e.name : e.name;
+            if (e.isDirectory()) { if (!rel && GENERATED.has(e.name)) continue; walkLive(path.join(d, e.name), r); }
+            else if (!upstream.has(r) && !fs.existsSync(path.join(cfgRoot, r)))
+              errs.push(`${r} exists only in the gitignored live tree - it vanishes on a fresh unpack. Mirror it `
+                + `into config/ (and config/README.md), or add it to config/upstream-manifest.txt if a newer upstream drop provides it`);
+          }
+        };
+        walkLive(liveRoot, '');
+      }
+    }
+
+    /* ---- G14  THE THREE DELIBERATE STATION-WEAPON FIXES MUST STILL BE THERE.
+     * All three are documented at length on the STATION_OVERRIDES map: the two cone widenings exist
+     * because WeaponAction.java:72-83 enforces the arc from each hardpoint's own transform, so at
+     * 90 degrees most of a station's batteries never bear; the range/lifetime pair exists because
+     * station aggro reaches 4,000 m and the dump's 2,000 m round could never answer a sniper.
+     * They are OVERRIDES of the original's own numbers, which means a future dump re-import would
+     * revert all three and look correct doing it. This rule is the thing that notices. */
+    {
+      const STATION_OVERRIDES = [
+        [2805480538, 'Angle', 180, 'outpost long-range cannon: 90 deg leaves the flank batteries unable to bear'],
+        [3400376042, 'Angle', 360, 'outpost point defence: a last-ditch bubble with a 90 deg cone'],
+        [1849929854, 'MaxRange', 4000, 'outpost missile: station aggro is 3500/4000, so a 2000 m round can never answer a sniper'],
+        [1849929854, 'LifeTime', 55, 'outpost missile: 50 s dies ~213 m short of 4 km once the 15 m/s^2 ramp is paid'],
+      ];
+      STATION_OVERRIDES.forEach(([g, k, want, why]) => {
+        const a = cards.find(c => c.cardGUID === g && c.cardView2 === 'ShipAbility');
+        if (!a) { errs.push(`station override: ShipAbility ${g} is not emitted, so the fix "${why}" has been lost`); return; }
+        const got = Number(((a.ItemBuffAdd || {}).stats || {})[k]);
+        if (got !== want)
+          errs.push(`station override: ShipAbility ${g} ${k} is ${got} and must be ${want} - ${why}. If a dump re-import moved it, keep the override; if the override is genuinely obsolete, delete it here and on the STATION_OVERRIDES map together`);
+      });
+    }
+
+    /* ---- G16  A RESTRICTION ENTRY MUST BE A ShipObjectKey THAT IS ALSO A LOADABLE SHIP CARD.
+     * The server gate (ShipSystemCard.isObjectKeyRestrictionsBlocked) compares the hull's
+     * ShipObjectKey, but the CLIENT fetches a SHIP CARD at each entry (ShipSystemCard.cs:96-102) to
+     * name the hull in the restriction tooltip. That is the historical trap that produced
+     * "Card should not be send because it's null! 268081382 10" and an infinite loading screen: an
+     * entry has to satisfy BOTH readings, so it must be an objKey AND a guid carrying the full ship
+     * view set. hullIdentityCards() is what puts a card set at those 30 guids.
+     *
+     * WHICH card the client renders is not ambiguous: FetchCard resolves by guid, so it is the
+     * identity card at the entry itself and nothing else. That makes the rest of the rule a
+     * comparison against the hull the restriction is MEANT to name - the family's ShipList member,
+     * the one a player actually flies:
+     *   Tier               the server unlocks the item for every hull carrying this objKey, but the
+     *                      store filters by the ACTIVE hull's tier, so a disagreement makes the item
+     *                      visible on one member and invisible on another with nothing saying why.
+     *   ShipRoleDeprecated + HangarID  GuiAdvancedRequirementsPanel.cs:98 colours "Required ship:"
+     *                      by comparing the fetched card's HangarID against the active ship's, so a
+     *                      wrong one reads as unmet while you sit in the hull it names.
+     *   Faction            :93 skips a restriction entry whose Faction is not the player's, and
+     *                      TradeInWindowWidget.cs:161 hides the item outright, so a wrong faction
+     *                      makes the item nameless or invisible.
+     * HangarID is deliberately NOT required to agree across the whole family: our NPC clones share
+     * their prefab's objKey and legitimately park on HangarID 12, and 12 of the 24 keys in use
+     * today have such a clone. It is the identity card that has to be right, not the clones.
+     * LIVE TODAY: the six tiered platform weapons carry SENTRY_HULLS and exercise this. */
+    {
+      const byObjKey = new Map();
+      shipCardList.forEach(s => {
+        if (!byObjKey.has(s.ShipObjectKey)) byObjKey.set(s.ShipObjectKey, []);
+        byObjKey.get(s.ShipObjectKey).push(s);
+      });
+      const listedShipGuids = new Set(cards.filter(c => c.cardView2 === 'ShipList')
+        .flatMap(c => c.shipCardGuids || []));
+      const reported = new Set();
+      const once = (id, msg) => { if (reported.has(id)) return; reported.add(id); errs.push(msg); };
+      sysCards.forEach(c => (c.ShipObjectKeyRestrictions || []).forEach(k => {
+        const group = byObjKey.get(k);
+        if (!group) return;   // already reported by the objKey rule further up
+        ['Ship', 'World', 'GUI', 'Price', 'ShipLight'].forEach(v => {
+          if (hasView(k, v)) return;
+          once(`${k}|${v}`, `ShipSystem ${c.cardGUID}: ShipObjectKeyRestrictions entry ${k} is a valid ShipObjectKey but there is no ${v} card at guid ${k} - ShipSystemCard.cs:96-102 fetches a Ship card at the entry itself, and a card that never arrives is an infinite loading screen with no timeout`);
+        });
+        const tiers = [...new Set(group.map(s => s.Tier))];
+        if (tiers.length > 1)
+          once(`${k}|Tier`, `ShipObjectKey ${k} is shared by Ship cards ${group.map(s => s.cardGUID).join('/')} whose Tier values disagree (${tiers.join(', ')}) - the server unlocks the item for all of them while the store's equipable filter shows it at one tier only`);
+
+        /* The card the client will actually fetch. It is in `group` only if its own ShipObjectKey
+         * is k, and if it is not then the server and the client are talking about different hulls:
+         * the gate opens for family k while the tooltip names whoever owns that guid. */
+        const idCard = group.find(s => s.cardGUID === k);
+        if (!idCard) {
+          once(`${k}|identity`, `ShipObjectKey ${k}: the Ship card at guid ${k} carries ShipObjectKey ${(cards.find(x => x.cardGUID === k && x.cardView2 === 'Ship') || {}).ShipObjectKey} - the server unlocks the item for the ${k} family but ShipSystemCard.cs:100 fetches that card and names a different hull`);
+          return;
+        }
+        const listedMembers = group.filter(s => listedShipGuids.has(s.cardGUID));
+        if (listedMembers.length > 1) {
+          once(`${k}|listed`, `ShipObjectKey ${k}: Ship cards ${listedMembers.map(s => s.cardGUID).join('/')} are all in a ShipList - the identity card can only describe one of them`);
+          return;
+        }
+        // No ShipList member at all is the stations' case: the identity card IS the only card in
+        // the family, so there is nothing to compare it against.
+        if (!listedMembers.length) return;
+        ['Tier', 'ShipRoleDeprecated', 'HangarID', 'Faction'].forEach(f => {
+          if (idCard[f] === listedMembers[0][f]) return;
+          once(`${k}|${f}|id`, `ShipObjectKey ${k}: the identity card at guid ${k} has ${f} ${idCard[f]} but the player-flyable hull of that family (${listedMembers[0].cardGUID}) has ${listedMembers[0][f]} - the restriction tooltip renders the identity card, so it would describe the wrong hull`);
+        });
+      }));
+    }
+
+    /* ---- REGULATION KEYSET SANITY.
+     * applyRegulationTargeting derives the keys, so the ability-coverage rule further up can no
+     * longer fire. What it cannot see is a build in which the derivation never ran at all, which
+     * would ship both maps empty and KeyNotFoundException every ability on the client. */
+    cards.filter(c => c.cardView2 === 'Regulation').forEach(c => {
+      REGULATION_BASE_GROUPS.forEach(g => {
+        if (!(String(g) in (c.abilityTargetRelations || {})))
+          errs.push(`Regulation ${c.cardGUID}: no entry for group ${g} - applyRegulationTargeting seeds 0..3 unconditionally, so this card was written before it ran`);
+      });
+    });
+  }
 
   /* Anything a template can drop into a Hold must have all three countable views, or the row never
    * finishes loading: blank tile, matched by no filter (ItemType.None), unsellable, and it holds one
@@ -5358,8 +6392,9 @@ const boot = bootstrapCards();
 // The two starter hulls now live in HULLS (starter: true) - they are ordinary roster entries that
 // happen to be granted for free, so they must not be emitted twice.
 const starters = HULLS.filter(h => h.starter).flatMap(shipCards);
-const world = [...roomCards(), ...sectorCards(), ...sectorObjectCards(), ...sectorFurnitureCards(), ...resourceCards(), ...lootExtraCards()];
-const weapons = [...weaponCards(), ...equipmentCards(), ...missileObjectCards(), ...moduleCards(), ...cometCards()];
+const world = [...roomCards(), ...sectorCards(), ...sectorObjectCards(), ...sectorFurnitureCards(), ...consumableCards()];
+const weapons = [...realSystemCards(), ...paintCards(), ...handAuthoredSystemCards(),
+                 ...weaponCards(), ...missileObjectCards(), ...moduleCards(), ...cometCards()];
 const ADVANCED_HULLS = HULLS.filter(h => !h.npcOnly && !h.rentalOnly).map(h => Object.assign({}, h, {
   g: h.g + ADVANCED_OFFSET, advanced: true, starter: false,
   name: 'Advanced ' + h.name,
@@ -5367,7 +6402,16 @@ const ADVANCED_HULLS = HULLS.filter(h => !h.npcOnly && !h.rentalOnly).map(h => O
 }));
 const ships = [...HULLS.filter(h => !h.starter), ...NPC_HULLS, ...NPC_HEAVIES, ...ADVANCED_HULLS].flatMap(shipCards);
 const progression = progressionCards();
+/* Last, because it reads everything else: which object keys already carry a card set, which hull
+ * is the ShipList member of its family, and what that hull's World and GUI cards say. */
+ships.push(...hullIdentityCards([...boot, ...starters, ...world, ...ships, ...weapons, ...progression]));
 const all = [...boot, ...starters, ...world, ...ships, ...weapons, ...progression];
+
+/* The Regulation card's two maps are the one thing that cannot be written where the card is
+ * declared: their keyset is every AbilityGroupId that actually shipped, and the abilities are built
+ * further down the file than the sector cards. Mutates the card in place, so the emitted order is
+ * untouched. Must run BEFORE validate() - the empty maps it replaces would fail the sanity rule. */
+const nGroups = applyRegulationTargeting(all);
 
 const errors = validate(all);
 if (errors.length) {
@@ -5392,3 +6436,23 @@ console.log(`validation passed - ${all.length} cards`);
 console.log(`  00-bootstrap.json  ${n1}`);
 console.log(`  10-ships.json      ${n2}`);
 console.log('  by view:', Object.entries(byView).map(([k, v]) => `${k}=${v}`).join(' '));
+// The Regulation keyset is derived, so print it: it is the one emitted number nothing else reports,
+// and a drop in it means a whole ability family stopped being emitted.
+console.log(`  Regulation: ${nGroups} AbilityGroupId key(s), derived from the emitted abilities`);
+
+/* The systems the import deliberately leaves out, printed every run. These are not a data defect -
+ * every one of them would throw out of AbilityActionFactory and truncate the sector's tick - but
+ * they ARE missing content a returning player will look for by name, including four complete tiered
+ * families. Burying that in a JSON file nobody opens is how it gets forgotten. */
+console.log(`  ${SYSTEMS_DROPPED.dropped.length} dump system(s) NOT shipped (tools/cardgen/systems-dropped.json):`);
+SYSTEMS_DROPPED.dropped.forEach(d =>
+  console.log(`    ${d.guid}  ${d.slot}/t${d.tier}  ${d.key}  - ${d.reason}`));
+// Same reasoning for the paint import, which drops its own. The list lives in paints-real.js and
+// is regenerated from the dump, so a future re-import that quietly drops more shows up here.
+console.log(`  ${PAINTS_DROPPED.length} dump paint(s) NOT shipped (tools/cardgen/paints-real.js):`);
+PAINTS_DROPPED.forEach(d =>
+  console.log(`    ${d.sys}  ship_paint/t${d.tier}  ${d.key}  - ${d.reason}`));
+// And the consumable import's own drop list, for the same reason.
+console.log(`  ${CONSUMABLES_DROPPED.length} dump consumable(s) NOT shipped (tools/cardgen/consumables-real.js):`);
+CONSUMABLES_DROPPED.forEach(d =>
+  console.log(`    ${d.guid}  ${d.key}  - ${d.reason}`));

@@ -5,19 +5,24 @@ These changes also live as one commit each on the
 which is what you actually clone and run. This file is the annotated changelog; the `patches/`
 files are the same changes as standalone diffs against pristine upstream, for review or reapply.
 
-Thirteen patches against [BSGOCore](https://github.com/luigeneric/BSGOCore) at baseline
+Twenty patches against [BSGOCore](https://github.com/luigeneric/BSGOCore) at baseline
 **`23bad98a`** ("Fix PulseManeuver, fix DynamicMovementController", #10).
 
-Together they touch **18 files, +365 / −59**. Verified: applied in order with
+Together they touch **36 files, +1 151 / −83**. Verified: applied in order with
 `git apply --ignore-whitespace` to a clean worktree of `23bad98a`, the result is byte-identical
 (modulo CRLF) to the tree this server actually runs.
+
+**0015–0020 are back-filled documentation**, not new work. Those fifteen files were changed across
+earlier sessions and never added to `tools/mkpatches.js`, so the coverage check had been failing and
+`patches/` had gone stale for 0006, 0007, 0008, 0010, 0012 and 0013 as well. Their entries below are
+short on purpose: the reasoning for each lives in the code comments, which is where it is useful.
 
 ## Why patches and not a fork
 
 BSGOCore is AGPL-3.0 and actively developed. Patches keep our changes reviewable in isolation,
-make it obvious which are bug fixes worth sending upstream (1, 3, 5, 6, 8, 9, 12) and which are
-deployment choices that are only right for a small private server (2, 4, 11, 13), and let us rebase
-without a merge history nobody wants to read.
+make it obvious which are bug fixes worth sending upstream (1, 3, 5, 6, 8, 9, 12, 14, 17, 18, 19)
+and which are deployment choices that are only right for a small private server (2, 4, 11, 13, 15,
+16, 20), and let us rebase without a merge history nobody wants to read.
 
 ## Applying
 
@@ -40,7 +45,12 @@ Either one alone leaves BSGOCore in a state that does not compile.
 
 `tools/mkpatches.js` regenerates the whole set from a modified BSGOCore working tree and **fails**
 if any modified file is not covered by exactly one patch group — so a change can never ship
-undocumented.
+undocumented. It reads the working tree from `BSGOCore/` beside this file, or from `BSGOCORE_PATH`.
+
+That tree is the clone described above with our changes applied on top; it is gitignored and not
+part of a fresh checkout, so run the clone first or the script has nothing to diff. If you edit
+`server/` directly, copy the touched files across before regenerating — `server/` is the tree that
+runs, the clone is only the diff baseline.
 
 ---
 
@@ -100,7 +110,7 @@ than the login path because `sendLoadNextScene()` has nine call sites.
 
 ## 0006 — getStatOrDefault
 
-`GameProtocol.java`, `MovementController.java` · 2 files, +8 −8
+`GameProtocol.java`, `MovementController.java` · 2 files, +26 −8
 
 Eight unguarded `getStat` calls become `getStatOrDefault`.
 
@@ -113,13 +123,27 @@ map lookup, so a missing stat auto-unboxes `null`:
 there it is a card bug — `tools/cardgen/cards.js` validates the full flight-stat set and fails the
 build rather than letting it reach the client.
 
+`GameProtocol.java` also carries a **docking faction check** that has nothing to do with
+`getStatOrDefault`. It rides here because a file can belong to only one patch group and this one
+already owned it. `IsDockable` is a property of the card, so it means "this is a station", not "this
+station will have you" — an attacker could sit inside an enemy outpost's guns and dock out on demand.
+Harmless while outposts were scenery; the dominant tactic the moment they shot back.
+
 ## 0007 — persistence and shutdown
 
-`SqLiteProvider.java`, `GameServer.java` · 2 files, +157 −20
+`SqLiteProvider.java`, `GameServer.java` · 2 files, +182 −20
 
 The largest patch, and the one that stops progress vanishing:
 
 - `writeLocation` never persists `Disconnect`, and null-guards the previous location.
+- **The restore side of the same bug.** `fetchPlayer` applied `previousLocation()` as the *current*
+  location and threw the persisted current one away, so the periodic snapshot wrote
+  `previous_game_locations_id = Starter` and the next restart resumed the character into
+  faction-select — where picking a faction calls `setupBasicHangar()` and re-rolls a finished
+  character. The writer then refuses to save at all from `Starter`/`Avatar`, so the mangled
+  character could never be persisted again either. This is why characters kept vanishing.
+- Capital rentals expire at hangar load (see 0016), because there is no server-to-client
+  remove-ship message to do it live.
 - `bulkWritePlayerToDb` gives each player its own transaction via
   `QuarkusTransaction.requiringNew()`, so one bad row cannot roll back everyone else's session.
 - `fetchSkillBook` restores by **skill hash**, not serverID.
@@ -131,11 +155,19 @@ Related upstream bug, **not** patched: `ApplicationBootstrap.onShutdown()` logs
 
 ## 0008 — launcher module binding
 
-`ShipBindings.java` · 1 file, +6 −1
+`ShipBindings.java` · 1 file, +20 −1
 
 The guard around the binding loop accepted `weapon` only, but the `FireMissle` branch sits inside
 it — so a launcher-typed slot could never emit a missile-pod binding and the pod simply never
-appeared on the model. Widened to `weapon || launcher`.
+appeared on the model. Now widened to every weapon-bearing slot type: `weapon`, `launcher`, `gun`,
+`defensive_weapon`, `special_weapon`. The capital families use the last three — our Pegasus (5017)
+and Basestar (5117) carry six `gun` and two `defensive_weapon` mounts, so eight of their twelve
+hardpoints rendered nothing at all. Widening cannot bind a non-weapon: the switch below leaves
+`moduleGUID` at 0 for any ability that does not fire.
+
+The same switch also dispatches the new `FireKillCannon` / `FireShotgun` / `FireMachineGun` and
+`FireHeavyMissile` / `FireLightMissile` action types to the turret and pod bindings — the model side
+of what 0014 does to the server side.
 
 ## 0009 — mining respawn and asteroid XP
 
@@ -153,9 +185,9 @@ Two economy bugs:
 
 ## 0010 — shop and avatar guards
 
-`ContainerVisitor.java`, `ShopProtocol.java`, `PlayerProtocol.java` · 3 files, +21 −3
+`ContainerVisitor.java`, `ShopProtocol.java`, `PlayerProtocol.java` · 3 files, +106 −4
 
-Four server-side holes, three of them reachable only from a modified client:
+Five server-side holes, three of them reachable only from a modified client:
 
 - `checkItemToBuy` validated only price, never `ItemType` — so a hand-crafted `MoveItem`
   shop→hold bought a `StoreShip` straight into cargo, bypassing the level and faction checks
@@ -167,6 +199,19 @@ Four server-side holes, three of them reachable only from a modified client:
   *currency* (`eventRessources: [11,12,13]`), not as goods.
 - `CreateAvatar` gained the location guard `SetFaction` already had. Everything below it re-grants
   the starter resources, so replaying it from in-flight was a free-resource exploit.
+- **`upgradeSystemByPack` gave away levels.** The tuning-kit odds are
+  `packCount / (cubitsPrice / 1000)`, and the `UpgradePrice` was read straight out of the map with
+  no check. A missing Cubits entry unboxes `null`; a Cubits entry at **0** divides by zero, so the
+  chance is `+Infinity`, `Mathf.min` pins it to `1f` and the roll always succeeds. The method never
+  charges the `UpgradePrice` at all — only the kits — so that is a guaranteed free level-up for one
+  tuning kit. 136 of the 2 190 upgrade levels in the card dump price Cubits at exactly 0, so it arms
+  itself the moment `UserUpgradeable` systems ship. No price, no pack upgrade. The ordinary cubit
+  upgrade path is untouched.
+
+Two of these files also carry **capital-rental** hooks: `ContainerVisitor` turns a rental pass into a
+`rentCapital` call rather than an item, and `PlayerProtocol.rentCapital` charges the dynamic price
+and seats the hull at an offset hangar id. They are here because those files already belonged to
+this group; the rest of that feature is 0016.
 
 ## 0011 — economy tuning
 
@@ -187,7 +232,7 @@ are deliberately left at 99999999.
 
 ## 0012 — outpost spawn diagnostics
 
-`OutpostSpawnTimer.java` · 1 file, +21 −2
+`OutpostSpawnTimer.java` · 1 file, +151 −1
 
 `spawnOp`'s catch block was empty. `createOutpost` throws `IllegalStateException` for exactly one
 reason — the sector has no `Outpost` template of the requested faction — and the timer retries
@@ -202,11 +247,20 @@ Now logged once per faction — the retry itself is by design, since the same ti
 sector's outpost appears — plus an `info` line on a successful spawn. That line is what verified
 the whole outpost rollout.
 
+The timer has since grown **the outpost's defence ring**, which is most of this patch's size. The
+original's ladder (`Outposts.txt`): level 3 is two light sentries, 4 is four light, 5 is two medium
+plus two light, 6 is four medium, 7 is two heavy plus two medium, 8 and up is four heavy. Ring
+positions come from the sector template's own ring entries, the card guids swap with the tier, and
+base-sector rings are pinned to heavy. Reconciliation runs on a level change and on a full wipe but
+never on a partial kill, so shooting one platform means something while a ring destroyed outright
+returns with its outpost. The tier guids must stay in step with `PLATFORM_GUID` in
+`tools/cardgen/emit-sector-templates.js`, which authors those cards.
+
 ---
 
 ## 0013 — outpost seeding from star flags
 
-`SectorFactory.java` · 1 file, +33 −10
+`SectorFactory.java` · 1 file, +44 −11
 
 `setupOutpostStates` seeded outpost points for two hardcoded sector ids: 27 got 3 000 Cylon points,
 47 got 3 000 Colonial. Everywhere else started at zero, and `OutpostState.isOutPost()` needs 900
@@ -228,13 +282,141 @@ this is where it went.
 
 ---
 
+## 0014 — ability dispatch and armour
+
+`AbilityActionFactory.java`, `FireMissileAction.java`, `SectorAlgorithms.java` · 3 files, +44 −3
+
+Three changes that have to land together, because the systems the first one unblocks are weapons and
+half of what a weapon does is decided by the third.
+
+**Five missing `AbilityActionType` arms.** `create` had fourteen cases and a `default -> throw`.
+The throw escapes `AbilityCastRequestQueue.run` into `Sector.run`'s per-tick catch, which abandons
+the remaining timers, the object remover and the zone update *for every player in that sector* — and
+on a `Launch: Auto` weapon it does so every frame. `FireMachineGun`, `FireShotgun` and
+`FireKillCannon` join `FireCannon`: their abilities carry only accuracy, angle, damage and range, so
+they are hitscan guns under other names. `FireHeavyMissile` and `FireLightMissile` join `FireMissle`:
+theirs carry `Speed`, `MaxHullPoints`, `LifeTime` and the six rotation stats, which is exactly the
+projectile stat set `FireMissileAction` reads back when it spawns the round.
+
+`FireLightMissile` has no user yet — its only family in the card dump is the Rocket Pack, dropped for
+having all six rotation stats at zero. It is wired anyway so that fixing the pack is a card change
+with no server change behind it. **Do not delete it as dead code.**
+
+**`getMissileGUID` could return 0.** The `DamageNuclear` branch recognises `DamageHigh` 4.0 and 19.0
+and nothing else, so any other nuclear countable — the three mines at 0.3, or anything added later —
+fell out with the guid still 0, and `SpaceObjectFactory.createMissile` throws on a guid it cannot
+resolve. Same sector-tick truncation as above, and reachable on purpose: `SelectConsumable` validates
+neither `ConsumableType` nor `Tier`, so a crafted packet can seat a mine in a missile slot and hold
+the fire button. Unrecognised now fires an ordinary missile and logs.
+
+**`ArmorAlgorithmV0` → `V1`.** V0 returns a constant 1 — armour discarded, `ArmorPiercing` inert,
+every armour-plating module and every hull `ArmorValue` decorative. V1 is the original's curve,
+`(100 − clamp(armor − armorPiercing, 0, 99.9)) / 100`.
+
+> **This one changes damage numbers for every player and every NPC in every sector.** It is not
+> confined to new content: 97 of the stat blocks the card generator already emits carry a non-zero
+> `ArmorValue` and only 40 abilities answer with any `ArmorPiercing`, so most existing targets get
+> harder to kill. It is a deliberate call, not a bug fix — without it the whole armour line of the
+> equipment pass ships as items that do nothing. Revert by putting `ArmorAlgorithmV0` back on the
+> single commented line in `SectorAlgorithms.defaultAlgorithms()`; nothing else moves.
+
+---
+
+## 0015 — galaxy update payload
+
+`Galaxy.java` · 1 file, +37 −5
+
+Upstream shipped a hardcoded dynamic-mission probe — an Ancient mission in sector 63 — with its
+three siblings commented out. Sector 63 is not on our galaxy map, and
+`GalaxyMapMediator.UpdateDynamicMissions` throws on the client every time it arrives: 37 unhandled
+exceptions in one play session, each aborting the rest of that galaxy update mid-apply. That is what
+left the sector-entry prompt on screen forever. Nothing computes dynamic missions yet, so we send
+none. Restore it alongside a real generator, and only for sector ids that exist on the map card.
+
+Also here, because it is the same file: live per-faction outpost counts, which is what the
+capital-rental price in 0016 is calculated against.
+
+## 0016 — capital rental
+
+`Hangar.java`, `DialogProtocol.java` · 2 files, +45 −0
+
+The Pegasus and the Basestar are rented by the hour from the Admiral (Colonial) or Number Six
+(Cylon), exactly as the original did it — the capital is never sold in the shop, it is authorised in
+the CIC. Charged in merits at the `CapitalRental` price, which falls as your faction loses the map.
+
+`Hangar.removeShip` exists for the expiry: if the rented hull was active, activation falls back to
+any remaining ship so the index cannot dangle. There is no server-to-client remove-ship message, so
+expiry is enforced at hangar load (0007) where the client rebuilds its hangar anyway.
+
+## 0017 — NPC combat
+
+`SpaceObjectFactory.java`, `NpcTimer.java`, `NpcStaticTimer.java`, `NpcBehaviourTemplates.java`,
+`AbilityCastRequestQueue.java` · 5 files, +140 −7
+
+**The reason NPCs never shot back.** `createBotFighter` arms a bot with its `OwnerCard`'s level, and
+`getFirstBestConfigForGUIDAndLevel` demanded `config.level` equal that level exactly. Every NPC Owner
+card is Level 1 while every shipped `ShipConfigTemplate` carries the NPC's *rank* — upstream
+10/20/75, ours 15/25/45/120 — so the lookup matched nothing for every bot in the game and each one
+spawned with zero armed slots, silently. Bots flew, chased and rammed, and never fired. Stations were
+unaffected because they use the no-level overload, which is why only they ever fought. The level is a
+preference now: exact match wins, otherwise any config for that hull.
+
+The rest is the fallout of making that work — an unarmed bot now warns once per sector per run rather
+than flooding, stale target-cache entries are pruned when a station leaves the sector, removed ships
+stop casting and re-registering autocasts, and station aggro moved to 3 500 acquire / 4 000 leash so
+that something which opens fire from just outside acquisition range is not dropped the moment it
+drifts a metre further out.
+
+## 0018 — outpost death and loot
+
+`DamageMediator.java`, `LootDistributorUtil.java`, `LootClaimHolder.java`,
+`SpaceObjectRemover.java` · 4 files, +73 −6
+
+An outpost at hull zero retreats rather than exploding — it leaves with `JumpOut`, which plays the
+client's FTL-out — but it still has to pay out like a kill, and only for the shot that actually
+removed it. Outpost loot arrives with a null `lootOwner`, and that null used to abort
+`objectLeftUpdate` mid-drain and leave the removed object in the sector as a zombie: marked, still
+ticking, client never told. Loot now falls back to the highest player damage dealer, and
+`SpaceObjectRemover` logs a throwing subscriber and keeps draining instead of abandoning the remove.
+
+## 0019 — collision resolution
+
+`CollisionResolution.java` · 1 file, +45 −1
+
+Missile × asteroid had no branch at all: the round fell through the whole if/else, was neither
+removed nor detonated, and carried on through the rock while the asteroid took no damage. Both are
+destroyed now, damage first so the asteroid dies by the normal path and still drops its resources.
+Static × static threw instead of being ignored — there is nothing to resolve when neither body can be
+pushed — and the warning it raised now fires once per pair rather than ten times a second.
+
+## 0020 — debug console
+
+`DebugProtocol.java`, `SpaceSubscribeInfo.java` · 2 files, +127 −0
+
+Four operator commands: `where`, `npcs`, `heal` and `push <speed> [seconds]`. `push` is why
+`SpaceSubscribeInfo` gained a live stat overwrite — the server clamps every client speed report to
+the ship's max, so the stat has to move for the shove to survive. Nothing here is persisted and
+ordinary gameplay never uses that setter; stats otherwise change through buffs and modifiers, which
+the client is told about.
+
+---
+
 ## Data changes that are not patches
 
 `ServerConfigurationUtils/` is gitignored upstream, so config cannot ship as a diff.
 
 - **`config/`** in this repo holds the hand-authored collider and loot templates. See its README.
-- **`tools/cardgen/cards.js`** generates the whole `JsonCards/` catalogue (1 260 cards). Never
-  hand-edit those files.
+- **`tools/cardgen/cards.js`** generates the whole `JsonCards/` catalogue (11 696 cards). Never
+  hand-edit those files. Most of that is the equipment import: 219 systems × 10 upgrade levels,
+  with their abilities, prices and icons. The generated modules it reads —
+  `systems-real.js`, `paints-real.js`, `consumables-real.js`, `hulls-real.js` — each have their own
+  `gen-*.js` and are regenerated from the card dump, not edited.
+- **Item restrictions are one constant.** `RESTRICTIONS_ENABLED` in `gen-systems-real.js` decides
+  whether the catalogue's `ShipObjectKeyRestrictions` lists are the real per-hull ones or empty.
+  Setting it back to `false` and re-running that script plus `cards.js` returns every item in the
+  store to fitting every hull of its tier. It is the revert for anything the restriction lists turn
+  out to break, and it covers the hand-authored avionics and role modules too — they read the flag
+  the generator stamps into the module rather than carrying their own.
 - **Sector templates** are generated, not duplicated. `tools/cardgen/emit-sector-templates.js`
   writes one template per star in `galaxy.js` and augments the three upstream files in place. It is
   idempotent and deterministic — re-running produces byte-identical output — and it is verified to

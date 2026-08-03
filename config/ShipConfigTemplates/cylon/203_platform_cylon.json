@@ -1,0 +1,20 @@
+[{
+    "id": 203,
+    "shipGUID": 1783473197,
+    "level": 1,
+    "slotConfigs": [
+        { "slotID": 0,  "itemGUID": 1957961850 },
+        { "slotID": 1,  "itemGUID": 1957961850 },
+        { "slotID": 2,  "itemGUID": 1957961850 },
+        { "slotID": 3,  "itemGUID": 3756543070, "consumableGUID": 218608438 },
+        { "slotID": 4,  "itemGUID": 1957961850 },
+        { "slotID": 5,  "itemGUID": 1957961850 },
+        { "slotID": 6,  "itemGUID": 1957961850 },
+        { "slotID": 7,  "itemGUID": 1957961850 },
+        { "slotID": 8,  "itemGUID": 1957961850 },
+        { "slotID": 9,  "itemGUID": 3756543070, "consumableGUID": 218608438 },
+        { "slotID": 10, "itemGUID": 3756543070, "consumableGUID": 218608438 },
+        { "slotID": 11, "itemGUID": 3756543070, "consumableGUID": 218608438 },
+        { "slotID": 12, "itemGUID": 3756543070, "consumableGUID": 218608438 }
+    ]
+}]

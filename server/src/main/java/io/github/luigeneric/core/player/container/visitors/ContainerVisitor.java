@@ -398,7 +398,16 @@ public abstract class ContainerVisitor
         final ShopItemCard shopItemCard = optShopItemCard.get();
 
 
-        final float cubitsPrice = shopItemCard.getUpgradePrice().getItems().get(ResourceType.Cubits.guid);
+        // The tuning-kit odds are packCount / (cubitsPrice / 1000), so a card whose UpgradePrice has
+        // no Cubits entry unboxes null here, and one that prices Cubits at 0 divides by zero: the
+        // chance comes out +Infinity, Mathf.min pins it to 1f, and rollChance(1f) always succeeds.
+        // That is a free guaranteed level-up for a single tuning kit, and this path never charges
+        // the UpgradePrice at all - only the kits. 136 of the 2 190 upgrade levels in the card dump
+        // carry Cubits at exactly 0, so it arms itself the moment UserUpgradeable systems ship.
+        // No price, no pack upgrade; the ordinary cubit upgrade path is unaffected.
+        final Float cubitsInPrice = shopItemCard.getUpgradePrice().getItems().get(ResourceType.Cubits.guid);
+        if (cubitsInPrice == null || cubitsInPrice <= 0f) return false;
+        final float cubitsPrice = cubitsInPrice;
         final float chanceToUpgrade = Mathf.min(1f, packCount / (cubitsPrice / 1000f));
 
         Optional<ShipItem> tuningKits = hold.getByGUID(ResourceType.TuningKit.guid);

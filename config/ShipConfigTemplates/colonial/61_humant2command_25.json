@@ -6,27 +6,27 @@
         "slotConfigs": [
             {
                 "slotID": 0,
-                "itemGUID": 6001
+                "itemGUID": 2145814586
             },
             {
                 "slotID": 1,
-                "itemGUID": 6002
+                "itemGUID": 4288840512
             },
             {
                 "slotID": 2,
-                "itemGUID": 6003
+                "itemGUID": 2385916528
             },
             {
                 "slotID": 5,
-                "itemGUID": 6004
+                "itemGUID": 3162199345
             },
             {
                 "slotID": 12,
-                "itemGUID": 6005
+                "itemGUID": 3004914144
             },
             {
                 "slotID": 13,
-                "itemGUID": 6006
+                "itemGUID": 4274229632
             }
         ]
     }

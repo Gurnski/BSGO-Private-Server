@@ -1,0 +1,15 @@
+[
+    {
+        "_generated": "tools/cardgen/gen-consumables-real.js - do not hand-edit",
+        "factorSource": "Augment",
+        "factorTypeRecords": [
+            {
+                "type": "Experience",
+                "value": 1
+            }
+        ],
+        "activeTimeInHours": 168,
+        "augmentActionType": "None",
+        "associatedItemGUID": 140108213
+    }
+]
