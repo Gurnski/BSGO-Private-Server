@@ -509,8 +509,10 @@ public class SpaceObjectFactory
         final SphereCollider sphereCollider = new SphereCollider(missile.getMovementController().getTransform(), Vector3.zero(), missileRadius);
         missile.setCollider(sphereCollider);
 
-        if (castingShip.isPlayer())
-            lootNpcTemplateSetup(missile, StaticLootId.Missile.value);
+        /* No loot association. StaticLootId.Missile resolved to an empty template list (there is
+         * no 1_*.json), which was harmless while nothing could kill a missile - now that they are
+         * shootable, a Death-path claim on one would be live surface area for no benefit, and the
+         * shoot-down path deliberately emits Hit, which never distributes loot. */
 
         return missile;
     }

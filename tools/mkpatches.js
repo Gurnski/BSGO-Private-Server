@@ -63,7 +63,9 @@ const GROUPS = [
    * guard and belongs with the other three in 0010, where that file already lives. */
   ['0014-ability-dispatch-and-armour', [
     'src/main/java/io/github/luigeneric/core/sector/management/abilities/AbilityActionFactory.java',
+    'src/main/java/io/github/luigeneric/core/sector/management/abilities/actions/FireCannonAction.java',
     'src/main/java/io/github/luigeneric/core/sector/management/abilities/actions/FireMissileAction.java',
+    'src/main/java/io/github/luigeneric/core/sector/management/abilities/actions/FlakAction.java',
     'src/main/java/io/github/luigeneric/core/sector/management/SectorAlgorithms.java']],
   /* 0015-0020 back-fill. These fifteen files were changed in earlier sessions and never added
    * here, so the coverage check below had been failing since - which is also why patches/ was
@@ -73,7 +75,8 @@ const GROUPS = [
     'src/main/java/io/github/luigeneric/core/galaxy/Galaxy.java']],
   ['0016-capital-rental', [
     'src/main/java/io/github/luigeneric/core/player/Hangar.java',
-    'src/main/java/io/github/luigeneric/core/protocols/dialog/DialogProtocol.java']],
+    'src/main/java/io/github/luigeneric/core/protocols/dialog/DialogProtocol.java',
+    'src/main/java/io/github/luigeneric/core/protocols/player/CapitalRental.java']],
   ['0017-npc-combat', [
     'src/main/java/io/github/luigeneric/core/sector/SpaceObjectFactory.java',
     'src/main/java/io/github/luigeneric/core/sector/timers/NpcTimer.java',
@@ -90,7 +93,20 @@ const GROUPS = [
   ['0020-debug-console', [
     'src/main/java/io/github/luigeneric/core/protocols/debug/DebugProtocol.java',
     'src/main/java/io/github/luigeneric/core/spaceentities/statsinfo/stats/SpaceSubscribeInfo.java']],
+  /* Missile interception. The rest of the feature lives in files other groups already own -
+   * FireMissileAction (0014) reads the warhead override, DamageMediator (0018) emits Hit for a
+   * shot-down missile, SpaceObjectFactory (0017) drops the missile loot association - and in
+   * card data (Regulation target masks, warhead MissileHullPoints). This group carries the one
+   * file no other group covers: the server-only card field the warhead override reads. */
+  ['0021-missile-interception', [
+    'src/main/java/io/github/luigeneric/templates/cards/ShipConsumableCard.java']],
 ];
+
+// A brand-new source file in the baseline working tree is invisible to `git diff` until it
+// carries intent-to-add, so it would ship in no patch and the coverage check would not notice.
+// CapitalRental.java did exactly that. Stage intent-to-add first; the diff then emits a proper
+// new-file patch and the coverage check sees the path.
+cp.spawnSync('git', ['add', '-N', '--', 'src'], { cwd: CORE });
 
 // Diffs are staged in a temp directory and only replace patches/ after every group has
 // diffed cleanly and the coverage check has passed. A run that dies part-way through must

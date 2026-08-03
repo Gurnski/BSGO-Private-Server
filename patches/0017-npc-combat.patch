@@ -1,8 +1,21 @@
 diff --git a/src/main/java/io/github/luigeneric/core/sector/SpaceObjectFactory.java b/src/main/java/io/github/luigeneric/core/sector/SpaceObjectFactory.java
-index ac9ec97..2ab52ea 100644
+index ac9ec97..df1748b 100644
 --- a/src/main/java/io/github/luigeneric/core/sector/SpaceObjectFactory.java
 +++ b/src/main/java/io/github/luigeneric/core/sector/SpaceObjectFactory.java
-@@ -649,9 +649,23 @@ public class SpaceObjectFactory
+@@ -509,8 +509,10 @@ public class SpaceObjectFactory
+         final SphereCollider sphereCollider = new SphereCollider(missile.getMovementController().getTransform(), Vector3.zero(), missileRadius);
+         missile.setCollider(sphereCollider);
+ 
+-        if (castingShip.isPlayer())
+-            lootNpcTemplateSetup(missile, StaticLootId.Missile.value);
++        /* No loot association. StaticLootId.Missile resolved to an empty template list (there is
++         * no 1_*.json), which was harmless while nothing could kill a missile - now that they are
++         * shootable, a Death-path claim on one would be live surface area for no benefit, and the
++         * shoot-down path deliberately emits Hit, which never distributes loot. */
+ 
+         return missile;
+     }
+@@ -649,9 +651,23 @@ public class SpaceObjectFactory
      }
      private void setupWeaponConfig(final Ship ship, final short level)
      {
@@ -27,7 +40,7 @@ index ac9ec97..2ab52ea 100644
  
          if (optionalShipConfigTemplate.isEmpty())
              return;
-@@ -664,6 +678,7 @@ public class SpaceObjectFactory
+@@ -664,6 +680,7 @@ public class SpaceObjectFactory
              return;
          }
          final ShipSlots slots = optSlots.get();
@@ -35,7 +48,7 @@ index ac9ec97..2ab52ea 100644
  
          for (final ShipSlotCard shipSlotCard : ship.getShipCard().getShipSlotCards())
          {
-@@ -688,9 +703,31 @@ public class SpaceObjectFactory
+@@ -688,9 +705,31 @@ public class SpaceObjectFactory
              }
  
              slots.addSlot(shipSlot);

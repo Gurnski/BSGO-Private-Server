@@ -202,6 +202,29 @@ const DEV_ITEMS = new Map([[1097622313, 'dev item: no buy price, no sell price, 
  * why; keep that and record what the dump said so a future re-import cannot quietly undo it. */
 const PRICE_OVERRIDE = new Map([[92666191, { [CUBITS]: 4000 }]]);
 
+/* A missile's hull points come from the LAUNCHER's ability card - FireMissileAction copies
+ * ability.getItemBuffAdd onto the spawned projectile - so a nuke fired from a strike tube flew
+ * with the standard round's 5 HP, and the anti-carrier nuke with its launcher's 850. The live
+ * game gave warhead-armed missiles their own HP (OB build 1.4.1: "missiles armed with these
+ * warheads will now have increased HP"; Update 43 retuned them per warhead), and the server now
+ * honours a MissileHullPoints card field as an override (FireMissileAction, server-only - it is
+ * never written to the wire). It CANNOT ride in ItemBuffAdd: a consumable's ItemBuffAdd is a
+ * fractional multiplier against the ability's own stats, not an absolute.
+ * Values are the lead's design call (2026-08-03): strike nukes 50, line nukes 200, capital and
+ * anti-carrier nukes 400. Escort nukes at 100 are interpolated - the spec named only the strike
+ * and line tiers. The ct-27770 torpedo tokens are plain ammunition (DamageHigh 0) and keep the
+ * launcher's HP, as do the merit mines. */
+const WARHEAD_HULL = new Map([
+  [195427878, 50],   // consumable_mini_nuke            (ct 40431 t1, strike launchers)
+  [98392991,  50],   // consumable_torpedo_token        (ct 40431 t1, strike launchers)
+  [57483190, 100],   // consumable_medium_mini_nuke     (ct 40431 t2, escort launchers)
+  [174428943, 100],  // consumable_medium_torpedo_token (ct 40431 t2, escort launchers)
+  [56189094, 200],   // consumable_large_mini_nuke      (ct 40431 t3, line launchers)
+  [190162639, 200],  // consumable_large_torpedo_token  (ct 40431 t3, line launchers)
+  [174953405, 400],  // consumable_large_torpedo_token_xl (ct 40431 t4, capital launchers)
+  [92998406, 400],   // item_consumable_escort_anti_capital_nuke (ct 662, was 850 via launcher)
+]);
+
 /* Augments the server cannot honour. PlayerProtocol's UseAugment requires an AugmentFactorTemplate
  * specifically - it logs "No factor template" and returns for anything else - so an augment we
  * cannot back with factors must not be stocked, or a player pays cubits for a button that does
@@ -336,6 +359,7 @@ for (const c of cards) {
     owner: RESOURCE_GUIDS.has(c.guid) ? 'RESOURCE_META'
          : LOOT_EXTRA_GUIDS.has(c.guid) ? 'LOOT_EXTRAS' : null,
   };
+  if (WARHEAD_HULL.has(c.guid)) rec.missileHull = WARHEAD_HULL.get(c.guid);
   if (f.buyCount !== buyCount) rec.dumpBuyCount = f.buyCount;
   if (noStock) { rec.noStock = noStock; rec.dumpBuy = dumpBuy; }
   if (PRICE_OVERRIDE.has(c.guid)) rec.dumpBuy = dumpBuy;
@@ -562,6 +586,7 @@ const j = v => JSON.stringify(v);
 const body = rows.map(r => {
   const p = r.price;
   const extra = [
+    r.missileHull !== undefined ? `missileHull: ${r.missileHull}` : null,
     r.dumpBuyCount !== undefined ? `dumpBuyCount: ${r.dumpBuyCount}` : null,
     r.owner ? `owner: '${r.owner}'` : null,
     r.dumpBuy ? `dumpBuy: ${j(r.dumpBuy)}` : null,

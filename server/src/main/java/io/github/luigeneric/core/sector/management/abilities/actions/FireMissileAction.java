@@ -63,10 +63,22 @@ public class FireMissileAction extends WeaponAction
 
         final ObjectStats missileStats = missile.getSpaceSubscribeInfo().getStats();
         missileStats.put(ability.getItemBuffAdd());
+        /* A warhead may bring its own hull points (nukes are tougher than standard rounds, and
+         * the launcher's MaxHullPoints describes its standard round). Card field, not
+         * ItemBuffAdd: a consumable's ItemBuffAdd is a fractional multiplier and would scale
+         * the launcher's value instead of replacing it. */
+        if (useConsumable)
+        {
+            final ShipConsumableCard warhead = castingSlot.getCurrentConsumable().getShipConsumableCard();
+            if (warhead != null && warhead.getMissileHullPoints() > 0f)
+                missileStats.setStat(ObjectStat.MaxHullPoints, warhead.getMissileHullPoints());
+        }
         missile.getMovementController().getMovementOptions().setGear(Gear.Regular);
         missile.getMovementController().getMovementOptions().setThrottleSpeed(missileStats.getStat(ObjectStat.Speed));
-        missileStats.setStat(ObjectStat.MaxPowerPoints, 0);
-        missile.getSpaceSubscribeInfo().setHp(missileStats.getStat(ObjectStat.MaxHullPoints));
+        /* setMaxHpPp reads MaxHullPoints/MaxPowerPoints with getStatOrDefault, so nothing else is
+         * needed here. The old explicit setHp unboxed a nullable Float, and the old
+         * MaxPowerPoints=0 made the stat PRESENT, which a client that selects the missile renders
+         * as a NaN power bar (BlueLevel = 0/0). Absent reads as no power, cleanly. */
         missile.getSpaceSubscribeInfo().setMaxHpPp();
 
         final boolean gearIsSlide = castingShip.getMovementController().getMovementOptions().getGear() == Gear.RCS;

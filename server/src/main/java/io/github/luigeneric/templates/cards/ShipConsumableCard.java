@@ -30,6 +30,13 @@ public class ShipConsumableCard extends Card
     private final int buyCount;
     private final String[] consumableAttributes;
     private final ConsumableEffectType effectType;
+    /* Hull points of the missile this warhead spawns, overriding the launcher's own
+     * (FireMissileAction copies the ability's MaxHullPoints onto the projectile; a nuke should
+     * not fly with a standard round's 5 HP). It cannot ride in ItemBuffAdd because a
+     * consumable's ItemBuffAdd is a fractional multiplier, not an absolute. Server-only:
+     * deliberately absent from write(), so the client wire format is unchanged. 0 = no override. */
+    @SerializedName("MissileHullPoints")
+    private float missileHullPoints;
 
     public ShipConsumableCard(long cardGUID, int consumableType, byte tier, ObjectStats itemBuffMultiply,
                               ObjectStats itemBuffAdd, AugmentActionType augmentActionType, boolean isAugment,
@@ -47,6 +54,11 @@ public class ShipConsumableCard extends Card
         this.buyCount = buyCount;
         this.consumableAttributes = consumableAttributes;
         this.effectType = effectType;
+    }
+
+    public float getMissileHullPoints()
+    {
+        return missileHullPoints;
     }
 
     @Override

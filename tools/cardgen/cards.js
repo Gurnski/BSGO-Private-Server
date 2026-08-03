@@ -1813,17 +1813,35 @@ function sectorCards() {
 const REGULATION_POLICY = [
   /* MISSILES MAY NOT BE AIMED AT ROCKS. A missile that CLIPS an asteroid in flight still resolves
    * (CollisionResolution.resolveMissileOther destroys both); this only stops you selecting a rock
-   * and launching at it, which wastes ammunition and, on a torpedo, an entire cooldown. */
+   * and launching at it, which wastes ammunition and, on a torpedo, an entire cooldown. Missiles
+   * also may not lock other missiles - guns and screens are the anti-missile weapons. */
   { types: ['FireMissle', 'FireTorpedo', 'FireHeavyMissile', 'FireLightMissile'],
     relations: [16], targets: [2] },
-  // Guns of every description. Shooting rocks is how mining works, so these keep Neutral+Asteroid.
-  { types: ['FireCannon', 'FireMachineGun', 'FireShotgun', 'FireKillCannon', 'FireMining'],
+  /* Guns of every description. Shooting rocks is how mining works, so these keep Neutral+Asteroid.
+   * Missile(8) is what lets a strike gun down an incoming warhead: the client's TargetTypeCheck
+   * consults exactly this mask per ability group, and without the flag a selected missile is
+   * nulled out as an ability target the moment the weapon validates (ShipAbstractAbility.cs:78-81).
+   * The server accepts the cast either way - this mask is what the CLIENT enforces. */
+  { types: ['FireCannon', 'FireMachineGun', 'FireShotgun', 'FireKillCannon'],
+    relations: [4, 16], targets: [1, 2, 8] },
+  // Mining lasers keep rocks-and-ships only; a mining beam has no business aiming at a warhead.
+  { types: ['FireMining'],
     relations: [4, 16], targets: [1, 2] },
   /* Flak and point defence are not aimed - they sweep. Enemy-only and deliberately NOT Neutral: a
    * flak screen that chewed through every asteroid the ship drifted past would strip the field and
-   * spam loot. The target types stay Ship+Asteroid-capable because the two maps must carry
-   * identical keysets, but the relation is what actually gates it. */
-  { types: ['Flak', 'PointDefence', 'DeflectMissile', 'DropFlare', 'Slide'],
+   * spam loot. Missile(8) is the entire point of these systems: the client's auto-cast AOE sweep
+   * (ShipAbility.GetObjectsWithinAOE) filters through this mask, so without the flag point defence
+   * NEVER sends a missile id to the server and shoots down nothing - which is exactly the state
+   * the original data shipped in here. */
+  { types: ['Flak', 'PointDefence'],
+    relations: [16], targets: [1, 2, 8] },
+  /* The missile jammer targets ONLY missiles - DeflectMissileAction rejects everything else
+   * server-side (DeflectMissileAction.java:44-48), so the dump's Asteroid|Ship mask here meant
+   * the jammer jammed nothing: the client never offered it a missile and the server refused
+   * everything the client did offer. */
+  { types: ['DeflectMissile'],
+    relations: [16], targets: [8] },
+  { types: ['DropFlare', 'Slide'],
     relations: [16], targets: [1, 2] },
 ];
 // Buffs, debuffs, scans and anything not classified above. Permissive, because a utility ability
@@ -2795,6 +2813,7 @@ function consumableCards() {
       guid: r.guid, key: r.key, atlas: r.atlas, frame: r.frame, icon: r.icon,
       ct: r.ct, tier: r.tier, effect: r.effect, action: r.action, isAugment: r.isAugment,
       autoConsume: r.autoConsume, trashable: r.trashable, attrs: r.attrs, add: r.add, mul: r.mul,
+      missileHull: r.missileHull,
       buyCount: rate ? rate[3] : r.buyCount,
       category: r.price.category, itemType: r.price.itemType, faction: r.price.faction,
       sortNames: r.price.sortNames, weight: r.price.sortWeight,
@@ -2861,6 +2880,12 @@ function consumableCards() {
       Action: r.action, IsAugment: r.isAugment, AutoConsume: r.autoConsume,
       Trashable: r.trashable,
       buyCount: r.buyCount, consumableAttributes: r.attrs, effectType: r.effect,
+      /* Warhead missile HP - non-zero on the eight nukes only, 0 = no override. Server-only card
+       * field: FireMissileAction reads it to give the spawned missile the WARHEAD's hull points
+       * instead of the launcher's, and ShipConsumableCard.write never puts it on the wire. See
+       * WARHEAD_HULL in gen-consumables-real.js for the values and why ItemBuffAdd cannot carry
+       * this. Present on every card because G17 demands every declared field. */
+      MissileHullPoints: r.missileHull || 0,
     }),
     card(r.guid, 'Price', {
       /* Category is a ShopCategory constant and ItemType a ShopItemType one. They are different

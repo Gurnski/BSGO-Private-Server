@@ -10,6 +10,7 @@ import io.github.luigeneric.core.sector.management.damage.DamageMediator;
 import io.github.luigeneric.core.sector.management.lootsystem.loot.LootAssociations;
 import io.github.luigeneric.core.spaceentities.Ship;
 import io.github.luigeneric.core.spaceentities.SpaceObject;
+import io.github.luigeneric.enums.WeaponFxType;
 import io.github.luigeneric.templates.utils.AbilityActionType;
 
 import java.util.List;
@@ -90,12 +91,28 @@ public class AbilityActionFactory
             /* Three more hitscan guns. Their abilities carry only Accuracy, Angle, DamageLow/High,
              * Min/Optimal/MaxRange, Cooldown and PowerPointCost - no projectile stats at all - so
              * they resolve through FireCannonAction's roll-to-hit-then-deal-damage path unchanged.
-             * They pick the same weapon FX as every other cannon, because that choice keys off
-             * OverwriteActionType and the dump sets it to None on all 2 223 of its ability cards. */
-            case FireCannon, FireMachineGun, FireShotgun, FireKillCannon ->
+             * The weapon FX is a different story: the fx byte in the shot message is the ONLY
+             * thing that selects the client's tracer prefab (Weaponry.CreateWeapon), and the
+             * client keeps a dedicated one per type - Fx/Guns/{Faction}SmallMachineGun with its
+             * own sound player for the machine-gun family, Fx/Guns/{Faction}SmallFlechetteCannon
+             * for the flechette cannon. Dispatched as plain Gun they all render as a standard
+             * cannon bolt, which is how the stealth machine gun and the assault KKC shipped
+             * looking like long single pulses. The KKC takes MachineGun: it is the assault
+             * ships' rapid kinetic gun and no KillCannon prefab exists in the client. */
+            case FireCannon ->
             {
                 return new FireCannonAction(castingShip, castingSlot, targetSpaceObjects, isAutocastAbility,
                         ctx, sectorAlgorithms, damageMediator);
+            }
+            case FireMachineGun, FireKillCannon ->
+            {
+                return new FireCannonAction(castingShip, castingSlot, targetSpaceObjects, isAutocastAbility,
+                        ctx, sectorAlgorithms, damageMediator, WeaponFxType.MachineGun);
+            }
+            case FireShotgun ->
+            {
+                return new FireCannonAction(castingShip, castingSlot, targetSpaceObjects, isAutocastAbility,
+                        ctx, sectorAlgorithms, damageMediator, WeaponFxType.Flechete);
             }
             case FireMining ->
             {

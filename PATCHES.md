@@ -8,7 +8,7 @@ files are the same changes as standalone diffs against pristine upstream, for re
 Twenty patches against [BSGOCore](https://github.com/luigeneric/BSGOCore) at baseline
 **`23bad98a`** ("Fix PulseManeuver, fix DynamicMovementController", #10).
 
-Together they touch **36 files, +1 151 / −83**. Verified: applied in order with
+Together they touch **40 files, +1 331 / −90**. Verified: applied in order with
 `git apply --ignore-whitespace` to a clean worktree of `23bad98a`, the result is byte-identical
 (modulo CRLF) to the tree this server actually runs.
 
@@ -284,10 +284,11 @@ this is where it went.
 
 ## 0014 — ability dispatch and armour
 
-`AbilityActionFactory.java`, `FireMissileAction.java`, `SectorAlgorithms.java` · 3 files, +44 −3
+`AbilityActionFactory.java`, `FireCannonAction.java`, `FireMissileAction.java`, `FlakAction.java`,
+`SectorAlgorithms.java` · 5 files, +136 −8
 
-Three changes that have to land together, because the systems the first one unblocks are weapons and
-half of what a weapon does is decided by the third.
+Four changes that have to land together, because the systems the first one unblocks are weapons and
+half of what a weapon does is decided by the armour curve.
 
 **Five missing `AbilityActionType` arms.** `create` had fourteen cases and a `default -> throw`.
 The throw escapes `AbilityCastRequestQueue.run` into `Sector.run`'s per-tick catch, which abandons
@@ -308,6 +309,27 @@ fell out with the guid still 0, and `SpaceObjectFactory.createMissile` throws on
 resolve. Same sector-tick truncation as above, and reachable on purpose: `SelectConsumable` validates
 neither `ConsumableType` nor `Tier`, so a crafted packet can seat a mine in a missile slot and hold
 the fire button. Unrecognised now fires an ordinary missile and logs.
+
+**Missile spawn stats, for interception.** The spawned missile takes the launcher ability's
+`MaxHullPoints`, so a nuke flew with a standard round's 5 HP; the missile action now lets a
+warhead's `MissileHullPoints` card field override it (the field is 0021's). Also here: the explicit
+`setHp` unboxed a nullable `Float` (the `setMaxHpPp` a line later already does the job with safe
+defaults), and `MaxPowerPoints = 0` made the stat *present*, which a client that selects the
+missile renders as a NaN power bar — both gone.
+
+**Weapon FX for the new gun types.** The fx byte in the shot message is the only thing that picks
+the client's tracer prefab (`Weaponry.CreateWeapon`), and the client keeps dedicated ones the
+server never named: `Fx/Guns/{Faction}SmallMachineGun` (with its own sound player),
+`Fx/Guns/{Faction}SmallFlechetteCannon`, `Fx/Guns/ShrapnelGun`. Dispatched as plain `Gun`/`Flak`,
+the stealth machine gun and the assault KKC rendered as single long cannon bolts and the carriers'
+shrapnel burst as a flak puff. `FireCannonAction` gained a constructor that takes an explicit
+`WeaponFxType`; the factory sends `MachineGun` for `FireMachineGun`/`FireKillCannon` and
+`Flechete` for `FireShotgun`; `FlakAction` sends `Shrapnel` when the casting slot is a `gun` bay —
+the shrapnel burst is the only Flak-type ability that lives in one. Plain cannons in a `gun` bay
+(the carriers' long-range CC, the stealth 20mm autocannon) send `MachineGun` too: in the live
+game they fired KKC-style tracer rounds, not a single bolt. The `Mothership` role is the
+exception — the Pegasus and Basestar fired standard big bolts like any liner, so they keep the
+Gun fx whatever sits in their gun bays.
 
 **`ArmorAlgorithmV0` → `V1`.** V0 returns a constant 1 — armour discarded, `ArmorPiercing` inert,
 every armour-plating module and every hull `ArmorValue` decorative. V1 is the original's curve,
@@ -338,7 +360,11 @@ capital-rental price in 0016 is calculated against.
 
 ## 0016 — capital rental
 
-`Hangar.java`, `DialogProtocol.java` · 2 files, +45 −0
+`Hangar.java`, `DialogProtocol.java`, `CapitalRental.java` · 3 files, +107 −0
+
+`CapitalRental.java` is a brand-new file, which made it invisible to `git diff` and it originally
+shipped in no patch — a fresh checkout built from the patch set alone would not compile.
+`mkpatches.js` now stages intent-to-add on new files so this class of gap diffs and is covered.
 
 The Pegasus and the Basestar are rented by the hour from the Admiral (Colonial) or Number Six
 (Cylon), exactly as the original did it — the capital is never sold in the shop, it is authorised in
@@ -351,7 +377,11 @@ expiry is enforced at hangar load (0007) where the client rebuilds its hangar an
 ## 0017 — NPC combat
 
 `SpaceObjectFactory.java`, `NpcTimer.java`, `NpcStaticTimer.java`, `NpcBehaviourTemplates.java`,
-`AbilityCastRequestQueue.java` · 5 files, +140 −7
+`AbilityCastRequestQueue.java` · 5 files, +144 −9
+
+Also in `SpaceObjectFactory`: player-fired missiles no longer get a loot association. It resolved
+to an empty template list (no `1_*.json` exists), harmless while nothing could kill a missile —
+now that they are shootable it would be live claim surface for no benefit.
 
 **The reason NPCs never shot back.** `createBotFighter` arms a bot with its `OwnerCard`'s level, and
 `getFirstBestConfigForGUIDAndLevel` demanded `config.level` equal that level exactly. Every NPC Owner
@@ -370,7 +400,12 @@ drifts a metre further out.
 ## 0018 — outpost death and loot
 
 `DamageMediator.java`, `LootDistributorUtil.java`, `LootClaimHolder.java`,
-`SpaceObjectRemover.java` · 4 files, +73 −6
+`SpaceObjectRemover.java` · 4 files, +83 −6
+
+Also in `DamageMediator`: a missile shot to hull zero leaves with `Hit` (killer as the hit
+object), not `Death`. The client only plays the missile explosion on `Hit` — on `Death` a missile
+silently pops out of existence — and `Death` is the cause that arms the loot machinery, which a
+missile must never enter.
 
 An outpost at hull zero retreats rather than exploding — it leaves with `JumpOut`, which plays the
 client's FTL-out — but it still has to pay out like a kill, and only for the shot that actually
@@ -398,6 +433,24 @@ Four operator commands: `where`, `npcs`, `heal` and `push <speed> [seconds]`. `p
 the ship's max, so the stat has to move for the shove to survive. Nothing here is persisted and
 ordinary gameplay never uses that setter; stats otherwise change through buffs and modifiers, which
 the client is told about.
+
+## 0021 — missile interception
+
+`ShipConsumableCard.java` · 1 file, +12 −0
+
+Enemy missiles are selectable and shootable, with visible hull points. The client ships the whole
+feature — missile HUD brackets, a select-nearest-missile keybinding (Z), health bars fed by the
+stats subscription, an explicit `Missile` ability-target flag — all gated on server data, and the
+original data shipped with no ability group allowed to target missiles, which is also why point
+defence never intercepted anything and the missile jammer jammed nothing.
+
+This patch carries the one file no other group owns: `ShipConsumableCard` gains a server-only
+`MissileHullPoints` field (never written to the wire), so a nuclear warhead can give its missile
+its own hull points — strike nukes 50, escort 100, line 200, capital and anti-carrier 400. It
+cannot ride in `ItemBuffAdd`, which is a fractional multiplier, not an absolute. The rest of the
+feature lives with its owning groups (0014 missile spawn, 0017 loot association, 0018 death cause)
+and in card data: the Regulation card's target masks now include `Missile(8)` for every gun family,
+flak and point defence, and `DeflectMissile` targets only missiles.
 
 ---
 

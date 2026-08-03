@@ -24,7 +24,7 @@ index 76a4fba..e804bff 100644
  
  
 diff --git a/src/main/java/io/github/luigeneric/core/sector/management/damage/DamageMediator.java b/src/main/java/io/github/luigeneric/core/sector/management/damage/DamageMediator.java
-index 9a2ae93..116f2d3 100644
+index 9a2ae93..dbefdb9 100644
 --- a/src/main/java/io/github/luigeneric/core/sector/management/damage/DamageMediator.java
 +++ b/src/main/java/io/github/luigeneric/core/sector/management/damage/DamageMediator.java
 @@ -2,7 +2,10 @@ package io.github.luigeneric.core.sector.management.damage;
@@ -38,7 +38,7 @@ index 9a2ae93..116f2d3 100644
  import io.github.luigeneric.core.sector.SectorCards;
  import io.github.luigeneric.core.sector.Tick;
  import io.github.luigeneric.core.sector.creation.SectorContext;
-@@ -83,7 +86,27 @@ public class DamageMediator
+@@ -83,7 +86,37 @@ public class DamageMediator
              toStats.setPp(Mathf.max(toStats.getPp() - damageRecord.energyDrain(), 0));
          if (toStats.getHp() == 0f)
          {
@@ -60,6 +60,16 @@ index 9a2ae93..116f2d3 100644
 +                    sendOutpostRetreatBroadcast(toObject.getFaction());
 +                }
 +            }
++            else if (toObject.getSpaceEntityType() == SpaceEntityType.Missile && damageRecord.from() != null)
++            {
++                /* A shot-down missile leaves with Hit, not Death. The client's ObjectLeft handler
++                 * plays MissileScript.Terminate's explosion only on Hit - on Death a missile has
++                 * no removal effect and silently pops out of existence (SpaceObject.OnDestroyed is
++                 * an empty virtual that Missile does not override). Death is also the cause that
++                 * arms the loot/claim machinery, which a missile must never enter. The killer is
++                 * the hit object; ObjectLeftHit dereferences it, hence the null guard above. */
++                this.remover.notifyRemovingCauseAdded(toObject, RemovingCause.Hit, damageRecord.from());
++            }
 +            else
 +            {
 +                this.remover.notifyRemovingCauseAdded(toObject, RemovingCause.Death, damageRecord.from());
@@ -67,7 +77,7 @@ index 9a2ae93..116f2d3 100644
              toStats.setPp(0);
              wasKillShot = true;
          }
-@@ -94,6 +117,16 @@ public class DamageMediator
+@@ -94,6 +127,16 @@ public class DamageMediator
          sendDealDamageTo(newDmgRecord);
      }
  

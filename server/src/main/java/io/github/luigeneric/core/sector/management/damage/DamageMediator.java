@@ -103,6 +103,16 @@ public class DamageMediator
                     sendOutpostRetreatBroadcast(toObject.getFaction());
                 }
             }
+            else if (toObject.getSpaceEntityType() == SpaceEntityType.Missile && damageRecord.from() != null)
+            {
+                /* A shot-down missile leaves with Hit, not Death. The client's ObjectLeft handler
+                 * plays MissileScript.Terminate's explosion only on Hit - on Death a missile has
+                 * no removal effect and silently pops out of existence (SpaceObject.OnDestroyed is
+                 * an empty virtual that Missile does not override). Death is also the cause that
+                 * arms the loot/claim machinery, which a missile must never enter. The killer is
+                 * the hit object; ObjectLeftHit dereferences it, hence the null guard above. */
+                this.remover.notifyRemovingCauseAdded(toObject, RemovingCause.Hit, damageRecord.from());
+            }
             else
             {
                 this.remover.notifyRemovingCauseAdded(toObject, RemovingCause.Death, damageRecord.from());

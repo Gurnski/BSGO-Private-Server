@@ -26,10 +26,18 @@ index 1cf5cb0..61e3437 100644
                  new FlareChanceAlgorithmV1(),
                  new HackDurationAlgorithmV1()
 diff --git a/src/main/java/io/github/luigeneric/core/sector/management/abilities/AbilityActionFactory.java b/src/main/java/io/github/luigeneric/core/sector/management/abilities/AbilityActionFactory.java
-index 2d7eb29..2a13887 100644
+index 2d7eb29..21c0f7e 100644
 --- a/src/main/java/io/github/luigeneric/core/sector/management/abilities/AbilityActionFactory.java
 +++ b/src/main/java/io/github/luigeneric/core/sector/management/abilities/AbilityActionFactory.java
-@@ -71,12 +71,28 @@ public class AbilityActionFactory
+@@ -10,6 +10,7 @@ import io.github.luigeneric.core.sector.management.damage.DamageMediator;
+ import io.github.luigeneric.core.sector.management.lootsystem.loot.LootAssociations;
+ import io.github.luigeneric.core.spaceentities.Ship;
+ import io.github.luigeneric.core.spaceentities.SpaceObject;
++import io.github.luigeneric.enums.WeaponFxType;
+ import io.github.luigeneric.templates.utils.AbilityActionType;
+ 
+ import java.util.List;
+@@ -71,16 +72,48 @@ public class AbilityActionFactory
              {
                  return new RestoreBuffAction(castingShip, castingSlot, targetSpaceObjects, isAutocastAbility, ctx);
              }
@@ -50,21 +58,135 @@ index 2d7eb29..2a13887 100644
                  return new FireMissileAction(castingShip, castingSlot, targetSpaceObjects, isAutocastAbility,
                          ctx, sectorAlgorithms, damageMediator, joinQueue);
              }
--            case FireCannon ->
 +            /* Three more hitscan guns. Their abilities carry only Accuracy, Angle, DamageLow/High,
 +             * Min/Optimal/MaxRange, Cooldown and PowerPointCost - no projectile stats at all - so
 +             * they resolve through FireCannonAction's roll-to-hit-then-deal-damage path unchanged.
-+             * They pick the same weapon FX as every other cannon, because that choice keys off
-+             * OverwriteActionType and the dump sets it to None on all 2 223 of its ability cards. */
-+            case FireCannon, FireMachineGun, FireShotgun, FireKillCannon ->
++             * The weapon FX is a different story: the fx byte in the shot message is the ONLY
++             * thing that selects the client's tracer prefab (Weaponry.CreateWeapon), and the
++             * client keeps a dedicated one per type - Fx/Guns/{Faction}SmallMachineGun with its
++             * own sound player for the machine-gun family, Fx/Guns/{Faction}SmallFlechetteCannon
++             * for the flechette cannon. Dispatched as plain Gun they all render as a standard
++             * cannon bolt, which is how the stealth machine gun and the assault KKC shipped
++             * looking like long single pulses. The KKC takes MachineGun: it is the assault
++             * ships' rapid kinetic gun and no KillCannon prefab exists in the client. */
+             case FireCannon ->
              {
                  return new FireCannonAction(castingShip, castingSlot, targetSpaceObjects, isAutocastAbility,
                          ctx, sectorAlgorithms, damageMediator);
+             }
++            case FireMachineGun, FireKillCannon ->
++            {
++                return new FireCannonAction(castingShip, castingSlot, targetSpaceObjects, isAutocastAbility,
++                        ctx, sectorAlgorithms, damageMediator, WeaponFxType.MachineGun);
++            }
++            case FireShotgun ->
++            {
++                return new FireCannonAction(castingShip, castingSlot, targetSpaceObjects, isAutocastAbility,
++                        ctx, sectorAlgorithms, damageMediator, WeaponFxType.Flechete);
++            }
+             case FireMining ->
+             {
+                 return new FireMiningAction(castingShip, castingSlot, targetSpaceObjects, isAutocastAbility,
+diff --git a/src/main/java/io/github/luigeneric/core/sector/management/abilities/actions/FireCannonAction.java b/src/main/java/io/github/luigeneric/core/sector/management/abilities/actions/FireCannonAction.java
+index 8531583..cf91158 100644
+--- a/src/main/java/io/github/luigeneric/core/sector/management/abilities/actions/FireCannonAction.java
++++ b/src/main/java/io/github/luigeneric/core/sector/management/abilities/actions/FireCannonAction.java
+@@ -6,8 +6,10 @@ import io.github.luigeneric.core.sector.management.SectorAlgorithms;
+ import io.github.luigeneric.core.sector.management.damage.DamageMediator;
+ import io.github.luigeneric.core.spaceentities.Ship;
+ import io.github.luigeneric.core.spaceentities.SpaceObject;
++import io.github.luigeneric.enums.ShipRoleDeprecated;
+ import io.github.luigeneric.enums.WeaponFxType;
+ import io.github.luigeneric.templates.utils.AbilityActionType;
++import io.github.luigeneric.templates.utils.ShipSlotType;
+ 
+ import java.util.List;
+ 
+@@ -17,10 +19,52 @@ public class FireCannonAction extends WeaponAction
+     public FireCannonAction(Ship castingShip, ShipSlot castingSlot, List<SpaceObject> targetSpaceObjects,
+                                boolean isAutoCastAbility, SectorContext ctx, SectorAlgorithms sectorAlgorithms,
+                                DamageMediator damageMediator)
++    {
++        this(castingShip, castingSlot, targetSpaceObjects, isAutoCastAbility, ctx, sectorAlgorithms, damageMediator,
++                defaultFxFor(castingShip, castingSlot));
++    }
++
++    /* Plain cannons in a gun bay are the capital tracer cannons - the carriers' long-range CC,
++     * the capship cannon and the stealth 20mm autocannon are the only FireCannon systems that
++     * live in one - and in the live game they fired KKC-style tracer rounds, not the single
++     * bolt the Gun fx draws. Which tracer depends on the hull, because the client sizes fx by
++     * ship, not by weapon:
++     *   - Mothership (Pegasus/Basestar): standard big bolts like any liner, just harder and
++     *     further. Gun fx, whatever is bolted into their gun bays.
++     *   - Carrier: "bigger KKC rounds". The client's MachineGun fx exists only as
++     *     Fx/Guns/{Faction}SmallMachineGun and reads as a pea-shooter at capital scale
++     *     (confirmed in a live test), so carriers take Railgun, whose tier-4 arm is the one
++     *     capital-scale tracer round the client has (Fx/Guns/{Faction}XLargeRailgun).
++     *   - Everything else with a gun bay (the stealth strikes): MachineGun.
++     * Weapon-bay cannons keep the standard bolt, and upstream's OverwriteActionType ==
++     * FireCannon hack still forces the railgun beam for hand-made cards that ask for it. */
++    private static WeaponFxType defaultFxFor(final Ship castingShip, final ShipSlot castingSlot)
++    {
++        if (castingSlot.getShipAbility().getShipAbilityCard().getOverwriteActionType() == AbilityActionType.FireCannon)
++            return WeaponFxType.Railgun;
++        final boolean isGunBay = castingSlot.getShipSystem() != null
++                && castingSlot.getShipSystem().getShipSystemCard() != null
++                && castingSlot.getShipSystem().getShipSystemCard().getShipSlotType() == ShipSlotType.gun;
++        if (!isGunBay)
++            return WeaponFxType.Gun;
++        final ShipRoleDeprecated role = castingShip.getShipCard() != null
++                ? castingShip.getShipCard().getShipRoleDeprecated() : null;
++        if (role == ShipRoleDeprecated.Mothership)
++            return WeaponFxType.Gun;
++        if (role == ShipRoleDeprecated.Carrier)
++            return WeaponFxType.Railgun;
++        return WeaponFxType.MachineGun;
++    }
++
++    /* The fx byte in the shot message is the only thing that picks the client's tracer prefab
++     * (Weaponry.CreateWeapon), so the machine-gun and flechette hitscan types need to name their
++     * own fx here rather than take the Gun default above. */
++    public FireCannonAction(Ship castingShip, ShipSlot castingSlot, List<SpaceObject> targetSpaceObjects,
++                               boolean isAutoCastAbility, SectorContext ctx, SectorAlgorithms sectorAlgorithms,
++                               DamageMediator damageMediator, WeaponFxType weaponFxType)
+     {
+         super(castingShip, castingSlot, targetSpaceObjects, isAutoCastAbility, ctx,
+-                castingSlot.getShipAbility().getShipAbilityCard().getOverwriteActionType() == AbilityActionType.FireCannon ?
+-                        WeaponFxType.Railgun : WeaponFxType.Gun, sectorAlgorithms, damageMediator);
++                weaponFxType, sectorAlgorithms, damageMediator);
+     }
+ 
+     @Override
 diff --git a/src/main/java/io/github/luigeneric/core/sector/management/abilities/actions/FireMissileAction.java b/src/main/java/io/github/luigeneric/core/sector/management/abilities/actions/FireMissileAction.java
-index 4332d80..989f4f1 100644
+index 4332d80..612f2b6 100644
 --- a/src/main/java/io/github/luigeneric/core/sector/management/abilities/actions/FireMissileAction.java
 +++ b/src/main/java/io/github/luigeneric/core/sector/management/abilities/actions/FireMissileAction.java
-@@ -125,6 +125,21 @@ public class FireMissileAction extends WeaponAction
+@@ -63,10 +63,22 @@ public class FireMissileAction extends WeaponAction
+ 
+         final ObjectStats missileStats = missile.getSpaceSubscribeInfo().getStats();
+         missileStats.put(ability.getItemBuffAdd());
++        /* A warhead may bring its own hull points (nukes are tougher than standard rounds, and
++         * the launcher's MaxHullPoints describes its standard round). Card field, not
++         * ItemBuffAdd: a consumable's ItemBuffAdd is a fractional multiplier and would scale
++         * the launcher's value instead of replacing it. */
++        if (useConsumable)
++        {
++            final ShipConsumableCard warhead = castingSlot.getCurrentConsumable().getShipConsumableCard();
++            if (warhead != null && warhead.getMissileHullPoints() > 0f)
++                missileStats.setStat(ObjectStat.MaxHullPoints, warhead.getMissileHullPoints());
++        }
+         missile.getMovementController().getMovementOptions().setGear(Gear.Regular);
+         missile.getMovementController().getMovementOptions().setThrottleSpeed(missileStats.getStat(ObjectStat.Speed));
+-        missileStats.setStat(ObjectStat.MaxPowerPoints, 0);
+-        missile.getSpaceSubscribeInfo().setHp(missileStats.getStat(ObjectStat.MaxHullPoints));
++        /* setMaxHpPp reads MaxHullPoints/MaxPowerPoints with getStatOrDefault, so nothing else is
++         * needed here. The old explicit setHp unboxed a nullable Float, and the old
++         * MaxPowerPoints=0 made the stat PRESENT, which a client that selects the missile renders
++         * as a NaN power bar (BlueLevel = 0/0). Absent reads as no power, cleanly. */
+         missile.getSpaceSubscribeInfo().setMaxHpPp();
+ 
+         final boolean gearIsSlide = castingShip.getMovementController().getMovementOptions().getGear() == Gear.RCS;
+@@ -125,6 +137,21 @@ public class FireMissileAction extends WeaponAction
              }
          }
  
@@ -84,5 +206,46 @@ index 4332d80..989f4f1 100644
 +        }
 +
          return missileGUID;
+     }
+ }
+diff --git a/src/main/java/io/github/luigeneric/core/sector/management/abilities/actions/FlakAction.java b/src/main/java/io/github/luigeneric/core/sector/management/abilities/actions/FlakAction.java
+index 69495f3..356e18d 100644
+--- a/src/main/java/io/github/luigeneric/core/sector/management/abilities/actions/FlakAction.java
++++ b/src/main/java/io/github/luigeneric/core/sector/management/abilities/actions/FlakAction.java
+@@ -9,6 +9,7 @@ import io.github.luigeneric.core.sector.management.damage.DamageMediator;
+ import io.github.luigeneric.core.spaceentities.Ship;
+ import io.github.luigeneric.core.spaceentities.SpaceObject;
+ import io.github.luigeneric.enums.WeaponFxType;
++import io.github.luigeneric.templates.utils.ShipSlotType;
+ 
+ import java.util.List;
+ 
+@@ -18,13 +19,26 @@ public class FlakAction extends AoEAction
+                       boolean isAutoCastAbility, SectorContext ctx,
+                       SectorAlgorithms sectorAlgorithms, DamageMediator damageMediator)
+     {
+-        super(castingShip, castingSlot, targetSpaceObjects, isAutoCastAbility, ctx, WeaponFxType.Flak, sectorAlgorithms, damageMediator);
++        super(castingShip, castingSlot, targetSpaceObjects, isAutoCastAbility, ctx, flakFxFor(castingSlot), sectorAlgorithms, damageMediator);
++    }
++
++    /* The client renders flak-type weapons with different prefabs and the fx byte in the shot
++     * message is the only thing that picks between them (Weaponry.CreateWeapon):
++     * Fx/Guns/ShrapnelGun fires a shotgun-style pellet burst, Fx/Flak/{Faction}Flak is the
++     * escort screen puff. The carriers' shrapnel burst is the one Flak-type ability that lives
++     * in a gun bay - every flak screen sits in a weapon or defensive_weapon bay - so the slot
++     * type is the discriminator. Sent as plain Flak, the shrapnel burst renders as a flak puff. */
++    private static WeaponFxType flakFxFor(final ShipSlot castingSlot)
++    {
++        final boolean isGunBay = castingSlot.getShipSystem() != null
++                && castingSlot.getShipSystem().getShipSystemCard() != null
++                && castingSlot.getShipSystem().getShipSystemCard().getShipSlotType() == ShipSlotType.gun;
++        return isGunBay ? WeaponFxType.Shrapnel : WeaponFxType.Flak;
+     }
+ 
+     @Override
+     protected boolean internalProcess()
+     {
+-        this.weaponFxType = WeaponFxType.Flak;
+         return this.dealAoEDmg();
      }
  }
