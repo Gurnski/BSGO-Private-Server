@@ -1,3 +1,331 @@
+diff --git a/src/main/java/io/github/luigeneric/core/CapitalRentalExpiry.java b/src/main/java/io/github/luigeneric/core/CapitalRentalExpiry.java
+new file mode 100644
+index 0000000..b3c53c4
+--- /dev/null
++++ b/src/main/java/io/github/luigeneric/core/CapitalRentalExpiry.java
+@@ -0,0 +1,253 @@
++package io.github.luigeneric.core;
++
++import io.github.luigeneric.core.player.Hangar;
++import io.github.luigeneric.core.player.HangarShip;
++import io.github.luigeneric.core.player.Player;
++import io.github.luigeneric.core.player.counters.CounterDesc;
++import io.github.luigeneric.core.player.location.Location;
++import io.github.luigeneric.core.protocols.ProtocolID;
++import io.github.luigeneric.core.protocols.ProtocolRegistryWriteOnly;
++import io.github.luigeneric.core.protocols.game.GameProtocolWriteOnly;
++import io.github.luigeneric.core.protocols.player.CapitalRental;
++import io.github.luigeneric.core.protocols.player.PlayerProtocol;
++import io.github.luigeneric.core.protocols.scene.SceneProtocol;
++import io.github.luigeneric.core.sector.Sector;
++import io.github.luigeneric.core.sector.management.SectorRegistry;
++import io.github.luigeneric.core.spaceentities.PlayerShip;
++import io.github.luigeneric.enums.GameLocation;
++import io.github.luigeneric.enums.RemovingCause;
++import io.github.luigeneric.templates.cards.GalaxyMapCard;
++import io.github.luigeneric.templates.catalogue.Catalogue;
++import io.github.luigeneric.templates.utils.MapStarDesc;
++import io.github.luigeneric.utils.Utils;
++import io.quarkus.scheduler.Scheduled;
++import jakarta.enterprise.context.ApplicationScoped;
++import jakarta.inject.Inject;
++import lombok.extern.slf4j.Slf4j;
++
++import java.util.HashSet;
++import java.util.List;
++import java.util.Optional;
++import java.util.Set;
++
++/**
++ * Takes the Pegasus/Basestar back when the rented hour is up: the pilot is docked to their home
++ * CIC, put back in the hull they came from, and the rental leaves the hangar.
++ *
++ * A sector timer would be the wrong hook - a rental has to run out while the pilot is standing in
++ * the CIC too, and sector timers only see ships in space. The tick is coarse because the rental
++ * lasts an hour and every tick walks every connected player.
++ */
++@Slf4j
++@ApplicationScoped
++public class CapitalRentalExpiry
++{
++    private final UsersContainer usersContainer;
++    private final SectorRegistry sectorRegistry;
++    private final Catalogue catalogue;
++    private final CapitalRentalRegistry rentalRegistry;
++    private final GameProtocolWriteOnly gameWriter;
++
++    @Inject
++    public CapitalRentalExpiry(final UsersContainer usersContainer,
++                               final SectorRegistry sectorRegistry,
++                               final Catalogue catalogue,
++                               final CapitalRentalRegistry rentalRegistry)
++    {
++        this.usersContainer = usersContainer;
++        this.sectorRegistry = sectorRegistry;
++        this.catalogue = catalogue;
++        this.rentalRegistry = rentalRegistry;
++        this.gameWriter = ProtocolRegistryWriteOnly.game();
++    }
++
++    /* DISABLED - the sweep is written but is NOT safe to run yet, so the schedule is off and this
++     * class is inert. An adversarial review found six defects, three of them serious enough to
++     * hurt a live pilot:
++     *   - expireIfDue docks whoever is due WITHOUT checking they are still flying the rental, so a
++     *     pilot who parked the Pegasus an hour ago and is mid-fight in their Viper gets ripped out
++     *     of the sector and dropped in the home CIC;
++     *   - selectShip is called from the Quarkus scheduler thread while the sector thread is still
++     *     ticking that ship, and the in-space PlayerShip SHARES the HangarShip's SpaceSubscribeInfo
++     *     instance (SpaceObjectFactory:331) - the swap clears a subscriber map that is still live;
++     *   - pullToHomeCic rewrites location.sectorID before the ship drains from the old sector, so
++     *     GameProtocol.getSector() resolves the wrong sector for that window and an existing
++     *     unguarded path NPEs into a disconnect.
++     * Re-enable only with: an active-ship check before docking, the ship swap marshalled onto the
++     * sector thread, and the sector id left alone until the drain completes. Until then rentals end
++     * at dock or relog, which is the behaviour that shipped before and is merely generous.
++     * Restoring the schedule is putting @Scheduled(every = "15s") back on run(). */
++    public void run()
++    {
++        final long nowSeconds = System.currentTimeMillis() / 1000L;
++        final List<User> users = this.usersContainer.userList(User::isConnected);
++        final Set<Long> connectedIds = new HashSet<>(users.size());
++
++        for (final User user : users)
++        {
++            connectedIds.add(user.getPlayer().getUserID());
++            try
++            {
++                expireIfDue(user, nowSeconds);
++            }
++            catch (final Exception exception)
++            {
++                // One broken hangar must not stop the sweep for everybody else.
++                log.error("Capital rental sweep failed for {}: {}",
++                        user.getUserLogSimple(), Utils.getExceptionStackTrace(exception));
++            }
++        }
++
++        this.rentalRegistry.pruneExpiredOffline(connectedIds, nowSeconds);
++    }
++
++    private void expireIfDue(final User user, final long nowSeconds)
++    {
++        final Player player = user.getPlayer();
++        final long userId = player.getUserID();
++        final Hangar hangar = player.getHangar();
++        final HangarShip rental = findRentalHull(hangar);
++        final CapitalRentalRegistry.Rental tracked = this.rentalRegistry.get(userId);
++
++        if (rental == null)
++        {
++            if (tracked != null && tracked.expirySeconds() <= nowSeconds)
++                this.rentalRegistry.clear(userId);
++            return;
++        }
++
++        /* No record at all means the hull outlived the record - a restart, or a counter that was
++         * dropped for want of a Counter card. Treat that as expired, which is what the hangar
++         * load in SqLiteProvider does with the same hull. */
++        final long expiry = tracked != null
++                ? tracked.expirySeconds()
++                : counterValue(player, rental.getCardGuid());
++        if (expiry > nowSeconds)
++            return;
++
++        final int rentalSlot = rental.getServerId();
++        final int returnSlot = pickReturnSlot(player, hangar, tracked, rentalSlot);
++        if (returnSlot <= 0)
++        {
++            // Nothing else to fly. Stranding the pilot is worse than an overdue flagship.
++            log.warn("Capital rental expired for {} but no other hull to return to, keeping it",
++                    user.getUserLogSimple());
++            return;
++        }
++
++        if (!pullToHomeCic(user, player))
++            return;     // still in space with a dock already in flight; the next tick finishes it
++
++        final PlayerProtocol playerProtocol = user.getProtocol(ProtocolID.Player);
++        if (!playerProtocol.returnRentalHull(rentalSlot, returnSlot))
++            return;
++
++        player.getCounterFacade().setCounter(rental.getCardGuid(), 0);
++        player.getCounterFacade().setCounter(CapitalRental.RETURN_SLOT_COUNTER, 0);
++        this.rentalRegistry.clear(userId);
++        log.info("Capital rental expired for {}: {} returned, pilot back in slot {}",
++                user.getUserLogSimple(), rental.getCardGuid(), returnSlot);
++    }
++
++    /**
++     * Gets the pilot out of space and into their home CIC, which is where selectShip is allowed to
++     * run and where the client rebuilds the hangar. dockProcedure is deliberately not reused: it
++     * would have to be given the new location first, and it reads the sector off the player.
++     *
++     * @return false when the move has to wait for a later tick.
++     */
++    private boolean pullToHomeCic(final User user, final Player player)
++    {
++        final Location location = player.getLocation();
++        final GameLocation gameLocation = location.getGameLocation();
++
++        if (gameLocation == GameLocation.Space)
++        {
++            final Optional<Sector> optSector = this.sectorRegistry.getSectorById(player.getSectorId());
++            if (optSector.isEmpty())
++                return false;
++            final Sector sector = optSector.get();
++            final Optional<PlayerShip> optPlayerShip = sector.getCtx().users()
++                    .getPlayerShipByUserID(player.getUserID());
++            if (optPlayerShip.isEmpty())
++                return false;
++            final PlayerShip playerShip = optPlayerShip.get();
++            if (playerShip.isRemoved())
++                return false;
++
++            /* A dock the pilot started themselves is already sitting in GameProtocol's own future,
++             * which we cannot cancel from here. Docking on top of it would enqueue the removal
++             * twice and its runnable would drop the location back into this sector after we moved
++             * it. Let it land - the next tick finds the pilot in a room and finishes there. */
++            if (playerShip.getSpaceObjectState().getIsDocking())
++                return false;
++
++            playerShip.getSpaceObjectState().setDocking(true);
++            user.send(this.gameWriter.writeDockingDelay(0f));
++            // Enqueue only; the sector thread drains it on its next tick. Safe from this thread.
++            sector.getSpaceObjectRemover().notifyRemovingCauseAdded(playerShip, RemovingCause.Dock);
++        }
++        else if (gameLocation != GameLocation.Room)
++        {
++            // Avatar, zone, starter, mid-jump: no safe place to drop them. Try again next tick.
++            return false;
++        }
++
++        final long homeSectorId = GalaxyMapCard.getStartSector(player.getFaction());
++        if (gameLocation == GameLocation.Room && location.getSectorID() == homeSectorId)
++        {
++            return true;    // already standing in the home CIC, no scene reload needed
++        }
++
++        final Optional<MapStarDesc> optHome = this.catalogue.galaxyMapCard().getStar(homeSectorId);
++        if (optHome.isEmpty())
++        {
++            log.error("Capital rental expiry: no star for home sector {}", homeSectorId);
++            return false;
++        }
++        final MapStarDesc home = optHome.get();
++        // Room in sector 0/6 installs CICLocation itself.
++        location.setLocation(GameLocation.Room, home.getId(), home.getSectorGuid());
++        final SceneProtocol sceneProtocol = user.getProtocol(ProtocolID.Scene);
++        sceneProtocol.sendLoadNextScene();
++        return true;
++    }
++
++    private HangarShip findRentalHull(final Hangar hangar)
++    {
++        for (final HangarShip hangarShip : hangar.getAllHangarShips())
++        {
++            if (CapitalRental.isRental(hangarShip.getCardGuid()))
++                return hangarShip;
++        }
++        return null;
++    }
++
++    /** The recorded hull if it is still there, otherwise the best one left - never the rental. */
++    private int pickReturnSlot(final Player player, final Hangar hangar,
++                               final CapitalRentalRegistry.Rental tracked, final int rentalSlot)
++    {
++        final int recorded = tracked != null
++                ? tracked.returnSlot()
++                : (int) counterValue(player, CapitalRental.RETURN_SLOT_COUNTER);
++        if (recorded > 0 && recorded != rentalSlot && hangar.getByServerId(recorded) != null)
++            return recorded;
++
++        HangarShip best = null;
++        for (final HangarShip hangarShip : hangar.getAllHangarShips())
++        {
++            if (hangarShip.getServerId() == rentalSlot || CapitalRental.isRental(hangarShip.getCardGuid()))
++                continue;
++            if (best == null || hangarShip.getShipCard().getTier() > best.getShipCard().getTier())
++                best = hangarShip;
++        }
++        return best == null ? -1 : best.getServerId();
++    }
++
++    private long counterValue(final Player player, final long counterGuid)
++    {
++        final CounterDesc desc = player.getCounterFacade().counters()
++                .getInternalReadOnly().get(counterGuid);
++        return desc == null ? 0L : desc.getLongValue();
++    }
++}
+diff --git a/src/main/java/io/github/luigeneric/core/CapitalRentalRegistry.java b/src/main/java/io/github/luigeneric/core/CapitalRentalRegistry.java
+new file mode 100644
+index 0000000..d823659
+--- /dev/null
++++ b/src/main/java/io/github/luigeneric/core/CapitalRentalRegistry.java
+@@ -0,0 +1,63 @@
++package io.github.luigeneric.core;
++
++import jakarta.enterprise.context.ApplicationScoped;
++
++import java.util.Map;
++import java.util.Set;
++import java.util.concurrent.ConcurrentHashMap;
++
++/**
++ * Live bookkeeping for capital rentals: when the hour runs out, and which hangar slot the pilot
++ * flew before they took the flagship.
++ *
++ * The same two values are written to the player's counters so they can outlive a restart, but
++ * Counters.injectOldCounters silently drops any counter whose guid has no Counter card and guids
++ * 5017/5117 have none, so that write is a no-op today. Until those cards exist this map is the
++ * only place a rental's expiry is actually recorded, which is why CapitalRentalExpiry reads here
++ * first and only falls back to the counters.
++ *
++ * Keyed by userID rather than User, so a reconnect within the hour keeps its rental.
++ */
++@ApplicationScoped
++public class CapitalRentalRegistry
++{
++    /** @param returnSlot 0 when unknown - hangar ids start at 1. */
++    public record Rental(long expirySeconds, int returnSlot)
++    {
++    }
++
++    private final Map<Long, Rental> rentals = new ConcurrentHashMap<>();
++
++    public void start(final long userId, final long expirySeconds, final int returnSlot)
++    {
++        this.rentals.put(userId, new Rental(expirySeconds, returnSlot));
++    }
++
++    /** Re-renting while the hull is still in the hangar only moves the clock; the slot recorded
++     *  on the first rent has to survive, or expiry would try to hand the pilot back the capital. */
++    public void extend(final long userId, final long expirySeconds)
++    {
++        this.rentals.compute(userId, (id, old) ->
++                new Rental(expirySeconds, old == null ? 0 : old.returnSlot()));
++    }
++
++    public Rental get(final long userId)
++    {
++        return this.rentals.get(userId);
++    }
++
++    public void clear(final long userId)
++    {
++        this.rentals.remove(userId);
++    }
++
++    /** An entry for a pilot who has logged off is dead weight once its clock has run out - the
++     *  hangar load in SqLiteProvider removes an expired hull before they can fly it again. Only
++     *  expired entries are dropped, so an entry written a moment before its hull reaches the
++     *  hangar is never mistaken for garbage. */
++    public void pruneExpiredOffline(final Set<Long> connectedUserIds, final long nowSeconds)
++    {
++        this.rentals.entrySet().removeIf(entry ->
++                entry.getValue().expirySeconds() <= nowSeconds && !connectedUserIds.contains(entry.getKey()));
++    }
++}
 diff --git a/src/main/java/io/github/luigeneric/core/player/Hangar.java b/src/main/java/io/github/luigeneric/core/player/Hangar.java
 index ae8fb9d..4e5fabd 100644
 --- a/src/main/java/io/github/luigeneric/core/player/Hangar.java
@@ -403,10 +731,10 @@ index 4ff4531..9720065 100644
          final BgoProtocolWriter bw = newMessage();
 diff --git a/src/main/java/io/github/luigeneric/core/protocols/player/CapitalRental.java b/src/main/java/io/github/luigeneric/core/protocols/player/CapitalRental.java
 new file mode 100644
-index 0000000..16b6a75
+index 0000000..90d777a
 --- /dev/null
 +++ b/src/main/java/io/github/luigeneric/core/protocols/player/CapitalRental.java
-@@ -0,0 +1,67 @@
+@@ -0,0 +1,78 @@
 +package io.github.luigeneric.core.protocols.player;
 +
 +import io.github.luigeneric.core.galaxy.Galaxy;
@@ -418,9 +746,15 @@ index 0000000..16b6a75
 + * The underdog flying a battlestar is the fun case, so the discount points that way.
 + *
 + * Expiry rides in the player's counters keyed by the ship card guid - no schema change, and it
-+ * persists like any other counter. It is enforced when the hangar loads at login, because the
-+ * protocol has no server-to-client remove-ship message: a rented capital survives until relog,
-+ * and that is a documented limit rather than a bug.
++ * persists like any other counter. Enforcement is live: CapitalRentalExpiry sweeps connected
++ * players, docks whoever is still flying one back to their home CIC and hands the hull back with
++ * ServerMessage.RemoveShip. The hangar load in SqLiteProvider stays as the offline backstop for
++ * rentals that ran out while the player was away.
++ *
++ * Counters.injectOldCounters drops a counter whose guid has no Counter card, and 5017/5117 have
++ * none yet, so the expiry write below currently lands nowhere and cannot survive a restart. The
++ * live authority is therefore CapitalRentalRegistry; the counter write stays because it starts
++ * working the moment the Counter cards are emitted.
 + */
 +public final class CapitalRental
 +{
@@ -440,6 +774,11 @@ index 0000000..16b6a75
 +    public static final long BASE_PRICE = 20_000L;
 +    public static final long FLOOR_PRICE = 2_000L;
 +    public static final long DURATION_SECONDS = 3600L;
++    /* The hangar slot the pilot flew before the rental, so expiry can put them back in it. Kept
++     * as a raw guid rather than a CounterCardType constant because the enum entry (and the
++     * Counter card behind it) is an integrator step; 234 is free in the emitted card set and
++     * must match capital_rental_return_slot when that lands. */
++    public static final long RETURN_SLOT_COUNTER = 234L;
 +
 +    private CapitalRental()
 +    {

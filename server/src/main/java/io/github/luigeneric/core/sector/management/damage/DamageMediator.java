@@ -129,12 +129,17 @@ public class DamageMediator
 
     private void sendOutpostRetreatBroadcast(final Faction faction)
     {
-        //EmergencyMessage renders as the prominent screen banner (proven by the shutdown broadcast)
-        final NotificationProtocolWriteOnly notificationProtocolWriteOnly =
-                ProtocolRegistryWriteOnly.getProtocol(ProtocolID.Notification);
-        ctx.sender().sendToAllClients(
-                notificationProtocolWriteOnly.writeEmergencyMessage(faction + " outpost was forced to retreat!", 5f)
-        );
+        /* DELIBERATELY SILENT, because the banner it used to raise told players the server was
+         * going down.
+         *
+         * EmergencyMessage does not carry text: the client takes the string, wraps it as
+         * "%$bgo." + s + ".description%" (NotificationProtocol.cs:169-176) and looks it up. We were
+         * sending a literal English sentence, which resolves to nothing, and the unresolved banner
+         * falls back to the maintenance warning - so every outpost kill announced an imminent
+         * shutdown. Nothing in the client's locale describes an outpost retreating, and there is no
+         * other broadcast writer that renders literal text, so there is no honest message to send.
+         * The retreat is visible in-world anyway: the outpost plays its FTL jump-out.
+         * Restore this the day a suitable loca key exists - pass the KEY, never a sentence. */
     }
 
     private void sendDealDamageTo(final DamageRecord damageRecord)

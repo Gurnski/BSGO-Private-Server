@@ -1,0 +1,82 @@
+[{
+        "id": 124,
+        "type": "Damage",
+        "rewardCount": 6,
+        "experience": 15000,
+        "chance": 1.0,
+        "lootEntryInfos": [{
+                "chance": 1.0,
+                "levelIntervall": [0, 255],
+                "shipItem": {
+                    "count": 35000,
+                    "cardGuid": 215278030,
+                    "itemType": "Countable"
+                },
+                "variationPercentage": 0.25
+            }, {
+                "chance": 1.0,
+                "levelIntervall": [26, 255],
+                "shipItem": {
+                    "count": 600,
+                    "cardGuid": 59143780,
+                    "itemType": "Countable"
+                },
+                "variationPercentage": 0.25
+            }, {
+                "chance": 1.0,
+                "levelIntervall": [26, 255],
+                "shipItem": {
+                    "count": 120,
+                    "cardGuid": 218608438,
+                    "itemType": "Countable"
+                },
+                "variationPercentage": 0.25
+            }, {
+                "chance": 1.0,
+                "levelIntervall": [0, 25],
+                "shipItem": {
+                    "count": 500,
+                    "cardGuid": 126173396,
+                    "itemType": "Countable"
+                },
+                "variationPercentage": 0.25
+            }, {
+                "chance": 1.0,
+                "levelIntervall": [0, 25],
+                "shipItem": {
+                    "count": 100,
+                    "cardGuid": 221436534,
+                    "itemType": "Countable"
+                },
+                "variationPercentage": 0.25
+            }, {
+                "chance": 0.8,
+                "levelIntervall": [0, 255],
+                "shipItem": {
+                    "count": 60,
+                    "cardGuid": 113883533,
+                    "itemType": "Countable"
+                },
+                "variationPercentage": 0.3
+            }, {
+                "chance": 0.8,
+                "levelIntervall": [0, 255],
+                "shipItem": {
+                    "count": 40,
+                    "cardGuid": 9845757,
+                    "itemType": "Countable"
+                },
+                "variationPercentage": 0.3
+            }, {
+                "chance": 0.35,
+                "levelIntervall": [0, 255],
+                "shipItem": {
+                    "count": 6,
+                    "cardGuid": 190162639,
+                    "itemType": "Countable"
+                },
+                "variationPercentage": 0.5
+            }
+        ]
+    }
+]

@@ -75,10 +75,21 @@ The station colliders are `AABB` boxes, not spheres, measured from the client pr
 | `114_npc_tier2.json` | NPC escort wings (threat 8+) | authored alongside the generated sectors |
 | `116_npc_tier3.json` | NPC line wings (threat 14+) | authored alongside the generated sectors |
 | `119_ancient_drone.json` | ancient drones | 900 XP |
-| `121_boss.json` | the two event capitals (threat 18+) | the boss jackpot |
+| `121_boss.json` | 9 of the 46 lair bosses | the original jackpot: tylium + titanium + water, 60% cubit roll |
+| `122_boss_tylium_vein.json` | 7 lair bosses | 130k tylium, thin on everything else |
+| `123_boss_cubit_hoard.json` | 7 lair bosses | 4000 cubits and 1200 merits; merits past the daily cap convert to Uranium in `lootToUser`, so nothing is lost |
+| `124_boss_ammunition_cache.json` | 9 lair bosses | ordnance, level-banded: heavy rounds/missiles at `[26,255]`, medium at `[0,25]` |
+| `125_boss_ancient_cache.json` | 7 lair bosses | plutonium, FTL fragments, tuning kits, tech analyses |
+| `126_boss_wrecker.json` | 7 lair bosses | titanium-heavy plus mines, flak and nukes |
 | `5_outpost.json` | outpost kills | id 5 is upstream's own loot id for outposts; 6000 XP and a tylium-heavy payout |
 | `101_weapon_platform.json` | weapon-platform kills | id 101, upstream's platform loot id; 1500 XP |
 | `20_pvp.json` | player kills, ids 20–23 by victim tier | `lootPlayerSetup` looks up `20 + tier - 1`, so all four ids must exist or a PvP kill pays nothing |
+
+The six boss templates all sit at 15000 XP, `chance` 1.0 and roughly the same total value, so which
+one a lair carries is flavour rather than a farming target. `emit-sector-templates.js` picks per
+sector from `(s.id + 3 * isCylon) % 6` — no draw from the layout LCG, so changing the list moves
+only the two `lootId` fields per lair sector and leaves every rock where it was. The +3 offset means
+the two lairs inside one contested sector never share a template.
 
 The ids are not free choices: `20`–`23` is what the server computes from the victim's tier, and
 `111` is referenced by guid from `sectorTemplate10.json`'s `botSpawnTemplates` and
@@ -86,7 +97,10 @@ The ids are not free choices: `20`–`23` is what the server computes from the v
 platforms; without the files, `SpaceObjectFactory.getTemplateLst` filters both out on
 `Optional::isPresent` — silently — so every station in the galaxy pays nothing on death, and the
 `outposts_killed` counter can never increment because `CounterCardDistributor.outpostKilled` sits
-inside the per-template loop.
+inside the per-template loop. `122`–`126` were free to take: `StaticLootId`'s header reserves 1–99
+for the server's own computed ids (including `3` for comets, whose file is parked behind a `!`
+prefix and never loaded), and `LootTemplateReader` throws `Double Entry in LootTemplates!!!` on a
+collision, which kills the whole template load at boot rather than the one file.
 
 Every `cardGuid` in a loot template must have a full `GUI` + `ShipConsumable` + `Price` card set.
 Without all three the row never finishes loading in the hold: blank tile, matched by no filter,

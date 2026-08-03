@@ -122,6 +122,20 @@ public class DialogProtocol extends BgoProtocol
     private static final byte SAY_CONFIRM_CAPITAL = 4;
     private static final byte SAY_WATER = 5;
     private static final byte SAY_CONFIRM_WATER = 6;
+    private static final byte SAY_REQUEST_FLAGSHIP = 7;
+
+    /* The flagship request has no line of its own: the original never let anyone fly the
+     * Galactica or the Guardian, so no phrase for them was ever written. The ship NAME does
+     * exist, and the client resolves %$bgo.<key>.Name% tokens anywhere inside a phrase (the
+     * shipped lines interpolate %Rank% and %CapShipCost% the same way), so the menu entry is
+     * built around the client's own name for the hull rather than a string we invented. */
+    private static final String COL_FLAGSHIP_REQUEST =
+            "Requesting temporary command of the %$bgo.cruiser_galactica.Name%, sir. [Command Battlestar]";
+    private static final String CYL_FLAGSHIP_REQUEST =
+            "Request %$bgo.ship_basestar_guardian.Name% command access [Command Basestar]";
+
+    /** Which capital the pilot asked for, so the confirmation rents the one they chose. */
+    private long pendingCapital;
 
     private enum Stage { ROOT, CONFIRM_CAPITAL, CONFIRM_WATER }
 
@@ -210,6 +224,18 @@ public class DialogProtocol extends BgoProtocol
                             user().send(writeStopped());
                             return;
                         }
+                        pendingCapital = CapitalRental.forFaction(user().getPlayer().getFaction(), false);
+                        stage = Stage.CONFIRM_CAPITAL;
+                        user().send(writeNpcRemark(new Remark((byte) 1, (isColonial() ? COL_RENT : CYL_RENT)[0], "")));
+                    }
+                    case SAY_REQUEST_FLAGSHIP ->
+                    {
+                        if (!npcGrantsCapital())
+                        {
+                            user().send(writeStopped());
+                            return;
+                        }
+                        pendingCapital = CapitalRental.forFaction(user().getPlayer().getFaction(), true);
                         stage = Stage.CONFIRM_CAPITAL;
                         user().send(writeNpcRemark(new Remark((byte) 1, (isColonial() ? COL_RENT : CYL_RENT)[0], "")));
                     }
@@ -217,7 +243,8 @@ public class DialogProtocol extends BgoProtocol
                     {
                         final Player player = user().getPlayer();
                         final PlayerProtocol playerProtocol = user().getProtocol(ProtocolID.Player);
-                        final long capitalGuid = isColonial() ? CapitalRental.PEGASUS : CapitalRental.BASESTAR;
+                        final long capitalGuid = pendingCapital != 0 ? pendingCapital
+                                : CapitalRental.forFaction(player.getFaction(), false);
                         CDI.current().select(Catalogue.class).get()
                                 .fetchCard(capitalGuid, CardView.Ship)
                                 .ifPresent(card -> playerProtocol.rentCapital((ShipCard) card));
@@ -289,6 +316,8 @@ public class DialogProtocol extends BgoProtocol
                     if (capitalNpc)
                     {
                         remarks.add(new Remark(SAY_REQUEST_CAPITAL, root[2], ""));
+                        remarks.add(new Remark(SAY_REQUEST_FLAGSHIP,
+                                isColonial() ? COL_FLAGSHIP_REQUEST : CYL_FLAGSHIP_REQUEST, ""));
                     }
                     if (WATER_NPCS.contains(currentNpc))
                     {

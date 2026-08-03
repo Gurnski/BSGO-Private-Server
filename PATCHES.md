@@ -8,7 +8,7 @@ files are the same changes as standalone diffs against pristine upstream, for re
 Twenty-three patches against [BSGOCore](https://github.com/luigeneric/BSGOCore) at baseline
 **`23bad98a`** ("Fix PulseManeuver, fix DynamicMovementController", #10).
 
-Together they touch **45 files, +1 717 / −150**. Verified: applied in order with
+Together they touch **47 files, +2 163 / −151**. Verified: applied in order with
 `git apply --ignore-whitespace` to a clean worktree of `23bad98a`, the result is byte-identical
 (modulo CRLF) to the tree this server actually runs.
 

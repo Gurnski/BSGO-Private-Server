@@ -76,7 +76,11 @@ const GROUPS = [
   ['0016-capital-rental', [
     'src/main/java/io/github/luigeneric/core/player/Hangar.java',
     'src/main/java/io/github/luigeneric/core/protocols/dialog/DialogProtocol.java',
-    'src/main/java/io/github/luigeneric/core/protocols/player/CapitalRental.java']],
+    'src/main/java/io/github/luigeneric/core/protocols/player/CapitalRental.java',
+    // The expiry sweep and its registry. Written, reviewed, and deliberately NOT scheduled -
+    // CapitalRentalExpiry's own header records the three defects that keep it switched off.
+    'src/main/java/io/github/luigeneric/core/CapitalRentalExpiry.java',
+    'src/main/java/io/github/luigeneric/core/CapitalRentalRegistry.java']],
   ['0017-npc-combat', [
     'src/main/java/io/github/luigeneric/core/sector/SpaceObjectFactory.java',
     'src/main/java/io/github/luigeneric/core/sector/timers/NpcTimer.java',

@@ -295,6 +295,37 @@ const CAPITAL_FLIGHT = {
   ArmorValue: 60, CriticalDefense: 200,
 };
 
+/* The Galactica / Guardian Basestar block - the flagship step above CAPITAL_FLIGHT.
+ *
+ * ONE OBJECT, TWO HULLS, ON PURPOSE. Both rows below carry `realStats: FLAGSHIP_FLIGHT`, i.e. the
+ * SAME object reference, exactly as the Pegasus and Basestar share CAPITAL_FLIGHT. That is what
+ * guarantees the Colonial and Cylon flagships can never drift apart: there is no second copy of
+ * these numbers to edit, so a change to one hull's performance is a change to both or it is not
+ * possible at all. Do not "specialise" one of them by spreading this into a per-hull literal - the
+ * moment there are two objects, the next tuning pass silently makes one faction's flagship better.
+ *
+ * DERIVED FROM CAPITAL_FLIGHT, not typed out fresh, so the relationship stays visible and the
+ * handling family stays recognisably capital-ship. Two groups change:
+ *   HANDLING, +12% speed and +1 deg/s of turn. Justified by measurement, not by feel: the Galactica
+ *     mesh is 1441 units long and the Guardian 1216 wide, against the Pegasus's 1815 and the
+ *     Basestar's 2084 (root-local mesh AABB over every MeshFilter, extracted 2026-08-03). These two
+ *     are the SMALLER capitals, so being marginally less ponderous is the honest reading.
+ *   ENDURANCE, the flagship step. 100,000 hull and 2,500 power against 80,000 and 2,000, with
+ *     recovery, armour and critical defence moved by the same quarter. Nothing here is attested -
+ *     there is no wiki infobox for either hull as a player ship - so it is one deliberate ratio
+ *     applied to a block that IS attested, rather than a set of invented figures.
+ * The armament does NOT step up with the stats: both fly 8 mounts against the Pegasus's 12 (see
+ * HULL_SLOTS). A flagship here is tougher and longer-winded, not better armed. */
+const FLAGSHIP_FLIGHT = Object.assign({}, CAPITAL_FLIGHT, {
+  Speed: 28, BoostSpeed: 39, Acceleration: 3.5,
+  PitchMaxSpeed: 7, YawMaxSpeed: 7, RollMaxSpeed: 7,
+  PitchAcceleration: 3.5, YawAcceleration: 3.5, RollAcceleration: 3.5,
+  InertiaCompensation: 45,
+  MaxHullPoints: 100000, MaxPowerPoints: 2500,
+  HullRecovery: 137, PowerRecovery: 75,
+  ArmorValue: 75, CriticalDefense: 250,
+});
+
 const HULLS = [
   /* Hangar 16 and 17 restored to their original occupants: the second merit line and the
    * stealth ships. Identities, prices and paperdolls are the dump's own - Mk III line 23,000
@@ -368,7 +399,12 @@ const HULLS = [
     hp: 3600, pwr: 260, speed: 101, agility: 1.1, extent: 245 },
   { g: 5015, name: 'Brimir', faction: 'Colonial', hangar: 15, tier: 4,
     prefab: 'humant4carrier', objKey: 98636899, loca: 'ship_brimir', paperdoll: 'ship_brimir_paperdoll_layouts',
-    role: 'Carrier', roleDep: 'Carrier', lvl: 24, tyl: 420000, variants: [18],
+    /* Two variant buttons, not one. ShipIcon.variantIcons is `new GuiButton[3]` (ShipIcon.cs:27)
+     * and ShipQueue allocates [count, 3] as well, so THREE is the hard ceiling on this cell and
+     * the pair below fits. A fourth variant would be silently unreachable: HangarWindow
+     * .AddShipIconAndVariant iterates variantIcons, not VariantHangarIDs, so the extra id is never
+     * drawn and the hull becomes uncommandable rather than throwing. */
+    role: 'Carrier', roleDep: 'Carrier', lvl: 24, tyl: 420000, variants: [18, 19],
     hp: 14000, pwr: 600, speed: 52, agility: 0.55, extent: 379 },
   /* CAPITALS DO NOT FLY LIKE FIGHTERS, and until now this one did: speed 52 and agility 0.55 are
    * the same figures as a tier-4 strike hull, on a ship 1,174 units long. The dump has no Pegasus
@@ -388,11 +424,52 @@ const HULLS = [
    * light year is 50 tylium per unit - the affordability validator exists precisely to stop a
    * pilot being stranded, and one hop would cost a third of the starting grant. The Pegasus is a
    * one-hour rental, so its economics are a separate question from its handling. */
+  /* PREFAB IS 'humant4pegasus', NOT 'pegasus'. The client ships two Pegasus prefabs on the same
+   * meshes (Pegasus_LOD1-4, identical root AABBs, both depending on humant4pegasus_tex); they
+   * differ only in the mount container. 'pegasus' is the decorative/mission copy and
+   * 'humant4pegasus' is the flyable one. Three independent tells, all checked against the bundles:
+   *   - low_res_ship_prefabs carries a lowres for every FLYABLE hull, humant4pegasus_lowres
+   *     included. There is no pegasus_lowres. The LOD swap needs one; a set-dressing prop does not.
+   *   - humant4pegasus's ten broadside mounts mirror about x to 1.5e-4 units and their rotations to
+   *     under 0.01 deg. 'pegasus' skews up to 1.695 units and its mirror plane wanders off centre
+   *     by as much as 0.85 on a hull whose mesh is symmetric to 0.000.
+   *   - 'pegasus' puts BOTH point-defence mounts at x=0, y=0, z=-19/+26 - inside the hull volume,
+   *     both facing aft. humant4pegasus puts them at z=+528 facing forward and z=-508 facing aft,
+   *     which is bow and stern. Turret models parent to the prefab transform (Modules.cs:46-71), so
+   *     the shipped pair rendered buried in the ship.
+   * DURABILITY, HARDPOINTS and HULL_SLOTS are all keyed by this string and were renamed with it.
+   * The ColliderTemplate is keyed by it too and lives OUTSIDE this file - see the note in
+   * HARDPOINTS.humant4pegasus. */
   { g: 5017, name: 'Pegasus', faction: 'Colonial', hangar: 18, parentHangar: 15, tier: 4,
-    prefab: 'pegasus', loca: 'ship_commandtoken_pegasus', paperdoll: 'ship_commandtoken_pegasus_paperdoll_layouts',
+    prefab: 'humant4pegasus', loca: 'ship_commandtoken_pegasus', paperdoll: 'ship_commandtoken_pegasus_paperdoll_layouts',
     role: 'Mothership', roleDep: 'Mothership', lvl: 1, tyl: 25000, tokens: 20000, rentalOnly: true,
     hp: 15400, pwr: 660, speed: 52, agility: 0.55, extent: 1174,
     realStats: CAPITAL_FLIGHT },
+  /* GALACTICA. Second Colonial flagship, and the Guardian Basestar's opposite number - the two
+   * share FLAGSHIP_FLIGHT by reference, which is the whole of the parity guarantee.
+   *
+   * HangarID 19 is FREE in both factions: 1-9, 11 and 13-17 are the strike roster, 12 is where the
+   * NPC clones park, 15 is the tier-4 carrier, 18 is the Pegasus/Basestar. It has no
+   * GUI/InfoJournal/Ships art, and needs none - a ParentHangarID moves this card out of
+   * ShipListCard.ShipCards into VariantShipCards before either the hangar grid or the shop queue
+   * iterates it, and the variant button is a fixed texture with a text label.
+   *
+   * hp/pwr/speed/agility below are the FORMULA INPUTS, not the emitted stats: flightStats() runs on
+   * them first and FLAGSHIP_FLIGHT then overwrites every field it names (see the Stats assign in
+   * shipCards). They are the Pegasus's, so the two capital pairs differ only where the shared block
+   * says they do.
+   *
+   * LOCA. There is no ship_galactica key anywhere in the 14,055-key set - she was never a player
+   * hull - so this borrows cruiser_galactica, which is the one candidate whose .Description reads
+   * like ship copy ("The mothership of the Colonial fleet") rather than an icon label. Reuse is
+   * safe: loca keys are not unique per card and CRUISERS guid 29 already points here.
+   * PAPERDOLL is the Pegasus's. No layout was ever authored for this hull; the Pegasus layout
+   * defines big-layout slot ids 0-13 at level 1, which covers everything HULL_SLOTS assigns. */
+  { g: 5019, name: 'Galactica', faction: 'Colonial', hangar: 19, parentHangar: 15, tier: 4,
+    prefab: 'galactica', loca: 'cruiser_galactica', paperdoll: 'ship_commandtoken_pegasus_paperdoll_layouts',
+    role: 'Mothership', roleDep: 'Mothership', lvl: 1, tyl: 25000, tokens: 20000, rentalOnly: true,
+    hp: 15400, pwr: 660, speed: 52, agility: 0.55, extent: 725,
+    realStats: FLAGSHIP_FLIGHT },
   // ---- Cylon
   { g: 1427261742, name: 'Raider', faction: 'Cylon', hangar: 1, tier: 1,
     prefab: 'cylont1fighter', objKey: 117312163, loca: 'ship_raider', paperdoll: 'ship_raider_paperdoll_layouts',
@@ -444,7 +521,8 @@ const HULLS = [
     hp: 3600, pwr: 260, speed: 101, agility: 1.1, extent: 175 },
   { g: 5115, name: 'Surtur', faction: 'Cylon', hangar: 15, tier: 4,
     prefab: 'cylont4carrier', objKey: 114650019, loca: 'ship_surtur', paperdoll: 'ship_surtur_paperdoll_layouts',
-    role: 'Carrier', roleDep: 'Carrier', lvl: 24, tyl: 420000, variants: [18],
+    // Second variant button - see the Brimir row for why three is the ceiling.
+    role: 'Carrier', roleDep: 'Carrier', lvl: 24, tyl: 420000, variants: [18, 20],
     hp: 14000, pwr: 600, speed: 52, agility: 0.55, extent: 375 },
   /* The Basestar is the Pegasus's stated counterpart (the infobox says so on both pages) and the
    * two are deliberately matched in every other figure we ship, so it takes the same flight block.
@@ -454,6 +532,21 @@ const HULLS = [
     role: 'Mothership', roleDep: 'Mothership', lvl: 1, tyl: 25000, tokens: 20000, rentalOnly: true,
     hp: 15400, pwr: 660, speed: 52, agility: 0.55, extent: 863,
     realStats: CAPITAL_FLIGHT },
+  /* GUARDIAN BASESTAR. The Galactica's opposite number; same shared FLAGSHIP_FLIGHT object, same
+   * shape of row, HangarID 20 (free in both factions - see the Galactica note on 19).
+   *
+   * LOCA ship_basestar_guardian resolves .Name "Guardian Basestar" and carries a .Description,
+   * which is an EMPTY STRING rather than absent - that resolves, so the description widgets get ""
+   * instead of the null they would NRE on. enemy_basestar_guardian_winter2016 at locaLevel 1 is the
+   * alternative if a non-empty blurb is ever wanted ("Captured Guardian Basestar"); it is not used
+   * here because a captured-ship description on a rented flagship reads as a different item.
+   * PAPERDOLL is the Basestar's, for the same reason the Galactica takes the Pegasus's: none was
+   * authored for this hull, and 0-13 at level 1 covers every slot assigned below. */
+  { g: 5119, name: 'Guardian Basestar', faction: 'Cylon', hangar: 20, parentHangar: 15, tier: 4,
+    prefab: 'cylont4wing_guardian', loca: 'ship_basestar_guardian', paperdoll: 'ship_commandtoken_basestar_paperdoll_layouts',
+    role: 'Mothership', roleDep: 'Mothership', lvl: 1, tyl: 25000, tokens: 20000, rentalOnly: true,
+    hp: 15400, pwr: 660, speed: 52, agility: 0.55, extent: 610,
+    realStats: FLAGSHIP_FLIGHT },
 ];
 
 /* NPC-only hulls. Authored because SectorTemplate 10 spawns 51/52/54/75/76/78 by guid and the
@@ -802,19 +895,69 @@ const HARDPOINTS = {
     bullet14_defensive:      { hash: 60692, pos: V3(72.070297, 23.752218, -307.778107), rot: QUAT(0, 0.965926, 0, 0.258819) },
     sticker1:                { hash: 45294, pos: V3(0, 0, 0), rot: QUAT(), type: 'Sticker' },
   },
-  pegasus: {           // Pegasus - REAL transforms, re-extracted from the client bundle 2026-08-02
-    bullet01:                { hash:  49813, pos: V3(-350.94944, -95.217966, -236.744682), rot: QUAT(0.707107, 0, -0.707107, 0) },
-    bullet02:                { hash:  50321, pos: V3(-350.892249, -95.183284, -68.559715), rot: QUAT(0.707107, 0, -0.707107, 0) },
-    bullet03:                { hash:  19778, pos: V3(-350.892277, -95.183278, 97.203041), rot: QUAT(0.707107, 0, -0.707107, 0) },
-    bullet04:                { hash:  50370, pos: V3(-197.31748, -14.993818, 404.189082), rot: QUAT(0.707107, 0, -0.707107, 0) },
-    bullet05:                { hash:  21514, pos: V3(-72.639383, -14.372976, 866.223428), rot: QUAT(0, 0, 1, 0) },
-    bullet06:                { hash:  64121, pos: V3(71.57479, -14.367258, 866.527068), rot: QUAT(0, 0, 1, 0) },
-    bullet07:                { hash:  64555, pos: V3(197.727594, -14.983938, 404.182905), rot: QUAT(0.707107, 0, 0.707107, 0) },
-    bullet08:                { hash:  18078, pos: V3(352.574734, -95.209134, 97.18218), rot: QUAT(0.707107, 0, 0.707107, 0) },
-    bullet09:                { hash:  21539, pos: V3(352.574762, -95.209148, -68.580577), rot: QUAT(0.707107, 0, 0.707107, 0) },
-    bullet10:                { hash:     10, pos: V3(352.64489, -95.207384, -236.666155), rot: QUAT(0.707107, 0, 0.707107, 0) },
-    bullet11:                { hash:     11, pos: V3(0.000004, -0.000009, -19.171537), rot: QUAT(1, 0, 0, 0) },
-    bullet12:                { hash:     12, pos: V3(-0.000005, -0.000006, 25.570395), rot: QUAT(1, 0, 0, 0) },
+  /* Pegasus - REAL transforms from bundle 'human_t4_pegasus' (humant4pegasus.prefab), extracted
+   * 2026-08-03. This replaces a transcription of 'pegasus.prefab', which was the wrong asset - see
+   * the prefab note on hull 5017 for why, and for the two edits that go with this one.
+   * The mounts here are machine-mirrored, not hand-placed: bullet01 x = -350.949493 against
+   * bullet10 x = +350.949507, and the same to 4-5 decimals on all five pairs. Worst d|x| across
+   * the five is 1.5e-4 units. They also fan correctly - 01/03/08/10 broadside, 02/09 and 04/07 at
+   * 45 degrees forward-outboard, 05/06 dead ahead, point defence on the centreline fore and aft.
+   *
+   * COMPANION EDIT OUTSIDE THIS FILE: the ColliderTemplate is keyed by prefab name and is still
+   * keyed 'pegasus' in both config/ColliderTemplates/Colonial/pegasus.json and
+   * server/ServerConfigurationUtils/global/ColliderTemplates/Colonial/pegasus.json. Rekey both to
+   * humant4pegasus; radius 1174 is unchanged because it is the same mesh. Missing it is silent -
+   * SpaceObjectFactory.wrapCollider uses Optional.ifPresent, so the hull simply flies with NO
+   * collider and nothing can hit it. */
+  humant4pegasus: {
+    bullet01:                { hash:  49813, pos: V3(-350.94948, -100, -156.722077), rot: QUAT(0.707107, 0, -0.707107, 0) },
+    bullet02:                { hash:  50321, pos: V3(-325.97942, -100, 226.48752), rot: QUAT(0.382684, 0, -0.923879, 0) },
+    bullet03:                { hash:  19778, pos: V3(-197.113817, -21.459248, 365.523878), rot: QUAT(0.707107, 0, -0.707107, 0) },
+    bullet04:                { hash:  50370, pos: V3(-167.882962, -21.867718, 665.421128), rot: QUAT(-0.382684, 0, 0.92388, 0) },
+    bullet05:                { hash:  21514, pos: V3(-70.773704, -21.290451, 866.223444), rot: QUAT(0, 0, 1, 0) },
+    bullet06:                { hash:  64121, pos: V3(70.773553, -21.290451, 866.223456), rot: QUAT(0, 0, 1, 0) },
+    bullet07:                { hash:  64555, pos: V3(167.882846, -21.867718, 665.421157), rot: QUAT(-0.382683, 0, -0.92388, 0) },
+    bullet08:                { hash:  18078, pos: V3(197.113768, -21.459248, 365.523912), rot: QUAT(0.707107, 0, 0.707107, 0) },
+    bullet09:                { hash:  21539, pos: V3(325.979381, -100, 226.487577), rot: QUAT(0.382683, 0, 0.92388, 0) },
+    bullet10:                { hash:     10, pos: V3(350.949507, -100, -156.722015), rot: QUAT(0.707107, 0, 0.707107, 0) },
+    bullet11:                { hash:     11, pos: V3(-0.000046, 0, 528), rot: QUAT(0, 0, 0, 1) },
+    bullet12:                { hash:     12, pos: V3(0.000044, 0, -508), rot: QUAT(1, 0, 0, 0) },
+  },
+  /* Galactica - REAL transforms, extracted from bundle 'galactica' 2026-08-03. The
+   * Pegasus-layout fallback was NOT needed: this hull carries its own bulletNN locators.
+   * Eight mounts, all broadside, in four port/starboard pairs; +Z is the bow (the engine
+   * glowball sits at z = -703.5), so they run bow to stern:
+   *     z = +499.4  bullet01 port / bullet02 stbd      z = +358.6  bullet04 port / bullet03 stbd
+   *     z = -424.6  bullet06 port / bullet05 stbd      z = -567.2  bullet08 port / bullet07 stbd
+   * There is no centre-line pair, so unlike the Pegasus there is nowhere obvious to hang point
+   * defence - see HULL_SLOTS.
+   * ONE ODDITY, recorded rather than corrected: the port row faces +X and the starboard row -X,
+   * i.e. each row points ACROSS the hull, where the Pegasus's port turrets face outward. The
+   * rotations are the prefab's own, verbatim, so whatever the original did with the muzzle VFX
+   * we do too; "fixing" them here would be inventing data. */
+  galactica: {
+    bullet01:                { hash:  49813, pos: V3(-55.444576, -0.210876, 499.360382), rot: QUAT(0, 0.707107, 0, 0.707107) },
+    bullet02:                { hash:  50321, pos: V3(53.008648, -0.210876, 499.360382), rot: QUAT(0, -0.707107, 0, 0.707107) },
+    bullet03:                { hash:  19778, pos: V3(53.008625, -0.210846, 358.558105), rot: QUAT(0, -0.707107, 0, 0.707107) },
+    bullet04:                { hash:  50370, pos: V3(-55.444599, -0.210846, 358.558105), rot: QUAT(0, 0.707107, 0, 0.707107) },
+    bullet05:                { hash:  21514, pos: V3(53.008503, -0.210785, -424.557434), rot: QUAT(0, -0.707107, 0, 0.707107) },
+    bullet06:                { hash:  64121, pos: V3(-55.444721, -0.210785, -424.557434), rot: QUAT(0, 0.707107, 0, 0.707107) },
+    bullet07:                { hash:  64555, pos: V3(53.008488, -0.210754, -567.233887), rot: QUAT(0, -0.707107, 0, 0.707107) },
+    bullet08:                { hash:  18078, pos: V3(-55.444736, -0.210754, -567.233887), rot: QUAT(0, 0.707107, 0, 0.707107) },
+    /* bullet09-12 are SYNTHESISED, and are the only invented transforms on this hull. THEY CANNOT
+     * BIND CLIENT-SIDE - no transform of that name exists in galactica.prefab, and Spot.FindSpots
+     * matches on name, so the four bays they carry render no turret. Read the GALACTICA block in
+     * HULL_SLOTS before touching them; moving these coordinates cannot fix it.
+     * The model ships eight real mounts in four port/starboard pairs at z = +499, +358, -425, -567, leaving
+     * an 780-unit gap amidships that carries no battery. Eight guns on the fleet flagship reads as
+     * weaker than the twelve-gun Pegasus it is meant to outclass, so two more pairs fill that gap
+     * at z = +160 and z = -180 on the hull's own flank line - same x offsets and same outward
+     * facing as every real mount, so they sit on the broadside where a battlestar's guns belong.
+     * Hashes continue the project's number-in-the-name fallback (bullet10-14 already use it). */
+    bullet09:                { hash:  21539, pos: V3(53.008600, -0.210820, 160.000000), rot: QUAT(0, -0.707107, 0, 0.707107) },
+    bullet10:                { hash:     10, pos: V3(-55.444600, -0.210820, 160.000000), rot: QUAT(0, 0.707107, 0, 0.707107) },
+    bullet11:                { hash:     11, pos: V3(53.008550, -0.210800, -180.000000), rot: QUAT(0, -0.707107, 0, 0.707107) },
+    bullet12:                { hash:     12, pos: V3(-55.444650, -0.210800, -180.000000), rot: QUAT(0, 0.707107, 0, 0.707107) },
   },
   cylont1fighter: {    // Raider
     bullet01:                { hash:  49813, pos: V3(-1.161417, -0.310141, 2.245296), rot: QUAT() },
@@ -972,6 +1115,33 @@ const HARDPOINTS = {
     bullet10:                { hash:     10, pos: V3(301.058446, -95.207386, -471.554667), rot: QUAT(0.707107, 0, 0.707107, 0) },
     bullet11:                { hash:     11, pos: V3(0.000008, -0.000009, -19.171537), rot: QUAT(1, 0, 0, 0) },
     bullet12:                { hash:     12, pos: V3(-0.000011, -0.000006, 25.570395), rot: QUAT(1, 0, 0, 0) },
+  },
+  /* Guardian Basestar - REAL transforms, extracted from bundle 'cylon_t4_wing' 2026-08-03.
+   * Twelve locators, of which HULL_SLOTS uses eight (see there for why).
+   *
+   * THE SLOT TYPES ARE ATTESTED, not inferred. The prefab carries a second container, 'Missiles
+   * Backup', holding eleven turret MODELS parked at exactly these root-local positions and
+   * rotations, and their names declare the class:
+   *     Missile Launcher 01-05    -> bullet01, 04, 05, 06, 07     (bullet10 mirrors bullet07)
+   *     Gun 01/02 u, Gun 01/02 o  -> bullet02, 03, 08, 09
+   *     Point Defense 01 u / 02 o -> bullet11, 12
+   * So the Guardian's authored armament is 6 launcher / 4 gun / 2 point defence - the Pegasus's
+   * 6/4/2 with gun and launcher swapped.
+   * cylont4wing_guardian_rusty has BYTE-IDENTICAL hardpoint transforms, so the paint below can swap
+   * the whole model without invalidating a single spot on this World card. */
+  cylont4wing_guardian: {
+    bullet01:                { hash:  49813, pos: V3(384.299988, 60.5, 33.599998), rot: QUAT(0, 0.671768, 0, 0.740762) },
+    bullet02:                { hash:  50321, pos: V3(-242.299988, -88.800003, -176.699997), rot: QUAT(0.893039, -0.008772, -0.448788, -0.031526) },
+    bullet03:                { hash:  19778, pos: V3(-243.309998, -87.620003, 177.809998), rot: QUAT(0.441369, -0.045254, -0.895703, -0.029349) },
+    bullet04:                { hash:  50370, pos: V3(384.599976, 60.5, -33.699997), rot: QUAT(0, 0.732832, 0, 0.68041) },
+    bullet05:                { hash:  21514, pos: V3(86.699997, 60.5, 375.800018), rot: QUAT(0, 0.103707, 0, 0.994608) },
+    bullet06:                { hash:  64121, pos: V3(152.5, 60.5, 358.699982), rot: QUAT(0, 0.179107, 0, 0.98383) },
+    bullet07:                { hash:  64555, pos: V3(87.370003, 60.549999, -377.75), rot: QUAT(0, -0.992811, 0, -0.119696) },
+    bullet08:                { hash:  18078, pos: V3(-281, 75.100006, -87.299995), rot: QUAT(-0.036406, 0.78885, -0.040178, -0.61219) },
+    bullet09:                { hash:  21539, pos: V3(-283.299988, 75.5, 86.800003), rot: QUAT(-0.053954, 0.620611, -0.028641, -0.781735) },
+    bullet10:                { hash:     10, pos: V3(150.399994, 60.549999, -354.399994), rot: QUAT(0, -0.978046, 0, -0.208388) },
+    bullet11:                { hash:     11, pos: V3(92.399994, -116.5, -1.1), rot: QUAT(0.499726, 0.501808, -0.503297, 0.495131) },
+    bullet12:                { hash:     12, pos: V3(-82.399994, 122.600014, -0.6), rot: QUAT(-0.001076, -0.708555, -0.003241, 0.705648) },
   },
 
   /* STATIONS. Extracted with tools/cardgen/extract-hardpoints.py against human_outpost /
@@ -1193,40 +1363,87 @@ const HULL_SLOTS = {
   humant4carrier:     [[0, 'weapon', 'bullet13_defensive', 1], [1, 'weapon', 'bullet14_defensive', 1], [2, 'launcher', 'bullet12_launcher', 1], [3, 'weapon', 'bullet01_cannon', 1], [4, 'weapon', 'bullet02_cannon', 1], [5, 'weapon', 'bullet03_cannon', 1], [6, 'weapon', 'bullet04_cannon', 1], [7, 'weapon', 'bullet05_cannon', 1], [8, 'weapon', 'bullet06_cannon', 1], [9, 'weapon', 'bullet07_defensive', 1], [20, 'weapon', 'bullet09_defensive', 2], [21, 'weapon', 'bullet11_launcher', 2]],
   /* THE TWO COMMAND-TOKEN CAPITALS. Neither exists in the live-server dump - that server has only
    * the t4 carriers - so these are the one place the slot map still has to be reasoned out rather
-   * than read off. What was here before was an arbitrary permutation: slot 3 on bullet10, slot 2 a
-   * 'launcher' on bullet01 (a PORT-SIDE TURRET), and slots 6 and 8 as weapons on bullet11/bullet12,
-   * which sit at (0, 0, +-20) - dead centre, inside the hull. That put gun models inside the ship
-   * firing backwards and a missile pod on a broadside mount, which is what "the orientation is a
-   * mess" was. The hardpoint ROTATIONS were never the problem: working the axis-angle through,
-   * bullet01-04 map forward onto (-1,0,0) and bullet07-10 onto (+1,0,0), so the port turrets really
-   * do point port and the starboard ones starboard.
+   * than read off.
    *
-   * The geometry is perfectly symmetric and settles the layout on its own:
-   *   bullet01..05  port side, running aft to bow      bullet06..10  starboard, bow to aft
-   *   bullet11/12   on the centre line at z = -19 and +26, inside the hull
-   * Ten turrets and two centre-line bays. The bays are LAUNCHER mounts, not guns: both t4 carriers
-   * in the dump carry exactly two launcher slots, and the points they sit on are named
-   * bullet11_launcher and bullet12_launcher. Same two indices, same pair count, same place.
+   * The map below is UNCHANGED by the move from 'pegasus' to 'humant4pegasus' (see hull 5017). The
+   * two prefabs number their mounts the same way, so the id->point assignment survived the repoint
+   * intact; only the coordinates it reasons over got better. On the real prefab:
+   *   bullet01,02,03  port, aft to bow        bullet08,09,10  starboard, bow to aft
+   *   bullet04,05     port bow, forward-firing   bullet06,07   starboard bow, forward-firing
+   *   bullet11 z=+528 bow, facing forward     bullet12 z=-508 stern, facing aft
+   * Ten broadside/bow turrets and a centre-line point-defence pair covering both approaches.
    *
    * WHAT GOES WHERE IS SETTLED BY THE WIKI, AND THE GEOMETRY AGREES WITH IT EXACTLY.
    * research/bsgo_wiki/Battlestar Pegasus.txt:50-52 lists the ship as pre-installed with twelve
    * level-15 systems - 6 Cannon Battery, 4 Missile Battery, 2 Point Defence Battery - and twelve is
-   * our hardpoint count. The mounts then fall into precisely those three groups by height:
-   *   y = -95.2   bullet01,02,03 + bullet08,09,10   SIX low broadside mounts   -> gun (cannon)
-   *   y = -15.0   bullet04,05    + bullet06,07      FOUR upper forward mounts  -> launcher (missile)
-   *   centre line bullet11,12                       TWO at (0,0,+-20)          -> defensive_weapon
-   * Six, four and two, matching the wiki's counts without being told them. The centre pair is the
-   * point-defence/flak mount, which is what the paperdoll shows centrally.
+   * our hardpoint count. The mounts fall into precisely those three groups by FACING:
+   *   broadside, forward = +-(1,0,0)   bullet01,02,03 + bullet08,09,10   SIX  -> gun (cannon)
+   *   bow arc, forward-outboard/ahead  bullet04,05    + bullet06,07      FOUR -> launcher (missile)
+   *   centre line, fore and aft        bullet11,12                       TWO  -> defensive_weapon
+   * Six, four and two, matching the wiki's counts without being told them.
    *
-   * I had these two as 'launcher' in the previous pass, reasoning from the dumped t4 carriers
-   * naming their launcher points bullet11_launcher/bullet12_launcher. That was the wrong call -
-   * the index coincidence is real but the Pegasus is a different ship, and its own page says point
-   * defence. defensive_weapon is the slot type both point defence and flak use.
+   * The centre pair is point defence, NOT launchers. The dumped t4 carriers name their launcher
+   * points bullet11_launcher/bullet12_launcher, and that index coincidence is what put launchers
+   * here in an earlier pass; but the Pegasus is a different ship, its own page says point defence,
+   * and on the real prefab this pair is a bow/stern axial pair rather than the carriers' pair of
+   * amidships bays. defensive_weapon is the slot type both point defence and flak use.
    *
    * All twelve ids stay inside the 0-13 set the paperdoll defines
    * (ship_commandtoken_{pegasus,basestar}_paperdoll_layouts), leaving 12 and 13 free rather than
    * filled with invented module slots. */
-  pegasus:            [[0, 'gun', 'bullet01', 1], [1, 'gun', 'bullet02', 1], [2, 'gun', 'bullet03', 1], [3, 'launcher', 'bullet04', 1], [4, 'launcher', 'bullet05', 1], [5, 'launcher', 'bullet06', 1], [6, 'launcher', 'bullet07', 1], [7, 'gun', 'bullet08', 1], [8, 'gun', 'bullet09', 1], [9, 'gun', 'bullet10', 1], [10, 'defensive_weapon', 'bullet11', 1], [11, 'defensive_weapon', 'bullet12', 1]],
+  humant4pegasus:     [[0, 'gun', 'bullet01', 1], [1, 'gun', 'bullet02', 1], [2, 'gun', 'bullet03', 1], [3, 'launcher', 'bullet04', 1], [4, 'launcher', 'bullet05', 1], [5, 'launcher', 'bullet06', 1], [6, 'launcher', 'bullet07', 1], [7, 'gun', 'bullet08', 1], [8, 'gun', 'bullet09', 1], [9, 'gun', 'bullet10', 1], [10, 'defensive_weapon', 'bullet11', 1], [11, 'defensive_weapon', 'bullet12', 1]],
+  /* THE TWO FLAGSHIPS - twelve batteries each, 6 gun / 4 launcher / 2 defensive, matching the
+   * Pegasus and Basestar so the flagship is not the lighter-armed ship. The split is IDENTICAL on
+   * both because these two share FLAGSHIP_FLIGHT by reference and a 12-vs-8 battery would undo in
+   * armament exactly the parity that stat block exists to guarantee. This file settled the same
+   * question once already on the Basestar row below: "a Cylon capital with a different weapon count
+   * to its Colonial counterpart would be the surprise".
+   *
+   * GUARDIAN. Twelve real locators, all twelve slotted, all twelve bind. Types are the prefab's own
+   * (see HARDPOINTS): bullet02/03/08/09 are the 'Gun' mounts, bullet11/12 the 'Point Defense' pair,
+   * and the launcher locators supply the rest.
+   *
+   * GALACTICA - AND THE ONE KNOWN DEFECT ON THIS HULL. galactica.prefab carries EIGHT bullet
+   * locators, not twelve; bullet09/10/11/12 in HARDPOINTS.galactica are synthesised and are the
+   * only invented transforms on any capital. Re-checked 2026-08-03 against galactica.prefab,
+   * galactica_lowres.prefab and every other galactica-family asset in the client: there is no
+   * twelve-mount Galactica anywhere, so this cannot be fixed the way the Pegasus was.
+   * The consequence is silent and VISUAL ONLY. Spot.FindSpots matches ObjectPointName against
+   * transform names by exact equality and drops misses without a log line, so those four descs
+   * produce no Spot -> GetObjectPoint returns null -> Modules.BuildModules hits `continue` ->
+   * no turret model, no muzzle flash, no tracer on four of the twelve bays. Damage still resolves:
+   * the server reads the card's own localPosition for the arc check and missile spawn origin, and
+   * those sit on the hull's real flank line. The loss is symmetric (both phantom pairs are complete
+   * port/starboard pairs), so the ship looks bald amidships rather than lopsided.
+   * Do NOT "fix" this by moving the coordinates. Spot binds to the prefab transform and Position/
+   * Rotation return transform.position/rotation (Spot.cs:26-28), so no value in HARDPOINTS can move
+   * a turret on screen - only the NAME matters client-side.
+   * The only two real options are (a) leave it, which is what we do, and keep 12-vs-12 parity, or
+   * (b) drop BOTH flagships to eight bays, which restores every turret model at the cost of a third
+   * of the flagship battery on both factions. That is a balance call, not a data call, so it is not
+   * being made here.
+   *
+   * Type split on the Galactica is by geometry, bow to stern - no backup models, no
+   * _cannon/_launcher/_defensive suffixes, no wiki loadout: the bow pair throws missiles, the middle
+   * pairs are the cannon battery, and the stern pair is the point-defence screen over the engines.
+   * Point defence aft is the debatable call - the Pegasus mounts it on the centre line and this hull
+   * has none - but the alternative is a flagship with no close-in defence at all.
+   *
+   * MaxCountPerShip ON THE CAPITAL WEAPONS COVERS THIS SPLIT and was re-checked against the emitted
+   * catalogue: 6031 gun cap 6 vs 6 gun bays, 6034 launcher cap 4 vs 4 launcher bays, 6032/6033 cap 2
+   * vs 2 defensive bays. Change the split here and those caps have to move with it, or the extra
+   * bays are permanently unfillable.
+   *
+   * SLOT 12 IS THE PAINT BAY on both. The two command-token paperdolls define big-layout ids 0-13
+   * at level 1 and 0-12 at level 2, so 12 is the only id that is safe at BOTH levels; 13 would be a
+   * NullReferenceException on any level-2 card. These hulls can never reach level 2 (rentalOnly
+   * forces nextShipCardGuid 0), but a bay that is only safe by accident is not worth the saving. */
+  /* Point defence goes FORE AND AFT, never as a pair. bullet07/08 are both at z = -567, so putting
+   * the two defensive bays there left every flak burst coming out of the stern and the bow
+   * undefended - which is exactly how it looked in flight. bullet01 (z = +499) and bullet07
+   * (z = -567) are the hull's own extremes, matching the Pegasus, whose real prefab puts its pair
+   * at +528 and -508. The 6/4/2 split is unchanged, so parity with the Guardian holds. */
+  galactica:          [[0, 'launcher', 'bullet02', 1], [1, 'launcher', 'bullet03', 1], [2, 'launcher', 'bullet09', 1], [3, 'launcher', 'bullet10', 1], [4, 'gun', 'bullet04', 1], [5, 'gun', 'bullet05', 1], [6, 'gun', 'bullet06', 1], [7, 'gun', 'bullet08', 1], [8, 'gun', 'bullet11', 1], [9, 'gun', 'bullet12', 1], [10, 'defensive_weapon', 'bullet01', 1], [11, 'defensive_weapon', 'bullet07', 1], [12, 'ship_paint', 'undefined', 1]],
   cylont1fighter:     [[0, 'weapon', 'bullet01', 1], [1, 'weapon', 'bullet03', 1], [2, 'weapon', 'elitebullet04', 1], [12, 'weapon', 'bullet02', 2]],
   cylont2fighter:     [[0, 'weapon', 'bullet01', 1], [1, 'weapon', 'bullet04', 1], [2, 'weapon', 'elitebullet06', 1], [3, 'weapon', 'bullet03', 1], [12, 'weapon', 'bullet02', 2], [13, 'weapon', 'elitebullet05', 2]],
   cylont3fighter:     [[12, 'weapon', 'bullet02', 1], [13, 'weapon', 'bullet05', 1], [0, 'weapon', 'bullet01', 1], [1, 'weapon', 'bullet06', 1], [2, 'weapon', 'elitebullet07', 1], [3, 'weapon', 'bullet03', 1], [4, 'weapon', 'bullet04', 1], [5, 'weapon', 'elitebullet08', 1]],
@@ -1246,6 +1463,11 @@ const HULL_SLOTS = {
    * there is no attested loadout to check it against. The geometry is identical though, and a
    * Cylon capital with a different weapon count to its Colonial counterpart would be the surprise. */
   basestar:           [[0, 'gun', 'bullet01', 1], [1, 'gun', 'bullet02', 1], [2, 'gun', 'bullet03', 1], [3, 'launcher', 'bullet04', 1], [4, 'launcher', 'bullet05', 1], [5, 'launcher', 'bullet06', 1], [6, 'launcher', 'bullet07', 1], [7, 'gun', 'bullet08', 1], [8, 'gun', 'bullet09', 1], [9, 'gun', 'bullet10', 1], [10, 'defensive_weapon', 'bullet11', 1], [11, 'defensive_weapon', 'bullet12', 1]],
+  // Guardian Basestar - the Galactica's matched pair. See the block above the galactica row.
+  /* All twelve real mounts, classed by the turret models parked on them in the prefab's own
+   * 'Missiles Backup' container: launchers on 01/04/05/06, guns on 02/03/08/09, point defence
+   * on 11/12. bullet07/10 are the launcher pair the artists left unmodelled - mirrors of 05/06. */
+  cylont4wing_guardian: [[0, 'launcher', 'bullet01', 1], [1, 'launcher', 'bullet04', 1], [2, 'launcher', 'bullet05', 1], [3, 'launcher', 'bullet06', 1], [4, 'gun', 'bullet02', 1], [5, 'gun', 'bullet03', 1], [6, 'gun', 'bullet08', 1], [7, 'gun', 'bullet09', 1], [8, 'gun', 'bullet07', 1], [9, 'gun', 'bullet10', 1], [10, 'defensive_weapon', 'bullet11', 1], [11, 'defensive_weapon', 'bullet12', 1], [12, 'ship_paint', 'undefined', 1]],
 };
 /* LevelRequirement. The Requisition button is not rendered AT ALL when the player's level is
  * below this, so 5/10 made four of six hulls unbuyable for a fresh character. The curve is
@@ -1285,7 +1507,15 @@ function slotCards(prefab) {
       Level: lvl,
     }));
   }
-  const hp = HARDPOINTS[prefab];
+  /* A module bay (hull/computer/engine/avionics/ship_paint/role) does not render on the ship, so it
+   * has no transform to attach to and no spot on the World card - the validator's slot->spot rule
+   * exempts those types for exactly that reason. Every such bay in the dump carries the sentinel
+   * point "undefined" with hash 44673, the hash of that literal string, and hulls-real.js reproduces
+   * it on all 26 flyable hulls. It is folded into the lookup rather than special-cased at the call
+   * site so that a module bay and a turret still read the same way here, and so that HARDPOINTS
+   * stays purely the set of REAL transforms - spots() emits every entry it holds, and a sentinel in
+   * there would become a phantom spot on the World card. */
+  const hp = Object.assign({ undefined: { hash: 44673 } }, HARDPOINTS[prefab]);
   return HULL_SLOTS[prefab].map(([id, type, point, lvl]) => ({
     SlotId: id,
     ObjectPoint: point,                       // dead at runtime; the client joins by the hash
@@ -1364,7 +1594,14 @@ const DURABILITY = {
    * dumped tier-4 carrier figure above (100,000) matches its own page exactly - so the infobox is
    * a checked source for this field, not a guess. 12,000 was the old placeholder: a repair pool
    * eight times SMALLER than the Brimir it outclasses. */
-  pegasus: 500000, basestar: 500000,
+  humant4pegasus: 500000, basestar: 500000,
+  /* The two flagships, scaled off that same infobox figure by the one ratio that separates them
+   * from the Pegasus: 100,000 hull against 80,000, so 625,000 against 500,000. IDENTICAL on both
+   * prefabs, and it has to stay that way - this table is keyed by prefab, which is the one place
+   * the Galactica and the Guardian can drift apart without touching FLAGSHIP_FLIGHT. Falling
+   * through to the 12,000 default would be worse than wrong: a repair pool eight times smaller
+   * than the Brimir these outclass. */
+  galactica: 625000, cylont4wing_guardian: 625000,
 };
 
 /* SENSOR RADII, LIFTED FROM THE LIVE-SERVER DUMP. Not derived, not guessed - read off 26 of our
@@ -2032,10 +2269,37 @@ const TOKEN = 130920111;   // command tokens - the capital-rental currency
  * Firing arcs are the wiki's: 180 degrees for the cannon and missile batteries, 360 for point
  * defence. The dump's carrier equivalents are much narrower (17.5-90), but those are a different
  * ship and the Pegasus page is specific.
+ *
+ * FRAMES ARE THE DUMP'S OWN, PER FAMILY, and were four separate wrong tiles before. GUI/Inventory/
+ * items_atlas is not an NGUI atlas with named sprites - it is a 400x946 grid read arithmetically at
+ * 40x35 per cell (GuiAtlasImageBase.smallSize, AtlasCache.CalcFrameRectInTexture), so 10 columns by
+ * 27 rows, frames 0-269, and an index only means whatever tile happens to sit in that cell. The
+ * dump ships a whole item_slot_capital_* family, which is direct ground truth for all four:
+ *     6031 cannon   43   item_slot_capital_system_gun_long_range_cc     (was 16, a MISSILE RACK -
+ *                        16 is system_light_missile_launcher, shared by 64 dump cards)
+ *     6032 pd       26   item_slot_capital_system_dw_point_defence      (was 17, the CAPITAL
+ *                        COMPUTER tile, item_slot_capital_system_computer_repair_recharge)
+ *     6033 flak     89   item_slot_capital_system_dw_aoe_flak           (was 43, i.e. the CANNON
+ *                        tile above - and 6033's stats were themselves transcribed from this family)
+ *     6034 launcher 209  item_slot_capital_system_launcher_long_range   (was 227, used by no dump
+ *                        card at all; the tile is two loose shells and reads as ammunition)
+ *
+ * abFrame TRACKS frame on all four, because the dump's own ability halves do:
+ * item_slot_capital_ability_{gun_long_range_cc,dw_point_defence,dw_aoe_flak,launcher_long_range}
+ * are 43/26/89/209, the same values as their system cards. abFrame is NOT redundant in general -
+ * 6 of the dump's 122 system/ability key pairs really do differ (the nuclear launchers, the EMP
+ * mine, the anti-radiation hulls) - so the field stays rather than being folded into frame.
+ * The four old abFrame values were guesses: 93, 101 and 104 are used by no dump card, and 98
+ * belongs to system_medium_missile_launcher_2_mt.
+ *
+ * These four share their tiles with the real capital families SYSTEMS_REAL emits unrestricted at
+ * tier 4 (guids 2705915343 / 90500721 / 1163767831 / 1862157617), so a tier-4 hull sees ours and
+ * theirs in one shop list with one icon. That is the original's own convention - frame 92 is shared
+ * by 65 dump cards - and they are the same weapon family restatted. Accepted deliberately.
  */
 const CAPITAL_WEAPONS = [
   { sys: 6031, ab: 71002031, slot: 'gun', key: 'capship_cannon', action: 'FireCannon',
-    launch: 'Auto', max: 6, frame: 16, abFrame: 93, tyl: 250000, dur: 50000,
+    launch: 'Auto', max: 6, frame: 43, abFrame: 43, tyl: 250000, dur: 50000,
     views: ['Target', 'DMGHigh', 'MaxRange', 'OptimalRange', 'Accuracy', 'CriticalOffense',
             'ArmorPiercing', 'Angle', 'Cooldown', 'BuffCost'],
     st: { Accuracy: 130, DamageLow: 325, DamageHigh: 410, CriticalOffense: 100, ArmorPiercing: 40,
@@ -2043,7 +2307,7 @@ const CAPITAL_WEAPONS = [
           Cooldown: 4.25, PowerPointCost: 25 } },
 
   { sys: 6032, ab: 71002032, slot: 'defensive_weapon', key: 'capship_pd', action: 'PointDefence',
-    launch: 'Auto', max: 2, frame: 17, abFrame: 101, tyl: 90000, dur: 50000,
+    launch: 'Auto', max: 2, frame: 26, abFrame: 26, tyl: 90000, dur: 50000,
     views: ['Target', 'DMGHigh', 'MaxRange', 'OptimalRange', 'Accuracy', 'CriticalOffense',
             'ArmorPiercing', 'Angle', 'Cooldown', 'BuffCost'],
     st: { Accuracy: 600, DamageLow: 8, DamageHigh: 12, CriticalOffense: 100, ArmorPiercing: 5,
@@ -2054,7 +2318,7 @@ const CAPITAL_WEAPONS = [
    * one; the other is a 22.5-degree 20-30 damage variant). Flak trades point defence's twitch
    * reload for reach and punch: 1.0s for 10-28 at 1,500 m against 0.5s for 8-12 at 1,600 m. */
   { sys: 6033, ab: 71002033, slot: 'defensive_weapon', key: 'capship_flak', action: 'Flak',
-    launch: 'Auto', max: 2, frame: 43, abFrame: 104, tyl: 120000, dur: 50000,
+    launch: 'Auto', max: 2, frame: 89, abFrame: 89, tyl: 120000, dur: 50000,
     views: ['Target', 'DMGHigh', 'MaxRange', 'OptimalRange', 'Accuracy', 'CriticalOffense',
             'ArmorPiercing', 'Angle', 'Cooldown', 'BuffCost'],
     st: { Accuracy: 400, DamageLow: 10, DamageHigh: 28, CriticalOffense: 100, ArmorPiercing: 15,
@@ -2071,7 +2335,7 @@ const CAPITAL_WEAPONS = [
    * Never add DrainLow: it branches into the torpedo AoE path, which then filters by an unset
    * radius and the missile does nothing at all. */
   { sys: 6034, ab: 71002034, slot: 'launcher', key: 'capship_launcher', action: 'FireMissle',
-    launch: 'Auto', max: 4, frame: 227, abFrame: 98, tyl: 300000, dur: 50000,
+    launch: 'Auto', max: 4, frame: 209, abFrame: 209, tyl: 300000, dur: 50000,
     views: ['Target', 'DMGHigh', 'MaxRange', 'Angle', 'Cooldown', 'BuffCost', 'Speed'],
     st: { DamageLow: 600, DamageHigh: 600, CriticalOffense: 100, ArmorPiercing: 50,
           MinRange: 0, MaxRange: 3900, Angle: 180, Cooldown: 5.0, PowerPointCost: 40,
@@ -2365,9 +2629,61 @@ function realSystemCards() {
  *
  * Price is CanBeSold false with an empty SellPrice on all 97 - the dump's own setting, and the
  * pairing matters: an empty SellPrice with CanBeSold true destroys the item for nothing. */
+/* ---- THE TWO FLAGSHIP PAINTS, hand-authored here rather than in paints-real.js.
+ *
+ * paints-real.js is GENERATED from the dump and the dump has no paint for any capital, so there is
+ * nothing to port; these are the same shape as the four hand-authored records that file already
+ * carries, and they are emitted through the same paintCards() loop.
+ *
+ * THE GUARDIAN'S IS A REAL SKIN, and it is the *_classic pattern exactly. A non-'default' `model`
+ * replaces the whole instantiated prefab - ShipSystemPaintCard.PrefabName returns model.ToLower()
+ * and Ship.cs:21 uses it in place of the World card's - and cylont4wing_guardian_rusty is a
+ * complete second prefab in the same bundle with byte-identical hardpoint transforms, so nothing
+ * about the ship's mounts or spots changes when it is worn.
+ * paintTexture MUST be 'advanced' and not a texture name: it is ShipSkinSubstance.DEFAULT_SKIN_KEY,
+ * and neither capital prefab carries a ShipSkin or ShipSkinSubstance component at all, so a real
+ * texture name would log "ShipSkin - couldn't find skin" and fall back. That is why all four
+ * shipped *_classic records pair 'advanced' with a real model, and this follows them.
+ *
+ * THE GALACTICA'S CHANGES NOTHING, deliberately. Her bundle holds no alternate model, so model is
+ * 'default' - the same do-nothing filler the four generated AUTHORED paints are. It exists because
+ * both flagships carry a ship_paint bay and cards.js fails the build on a paint bay no paint points
+ * at; the alternative was giving one faction's flagship a bay and the other none. Priced at 6,000
+ * cubits, which is gen-paints-real's own authored price for tier 3+, against 25,000 for the
+ * Guardian's, which is what all four model-swapping *_classic skins cost. Different content,
+ * different price - neither touches a stat.
+ *
+ * NOTHING VALIDATES model AGAINST THE ASSETMAP. The World-prefab rule only covers World cards, and
+ * ShipSystemPaintCard.java writes the string through untouched, so a typo here is a silent
+ * placeholder ship rather than a build failure. 'cylont4wing_guardian_rusty' was checked against
+ * BSGOCore/client/live/assetbundles/assetmap.json by hand.
+ *
+ * FOR WHOEVER NEXT RUNS gen-paints-real.js: it will need two adjustments before it can regenerate,
+ * because it measures its own coverage from the emitted JsonCards and knows nothing about this
+ * table. (1) Its gaps assertion will list galactica and cylont4wing_guardian as uncovered families
+ * - exclude the prefabs named here. (2) Its "does not chain to its Advanced twin" check fails on
+ * any rentalOnly hull, whose nextShipCardGuid is 0 by design; that check exists to keep a paint
+ * visible while the Advanced twin is active, and a hull with no twin has nothing to lose.
+ * Neither is a build problem today - cards.js does not invoke that generator - but it fails loudly
+ * rather than silently when it does run, which is the safe direction. */
+const CAPITAL_PAINTS = [
+  { sys: 6074, tier: 4, faction: 'Cylon', prefab: 'cylont4wing_guardian', ourShipCardGuid: 5119,
+    key: 'system_paint_advanced_ship_commandtoken_basestar', paintTexture: 'advanced',
+    model: 'cylont4wing_guardian_rusty',
+    guiAtlas: 'GUI/AbilityToolbar/abilities_atlas', frameIndex: 129,
+    guiIcon: 'GUI/EquipBuyPanel/ShipSkins/ShipskinIcon',
+    sortingNames: ['standard'], price: { 264733124: 25000 } },   // cubits - the currency 67 of the dump's paints use
+  { sys: 6075, tier: 4, faction: 'Colonial', prefab: 'galactica', ourShipCardGuid: 5019,
+    key: 'system_paint_advanced_ship_commandtoken_pegasus', paintTexture: 'advanced',
+    model: 'default',
+    guiAtlas: 'GUI/AbilityToolbar/abilities_atlas', frameIndex: 129,
+    guiIcon: 'GUI/EquipBuyPanel/ShipSkins/ShipskinIcon',
+    sortingNames: ['standard'], price: { 264733124: 6000 } },
+];
+
 function paintCards() {
   const out = [];
-  for (const p of PAINTS_REAL) {
+  for (const p of PAINTS_REAL.concat(CAPITAL_PAINTS)) {
     out.push(
       shipSystem(p.sys, 'ship_paint', {
         Tier: p.tier,
@@ -5876,6 +6192,39 @@ function validate(cards) {
     if (s.SystemType === 'undefined')
       errs.push(`Ship ${c.cardGUID} slot ${s.SlotId}: undefined has no bgo.shop.undefined loca and renders "[]"`);
   }));
+
+  /* ---- CROSS-FACTION PARITY ON THE SHARED CAPITAL STAT BLOCKS.
+   *
+   * Two pairs of hulls are deliberately matched across the factions - Pegasus/Basestar on
+   * CAPITAL_FLIGHT, Galactica/Guardian on FLAGSHIP_FLIGHT - and each pair carries the SAME object by
+   * reference precisely so the numbers cannot be edited apart. That guarantee is not total, though:
+   * realStats is applied over flightStats() and detection(), so a field NEITHER block names still
+   * comes from the row's own tier / roleDep / agility columns, and repair Durability is a separate
+   * per-PREFAB table that the shared object does not reach at all. Change a paired hull's roleDep
+   * and its detection radii move on one faction only, with nothing in the diff to say so.
+   * So this checks the property that actually matters - the two hulls a player compares in a fight
+   * emit identical Stats and identical Durability - rather than trusting the shared reference. */
+  {
+    const byBlock = new Map();
+    HULLS.filter(h => h.realStats).forEach(h => {
+      if (!byBlock.has(h.realStats)) byBlock.set(h.realStats, []);
+      byBlock.get(h.realStats).push(h);
+    });
+    byBlock.forEach(group => {
+      if (group.length < 2) return;
+      const cards_ = group.map(h => shipsAll.find(c => c.cardGUID === h.g)).filter(Boolean);
+      const ref = cards_[0];
+      cards_.slice(1).forEach(c => {
+        if (JSON.stringify(c.Stats) !== JSON.stringify(ref.Stats))
+          errs.push(`Ship ${c.cardGUID} (${c.Faction}) and ${ref.cardGUID} (${ref.Faction}) share one `
+            + `realStats block but emit DIFFERENT Stats - one faction's capital outperforms the other`);
+        if (c.Durability !== ref.Durability)
+          errs.push(`Ship ${c.cardGUID} (${c.Faction}) and ${ref.cardGUID} (${ref.Faction}) share one `
+            + `realStats block but their repair pools differ (${c.Durability} vs ${ref.Durability}) - `
+            + `Durability is keyed per PREFAB in DURABILITY, which the shared block does not reach`);
+      });
+    });
+  }
 
   /* A BAY A PLAYER CANNOT FILL IS A CONTENT GAP, NOT A DATA DEFECT - reported once per
    * (slot type, tier) cell, not once per slot.

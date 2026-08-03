@@ -2,107 +2,88 @@
 
 Ordered by what unblocks the most. Each item says what is actually wrong, not just what to build.
 
----
-
 ## Next
 
-### Verify combat end to end
+### Missile interception, client side
 
-Firing works and NPCs are targetable, but damage → death → loot award has never been watched
-through a client. `20_pvp.json` (ids 20–23) and `111_npc_fighter.json` exist and validate, but
-"the loot template loads" is not the same as "a kill pays out".
+Enemy missiles carry hull points and every gun, flak and point-defence ability group carries the
+`Missile` target flag, so the server will happily let you shoot one. A player still cannot click a
+missile to select it, and flak rarely kills one in practice.
 
-Check in this order: does an NPC take damage · does it die · does the corpse drop loot · does the
-loot reach the hold · does XP arrive · does the NPC shoot back.
+The leading suspicion is that the client only draws a target bracket for objects inside
+`DetectionOuterRadius`, and a bracket that is never drawn cannot be clicked or offered to the
+auto-cast sweep that feeds flak its targets. Capitals carry different detection stats than strike
+craft, which is where it was noticed. Verify that before changing any card data.
 
-### NPC aggro and return fire
+### Missile collisions on the carriers
 
-Bots spawn and fly. Whether they acquire and engage a player is untested. If they do not, players
-have nothing to fight and the only cubit faucet in the game (`111`, 8% chance) never opens.
+Missiles fired from a Brimir behave oddly on impact. Undiagnosed. First thing to check is the
+missile spawn point against the carrier's own 428-unit collider, since a projectile born inside its
+parent's collision sphere is a plausible cause, but that is a guess and not a diagnosis.
 
-### Weapon and hull balance across four tiers
+### The Galactica's four synthesised mounts
 
-Hull HP now spans 850 (Viper Mk II) to 15 400 (Basestar), and cannon damage 18–720 per shot. Both
-curves are derived from tier multipliers rather than hand-tuned, and nobody has timed an actual
-kill at any tier. Expect this to need a real pass once combat is verified end to end.
+`bullet09`–`12` on the Galactica do not exist in the client's model. They were added to bring her
+armament up to the Pegasus's twelve, and the client can only bind a mount whose transform is really
+there, so those four bays likely render no turret and may fire from the ship's origin. That could
+also be feeding the carrier collision problem above.
 
-The capitals are the open question: a Brimir has twelve slots against a Viper's four, so it fields
-three times the guns *and* tier-4 damage. That may be correct for a capital ship or it may be
-unplayable — it has not been tested with a person in the cockpit.
+Two honest options: drop back to her eight real mounts, applying the same change to the Guardian so
+the pair stays identical, or search the bundle for other usable transforms.
 
----
+### Rentals that survive a relog
 
+`Counters.injectOldCounters` silently discards any counter whose guid has no Counter card, so the
+rental expiry write lands nowhere and the login path deletes the hull as expired regardless of time
+remaining. Emitting Counter cards for 5017, 5117, 5019, 5119 and 234 fixes it, and the same change
+would allow a durable water-exchange ledger if one is ever wanted.
+
+### Flagship auto-return
+
+`CapitalRentalExpiry` is written and reviewed but has its `@Scheduled` annotation removed. Its
+header lists the three defects that keep it off: it docks pilots who are not flying the rental, it
+swaps ships from the scheduler thread while the sector thread still ticks that ship, and it rewrites
+the player's sector id before the ship drains. Re-enable only when all three are genuinely fixed.
+
+## Balance, once the above settles
+
+Hull points now span 850 on a Viper Mk II to 100,000 on a flagship, and the equipment ladder is the
+original's own rather than a tier multiplier. Nobody has timed kills across tiers with a person in
+the cockpit. The capitals are the open question: twelve capital batteries against a Viper's four
+guns may be correct for a battlestar or may be unplayable, and only play will say.
+
+Boss lairs pay six themed jackpots. Whether any of them is worth the fight is untested.
 
 ## Galaxy
 
-All 58 accessible systems ship. Ids, names, guids, galaxy positions, threat levels and faction
-lockouts are transcribed from the client; **sector contents are generated** — no source records
-where a single asteroid sat in any sector but 0, 6 and 10, so the asteroid fields, planetoid
-placements, spawn corridors and NPC patrol boxes are plausible rather than recovered. The three
-upstream files are never regenerated.
+All 58 accessible systems ship. Ids, names, guids, positions, threat levels and faction lockouts
+are transcribed from the client; **sector contents are generated**. No source records where a single
+asteroid sat in any system but 0, 6 and 10, so belts, clusters, junk fields and lairs are plausible
+rather than recovered. The three upstream files are never regenerated.
 
-`galaxy.js` holds the table and `STAGE`, the one number that grows the map; `emit-sector-templates.js`
+`galaxy.js` holds the star table and `STAGE`, the number that grows the map; `emit-sector-templates.js`
 writes the templates. They must move in the same commit — a star with no template on disk is a
-server that does not boot, not a system you cannot visit. Validator V2a fails the build first.
-
-Outposts: 26 spawn at boot, and 31 contested systems start unheld and are capturable through the
-existing conquest mechanic. Weapon platforms ring their outpost four apiece.
+server that does not boot.
 
 Still open here:
-- Sector 10's hand-placed 1 360-asteroid field is the only genuine sector content in existence.
-  Anything that recovers more of the real layouts beats the generator.
-- `SectorSlotData` sends 100/100 slots for every sector always, so a pilot still sees a live jump
-  button on a system the server will refuse — a bare "sector not allowed" with no explanation.
-- Loot templates 5 and 101 (outpost and platform drops) do not exist, so both pay nothing on death.
-- Comets are off in generated sectors: sector 10 carries a `cometSectorDesc`, but the comet guid has
-  never been confirmed to resolve to a full card set, and an unresolvable object is an exception on
-  a timer in every sector at once.
 
----
+- Sector 10's hand-placed 1,360-asteroid field remains the only genuine sector content in existence.
+  Anything that recovers more of the real layouts beats the generator.
+- `SectorSlotData` sends 100/100 slots for every sector always, so a pilot sees a live jump button
+  on a system the server will refuse, then a bare "sector not allowed" with no explanation.
+- Comets stay off in generated sectors. Sector 10 carries a `cometSectorDesc`, but the comet guid
+  has never been confirmed to resolve to a full card set, and an unresolvable object is an exception
+  on a timer in every sector at once.
 
 ## Known-unfixable, documented so nobody re-investigates
 
-**Ship scrapping.** `ScrapShip` is a logged no-op upstream and `RemoveShip` has **zero cases** in
-`parseMessage`. Every hull is therefore `CanBeSold: false` — not a limitation we chose, and a live
+**Ship scrapping.** `ScrapShip` is a logged no-op upstream and `RemoveShip` has zero cases in
+`parseMessage`. Every hull is therefore `CanBeSold: false` — not a choice we made, and a live
 footgun the day anyone wires it up, because `ContainerVisitor.sellItem` pays out on `CanBeSold`
 alone with no second gate.
 
-**Ship upgrading.** Not wired server-side, so `MaxLevel` is pinned at 1 and `UpgradePrice` is
-empty. The button is hidden anyway.
-
-**Per-unit price formatting.** `GUIShopInventorySlot.cs:415` formats with `"#0.0"`, so tylium at
-0.03125 cubits renders as **"0.0"** in the Store list. The confirm window is correct because
-`Count` initialises to the purchase unit (32). Fixable only by moving tylium to 1/16 (formats
-"0.1") and halving every cubit price.
-
-**The Cylon tier-1 `BlueprintTexture` fields are swapped.**
-`ship_heavy_raider_paperdoll_layouts` declares `BlueprintTexture: "cylont1defender"` and
-`ship_scout` (the Marauder) declares `"cylont1command"` — both backwards. The prefabs' own child
-meshes settle it: `CylonT1Defender_Marauder_Lod1` and friends, and the assetmap pairs
-`cylont1command` with the heavyraider textures.
-
-So: **`cylont1command` is the Heavy Raider and `cylont1defender` is the Marauder.** Take prefab
-identity from mesh names, never from `BlueprintTexture`. The blueprint image shown on the paperdoll
-is cosmetically wrong for those two and is unfixable server-side; do not "fix" it by swapping the
-prefabs, which is what makes the two ships trade models.
-
-**Sell-price quality asymmetry.** The client scales the displayed sell price by
-`ShipSystem.Quality`; `ContainerVisitor.sellItem` has no quality term. Harmless while every weapon
-is `Indestructible: true` (quality pinned at 1.0). In the player's favour if that changes.
-
-**`ApplicationBootstrap.onShutdown()` falls through.** It logs `"shutdown already triggered"` with
-no `return`, and two entry points reach it (`@PreDestroy` and the runtime shutdown hook). Upstream
-bug, left alone deliberately — patch 0007 works around the consequence rather than changing
-shutdown ordering.
-
----
-
-## Housekeeping
-
-- Sector templates are generated by `tools/cardgen/emit-sector-templates.js` rather than shipped:
-  it is deterministic and idempotent, and is verified to reproduce the live state byte-for-byte
-  from a pristine `ServerConfigurationUtils_public/` checkout. Re-run it after any `STAGE` change.
-- `tools/mkpatches.js` fails if a modified BSGOCore file is not covered by a patch group. Run it
-  after any server-side change.
-- Run `tools/cardgen/negtest.js` after touching `validate()` — a validator that silently never
-  fires is worse than none.
+**Outpost retreat has no announcement.** `EmergencyMessage` does not carry text: the client wraps
+whatever string it receives as `%$bgo.<s>.description%` and looks it up. Nothing in the client's
+locale describes an outpost retreating, and no other broadcast writer renders literal text, so there
+is no honest message to send. Passing a sentence renders the server-maintenance banner instead,
+which is what used to happen on every outpost kill.

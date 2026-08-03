@@ -109,7 +109,38 @@ const NPCS = {
   Colonial: { strike: [51, 54, 57], escort: [60, 61, 62], line: [63, 64, 65], boss: 90 },
   Cylon:    { strike: [75, 78, 81], escort: [84, 85, 86], line: [87, 88, 89], boss: 91 },
 };
-const NPC_LOOT = 111, ESCORT_LOOT = 114, LINE_LOOT = 116, BOSS_LOOT = 121;
+const NPC_LOOT = 111, ESCORT_LOOT = 114, LINE_LOOT = 116;
+
+/* ---------------------------------------------------------------- PER-LAIR BOSS LOOT
+ * 46 bosses all paying template 121 made every lair the same errand. These six are the same total
+ * value redistributed - all at experience 15000 / chance 1.0 - so no lair is strictly better than
+ * another and the choice is flavour, not a farming target:
+ *     121 the original: tylium+titanium+water, a 60% cubit roll
+ *     122 tylium vein:  130k tylium, thin on everything else
+ *     123 cubit hoard:  4000 cubits and 1200 merits (merits past the daily cap convert to
+ *                       Uranium in lootToUser, so nothing is lost)
+ *     124 ammo cache:   ordnance, level-banded heavy [26,255] / medium [0,25]
+ *     125 ancient:      plutonium, FTL fragments, tuning kits, tech analyses
+ *     126 wrecker:      titanium-heavy plus mines, flak and nukes
+ *
+ * The assignment is a pure function of the sector id and takes NO draw from R. That is deliberate:
+ * a single R.f() here would advance the LCG and reshuffle every rock, wreck and patrol box in the
+ * 23 lair sectors for a reason that has nothing to do with layout. The +3 offset on Cylon (half of
+ * six) guarantees the two lairs in one sector never share a template, so a contested system always
+ * has two different prizes in it. Adding a seventh template changes every assignment; that is the
+ * usual "change a constant, rewrite the galaxy" trade this file already makes.
+ *
+ * NOT ATTEMPTED, and worth knowing before someone tries: the gold/silver rocks in the lair hollow
+ * CANNOT pay more than an ordinary rock. SpawnController builds one ItemPicker per sector from
+ * sectorDesc.getAsteroidDesc(), AsteroidSpawn hands that same sector-wide desc and hp interval to
+ * every rock regardless of template, and AsteroidTemplate.lootTemplateIds is dead because
+ * SpaceObjectFactory.createAsteroid never calls lootNpcTemplateSetup. The vein is scenery. Its
+ * value is folded into the boss drop instead - the rocks are the sign, the boss is the payout.
+ * Making them genuinely richer needs a per-template resourceMultiplier threaded through
+ * AsteroidTemplate -> AsteroidSpawn -> AsteroidResourceSpawn (including its copy constructor, or
+ * the rock reverts to 1x on first respawn); ~20 lines of Java, not a config change. */
+const BOSS_LOOTS = [121, 122, 123, 124, 125, 126];
+const bossLoot = (s, f) => BOSS_LOOTS[(s.id + 3 * (f === 'Cylon' ? 1 : 0)) % BOSS_LOOTS.length];
 
 /* Loot ids upstream puts on its own outposts and platforms. BOTH TEMPLATES NOW EXIST - they were
  * authored alongside arming the stations, in LootTemplates/5_outpost.json and
@@ -875,7 +906,7 @@ function buildSector(s) {
       spawnArea: bossBox,
       lifeTimeSeconds: 360000, respawnTimeSeconds: 300, respawnTimeDeath: 7200,
       faction: f,
-      npcSpawnEntries: [{ guid: NPCS[f].boss, lootId: BOSS_LOOT, count: 1 }],
+      npcSpawnEntries: [{ guid: NPCS[f].boss, lootId: bossLoot(s, f), count: 1 }],
     });
     botSpawnTemplates.push({
       spawnArea: bossBox,
@@ -1060,12 +1091,20 @@ function separateSector6Cruisers() {
 function augmentUpstream() {
   const notes = [];
 
-  /* ---- sectors 0 and 6: the base sectors, which had NO Outpost template at all.
-   * OutpostSpawnTimer.java:43-56 spawns one unconditionally in a base sector and never consults
-   * OutpostState - but the timer is only registered when BOTH progress templates are non-null
-   * (SectorFactory.java:333), and neither file had them; and createOutpost then needs an Outpost
-   * entry of that faction or it throws IllegalStateException into spawnOp's catch. Two faults
-   * stacked, both silent, so the branch had never once run. */
+  /* ---- sectors 0 and 6: the fleet bases. NO OUTPOST BELONGS HERE, and an earlier pass of this
+   * script put one in each.
+   *
+   * The reasoning then was mechanical - OutpostSpawnTimer spawns unconditionally in a base sector
+   * and createOutpost throws without a template of that faction - and it missed the obvious: the
+   * home sector already HAS its station. Alpha Ceti is the Galactica, Appolid is the Basestar;
+   * that is where the CIC is, where the hangar is, and where the flagships live. A conquerable
+   * outpost parked alongside is both fiction and a contradiction, since the base sectors are the
+   * one place neither faction can attack.
+   *
+   * Removing the entries is only half of it: the outpost timers are registered ONLY when both
+   * progress templates are non-null (SectorFactory.java:356-361), so the progress templates go
+   * too. With them gone OutpostSpawnTimer never runs here, which is what the untouched upstream
+   * files did in the first place - the base sectors ship without either. */
   for (const id of [0, 6]) {
     const s = SECTORS.find(x => x.id === id);
     if (!s) continue;
@@ -1113,11 +1152,23 @@ function augmentUpstream() {
       notes.push(`sector ${id}: assassin config added to miningShipConfig (null table was a live NPE)`);
     }
 
-    if (tpl.some(t => t.spaceEntityType === 'Outpost' || t.spaceEntityType === 'WeaponPlatform')) {
-      if (dirty) fs.writeFileSync(p, JSON.stringify(doc, null, 2) + '\n');
-      notes.push(`sector ${id}: already has an outpost, unchanged`);
-      continue;
+    /* Written as a removal rather than "never add" so a tree that already carries the mistake is
+     * repaired in place. Once clean this reports unchanged and rewrites nothing. */
+    const stations = tpl.filter(t => t.spaceEntityType === 'Outpost' || t.spaceEntityType === 'WeaponPlatform');
+    if (stations.length) {
+      o.spaceObjectTemplates = tpl = tpl.filter(t => !stations.includes(t));
+      dirty = true;
+      notes.push(`sector ${id}: removed ${stations.length} station(s) - the fleet base IS the station`);
     }
+    if (o.colonialProgressTemplate || o.cylonProgressTemplate) {
+      delete o.colonialProgressTemplate;
+      delete o.cylonProgressTemplate;
+      dirty = true;
+      notes.push(`sector ${id}: progress templates removed, so the outpost timers never register`);
+    }
+    if (dirty) fs.writeFileSync(p, JSON.stringify(doc, null, 2) + '\n');
+    else notes.push(`sector ${id}: no station present, unchanged`);
+    continue;
     /* Placed by the same deterministic search the generated sectors use, so re-running cannot
      * move it: a fixed 250 m lattice, scored on distance to the nearest existing object, kept on
      * the owner's own side of the sector and far enough out to be a destination. */

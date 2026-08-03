@@ -1,8 +1,13 @@
 # BSGO Private Server
-The most advanced private server for BSGO ever made. 
 
-Tooling, game data and server patches for running a private server for Battlestar Galactica
-Online, the Bigpoint MMO that shut down in 2019. This is a preservation project.
+Battlestar Galactica Online shut down in 2019 and took its game data with it. The client shipped
+with none of its own: no ship stats, no items, no sector layouts. Every card was fetched at runtime
+from a server that no longer exists, and the card database was never published. Install the client
+today and it connects to nothing, then waits forever.
+
+This repo rebuilds that data, and the server fixes needed to run it. Right now that means 12,204
+cards, 58 star systems, the original's full equipment catalogue, boss lairs worth bringing friends
+to, and two battlestars the live game never let anyone fly.
 
 It does **not** contain the game. You need your own copy of the client.
 
@@ -18,20 +23,19 @@ luigeneric's full commit history and copyright ride along, with every change of 
 documented commit on top. Our [fork of BSGOCore](https://github.com/Gurnski/BSGOCore) stays
 around as the vehicle for sending fixes back upstream.
 
-The one thing BSGOCore cannot provide is game data. The BSGO client ships with none: no ship
-stats, no items, no sector layouts. Every "card" is fetched from the server at runtime, and the
-card database was never published, so a fresh BSGOCore install has nothing to serve. That gap is
-what this repo fills, along with fixes for the problems we hit on the way.
+What BSGOCore cannot provide is the game data, for the reason above: it was never published. A
+fresh install has a working server with nothing to serve. That gap is what this repo fills, along
+with fixes for the problems we hit on the way.
 
 ## What this repo adds
 
-`tools/cardgen/` generates the card catalogue the server sends to clients: 11,696 cards covering
+`tools/cardgen/` generates the card catalogue the server sends to clients: 12,204 cards covering
 58 star systems, 14 hulls per faction from the tier-1 strikes up to the Pegasus and Basestar, the
 original game's full equipment catalogue (219 systems as ten-level upgrade ladders, 175
-consumables, 97 paints), skills, missions, the shop, and every resource type. The generator validates each card
-against BSGOCore's own source and fails the build rather than emit a bad one, because the client
-handles a bad card by hanging on the loading screen forever. It also writes a sector template
-for each system.
+consumables, 97 paints), skills, missions, the shop, and every resource type. The generator checks
+each card against BSGOCore's own source and fails the build rather than emit a bad one, because the
+client handles a bad card by hanging on the loading screen forever. It also writes a sector template
+for each system, filled with belts, wrecks and boss lairs.
 
 Our server changes are commits in `server/`; `patches/` keeps the same changes as standalone
 patch files against pristine upstream, documented one by one in [PATCHES.md](PATCHES.md) with
@@ -48,9 +52,14 @@ choices that suit a small private server:
 - mining respawn and XP fixes, plus economy tuning
 - outpost spawning driven by the galaxy data instead of two hardcoded sector ids, which puts 26
   outposts on the map at boot and leaves 31 contested systems to capture
+- the ability arms and armour curve that make imported equipment behave, so weapons that were
+  decorative now hit, consume ammunition and are reduced by armour
+- room NPCs, flagship rentals and the water-for-cubits exchange, all reconstructed from dialogue
+  and message types the client still carries but upstream never sent
 
-`config/` holds hand-authored server config that upstream keeps out of git: 28 collider
-templates measured from the actual ship prefabs, and loot templates.
+`config/` holds hand-authored server config that upstream keeps out of git: collider templates
+measured from the actual ship prefabs, the loot tables including six themed boss jackpots, and the
+ship configs that arm every NPC and station. Its own README explains each.
 
 For the rest, [QUICKSTART.md](QUICKSTART.md) covers setup and troubleshooting,
 [PROGRESS.md](PROGRESS.md) records what has actually been seen working against a real client,
@@ -63,24 +72,34 @@ instead of a raw key and prefabs resolve to real models.
 
 ## Status
 
-Login through undocking into space works end to end at full framerate.
-[PROGRESS.md](PROGRESS.md) has the detail.
+Playable end to end: log in, fit a ship, fly out, fight NPCs, kill a boss, take a battlestar out
+for an hour. [PROGRESS.md](PROGRESS.md) has the detail, and everything marked working below has
+been watched in a real client rather than merely validated.
 
 | Area | State |
 |---|---|
 | Login, reconnects, persistence | working |
-| Catalogue streaming (1,380 cards) | working |
+| Catalogue streaming (12,204 cards) | working |
 | Character creation | working |
-| Hangar / CIC / shop | working |
-| Space: undock, fly, boost, FTL | working |
+| Hangar, CIC, outpost rooms, shop | working |
+| Space: undock, fly, boost, FTL, dock | working |
 | Galaxy (58 systems, every reachable one contestable) | working |
-| Outpost rings scaling with control level | working |
-| Mining | working |
+| Sector content (45,849 placed objects: belts, wrecks, lairs) | working |
+| Combat, damage, death, loot, XP | working |
+| Equipment (219 systems × 10 levels, 175 consumables, 97 paints) | working |
+| NPCs with the original's own rank names | working |
+| Boss lairs: level-120, 50,000-hull bosses with guard wings | working |
 | Ship roster (14 hulls per faction, 4 tiers) | working |
-| Combat | partial: weapons fire, untested end to end |
-| NPCs | partial: strikes, escorts, lines and the two event bosses roam by threat level; return fire untested |
-| Missions | partial: templates load, completion untested |
-| Guilds, tournaments, ship upgrading | not started |
+| Capital rentals: Pegasus, Basestar, Galactica, Guardian Basestar | working |
+| Water-for-cubits exchange | working |
+| Mining | working |
+| Missile interception | partial: server accepts it, missiles not yet clickable |
+| Rentals across a relog | partial: the hull is dropped at next login |
+| Missions | partial: templates load and count, completion untested |
+| Guilds, tournaments, ship scrapping | not started |
+
+The Galactica and the Guardian Basestar were never flyable in the original game. They are here
+because the models, the mounts and the names were all still in the client, waiting.
 
 ## Setup
 
@@ -111,7 +130,7 @@ $env:JAVA_HOME = "C:\path\to\jdk-21"
 .\mvnw.cmd quarkus:dev
 ```
 
-A healthy startup logs `size: 1380` (the card count) and `LoginServerEndpoint waiting for new
+A healthy startup logs `size: 12204` (the card count) and `LoginServerEndpoint waiting for new
 connections`. Anything else, see the troubleshooting table in QUICKSTART.md.
 
 ## Editing the data

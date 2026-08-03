@@ -608,11 +608,52 @@ public class DebugProtocol extends BgoProtocol
             }
         }
     }
+
+    /**
+     * The console is a typing surface, so its arguments are whatever the operator managed to type:
+     * a missing argument leaves the reader empty and readString runs off the end, a word where a
+     * number belongs throws NumberFormatException, an unknown command id switches on null. None of
+     * those reach ProtocolUpdater as anything it recognises, so its catch-all closes the socket -
+     * a typo in the console drops the player out of the game.
+     *
+     * Nothing in here reads from the socket (the reader is a byte array of the one message), so
+     * swallowing everything costs no stream sync: the command is abandoned, the operator is told
+     * why, and the connection stays up.
+     */
     @Override
-    public void parseMessage(final int msgType, final BgoProtocolReader br) throws IOException
+    public void parseMessage(final int msgType, final BgoProtocolReader br)
+    {
+        try
+        {
+            dispatchMessage(msgType, br);
+        }
+        catch (final Exception exception)
+        {
+            log.warn("DebugProtocol msgType={} from {} failed: {}",
+                    msgType, ctx.user().getUserLogSimple(), Utils.getExceptionStackTrace(exception));
+            try
+            {
+                final String reason = exception.getMessage() == null
+                        ? exception.getClass().getSimpleName()
+                        : exception.getMessage();
+                sendEzMsg("command failed: " + reason);
+            }
+            catch (final Exception ignored)
+            {
+                // the player is already gone; the log above is all we owe them
+            }
+        }
+    }
+
+    private void dispatchMessage(final int msgType, final BgoProtocolReader br) throws IOException
     {
         final ClientMessage clientMessage = ClientMessage.forValue(msgType);
         log.info("DebugProtocol: " + clientMessage);
+        if (clientMessage == null)
+        {
+            log.warn("DebugProtocol unknown msgType={} from {}", msgType, ctx.user().getUserLogSimple());
+            return;
+        }
 
         final Player player = this.ctx.user().getPlayer();
         final AdminRoles roles = player.getBgoAdminRoles();

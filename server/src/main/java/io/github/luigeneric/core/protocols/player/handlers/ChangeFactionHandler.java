@@ -15,6 +15,7 @@ import io.github.luigeneric.core.player.location.Location;
 import io.github.luigeneric.core.protocols.ProtocolID;
 import io.github.luigeneric.core.protocols.ProtocolMessageHandler;
 import io.github.luigeneric.core.protocols.community.CommunityProtocol;
+import io.github.luigeneric.core.protocols.player.CapitalRental;
 import io.github.luigeneric.core.protocols.player.CharacterServices;
 import io.github.luigeneric.core.protocols.player.ShipCardConverter;
 import io.github.luigeneric.core.protocols.scene.SceneProtocol;
@@ -78,6 +79,12 @@ public class ChangeFactionHandler implements ProtocolMessageHandler
         ShipSlotVisitor shipSlotVisitor = new ShipSlotVisitor(user, null);
         for (final HangarShip hangarShip : hangar.getAllHangarShips())
         {
+            /* A rented capital arrives pre-armed with systems the pilot never bought. Stripping
+             * them into the Locker here would bank 720k tylium of tier-4 hardware for the price of
+             * a faction switch; removeAllHangarShips below discards the hull either way. */
+            if (CapitalRental.isRental(hangarShip.getCardGuid()))
+                continue;
+
             for (ShipSlot slot : hangarShip.getShipSlots().values())
             {
                 final ShipItem removedShipItem = slot.removeShipItem();
@@ -86,8 +93,14 @@ public class ChangeFactionHandler implements ProtocolMessageHandler
                 shipSlotVisitor.addShipItem(removedShipItem, user.getPlayer().getLocker());
             }
         }
+        /* A rental does NOT convert. The loop above deliberately leaves its systems fitted rather
+         * than banking them in the Locker, and the comment there used to claim removeAllHangarShips
+         * discarded the hull - it does not: the card list below is built first, the converter maps
+         * the capital onto the other faction's ShipList by HangarID, and the rebuild loop hands it
+         * back as a PERMANENT hull, fully armed. An hour of a Pegasus became a Basestar to keep. */
         final List<ShipCard> shipCards = hangar.getAllHangarShips().stream()
                 .map(HangarShip::getShipCard)
+                .filter(card -> !CapitalRental.isRental(card.getCardGuid()))
                 .toList();
 
         final ShipCardConverter shipCardConverter = new ShipCardConverter(user.getPlayer().getFaction());

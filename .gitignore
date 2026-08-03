@@ -66,3 +66,6 @@ tools/cardgen/loca-keys.txt
 # Extracted from the client's resources.assets - client-derived content, same rule as loca-keys.
 # Regenerate with: node tools/cardgen/extract-paperdolls.js
 tools/cardgen/paperdolls/
+
+# Session handoff notes for the next Claude session - working state, not documentation.
+HANDOFF.md

@@ -1,0 +1,64 @@
+[{
+        "id": 126,
+        "type": "Damage",
+        "rewardCount": 5,
+        "experience": 15000,
+        "chance": 1.0,
+        "lootEntryInfos": [{
+                "chance": 1.0,
+                "levelIntervall": [0, 255],
+                "shipItem": {
+                    "count": 40000,
+                    "cardGuid": 215278030,
+                    "itemType": "Countable"
+                },
+                "variationPercentage": 0.25
+            }, {
+                "chance": 1.0,
+                "levelIntervall": [0, 255],
+                "shipItem": {
+                    "count": 40000,
+                    "cardGuid": 207047790,
+                    "itemType": "Countable"
+                },
+                "variationPercentage": 0.25
+            }, {
+                "chance": 0.8,
+                "levelIntervall": [0, 255],
+                "shipItem": {
+                    "count": 15,
+                    "cardGuid": 185436726,
+                    "itemType": "Countable"
+                },
+                "variationPercentage": 0.3
+            }, {
+                "chance": 0.7,
+                "levelIntervall": [0, 255],
+                "shipItem": {
+                    "count": 40,
+                    "cardGuid": 184125309,
+                    "itemType": "Countable"
+                },
+                "variationPercentage": 0.3
+            }, {
+                "chance": 0.6,
+                "levelIntervall": [0, 255],
+                "shipItem": {
+                    "count": 4,
+                    "cardGuid": 56189094,
+                    "itemType": "Countable"
+                },
+                "variationPercentage": 0.5
+            }, {
+                "chance": 0.3,
+                "levelIntervall": [0, 255],
+                "shipItem": {
+                    "count": 5,
+                    "cardGuid": 231751862,
+                    "itemType": "Countable"
+                },
+                "variationPercentage": 0.5
+            }
+        ]
+    }
+]

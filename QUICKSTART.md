@@ -73,7 +73,7 @@ $env:JAVA_HOME = "C:\path\to\jdk-21"     # must be a JDK 21, not the system-defa
 Healthy startup looks like:
 
 ```
-size: 1380
+size: 12204
 INFO [io.gi.lu.ne.LegacyTcpLoginServerListener] LoginServerListener successfully started
 INFO [io.gi.lu.ne.LegacyTcpLoginServerListener] LoginServerEndpoint waiting for new connections
 INFO [io.quarkus] bsgo-core 1.0.0-SNAPSHOT ... started in 4.131s

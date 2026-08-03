@@ -224,7 +224,8 @@ public class SqLiteProvider implements DbProvider
              * remove-ship message to do it live: an expired Pegasus/Basestar disappears with
              * the next login. A missing counter means never rented (including hulls bought
              * under the old purchase rules) and counts as expired. */
-            for (final long rentalGuid : new long[]{ CapitalRental.PEGASUS, CapitalRental.BASESTAR })
+            for (final long rentalGuid : new long[]{ CapitalRental.PEGASUS, CapitalRental.BASESTAR,
+                    CapitalRental.GALACTICA, CapitalRental.GUARDIAN })
             {
                 for (final HangarShip hangarShip : player.getHangar().getAllHangarShips())
                 {
