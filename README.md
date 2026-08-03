@@ -1,4 +1,5 @@
 # BSGO Private Server
+The most advanced private server for BSGO ever made. 
 
 Tooling, game data and server patches for running a private server for Battlestar Galactica
 Online, the Bigpoint MMO that shut down in 2019. This is a preservation project.
