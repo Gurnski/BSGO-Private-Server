@@ -45,13 +45,48 @@ const OUT = path.join(CORE_ROOT, 'ServerConfigurationUtils/global/SectorTemplate
 /* ---------------------------------------------------------------- CONTENT GUIDS
  * Every guid here resolves to cards our own generator emits. That is not a formality: an
  * objectGUID with no World/Owner card is an exception out of SpaceObjectFactory, and an NPC guid
- * with no Ship card is a bot that silently never spawns. Upstream's own sector 10 references
- * thirteen NPC guids we have never authored (41, 60, 63, 66, 68, 70, 72, 84, 87, 90, 92, 94, 96);
- * this emitter uses only the six that resolve, so a generated sector is never quietly emptier
- * than it looks. Re-check with tools/cardgen: every id below must appear in JsonCards. */
+ * with no Ship card is a bot that silently never spawns. The escort/line/boss guids (60-65,
+ * 84-91) are the NPC_HEAVIES block cards.js authors; upstream guids we still have no cards for
+ * (41, 66, 68, 70, 72, 92, 94, 96) are used NOWHERE below. Re-check with tools/cardgen: every id
+ * in this file must appear in JsonCards. */
 const ASTEROIDS = [57969842, 57969843, 57969844, 57969586, 57969587, 57969588,
                    57968050, 57968051, 57968052];
 const PLANETOIDS = [47343042, 47344578, 47344835, 47344836];
+
+/* ---------------------------------------------------------------- CONTENT-PASS SCENERY
+ * Allocated in SECTOR-PASS-SPEC.md and emitted by cards.js in the same pass. The RANGES are the
+ * contract between the two generators: cards.js assigns prefabs to consecutive guids in the
+ * spec's listing order, and this file references nothing outside an allocated range. A guid the
+ * card side never fills is an IllegalArgumentException out of SpaceObjectFactory at sector
+ * creation (Debris demands World+Owner like everything else), so the integration step MUST run
+ * cards.js's guid validation against these templates before a boot is attempted. */
+const seq = (from, n) => Array.from({ length: n }, (_, i) => from + i);
+const AST_VARIANTS = seq(57970001, 11);      // asteroid1_2 .. 4_5 - same family as the existing 9
+const DECO_ASTEROIDS = seq(57970021, 15);    // decoasteroid_{black,bluesteel,bright,dark,precious}_{1..3}
+const DECO_ROCKS = seq(57970041, 9);         // deco_rock_{1,2,3}_{a,b,c} - cluster/lair dressing ONLY
+const GOLD_ASTEROIDS = seq(57970051, 12);    // asteroid{gold,silver,spookygreen,spookyorange}_{1..3}
+const PLANETOID_VARIANTS = seq(47345001, 6); // planetoid1_2, 1_3, 2_1, 2_3, 3_1, 3_2
+const DEBRIS_PILES = seq(61000001, 14);      // debrispile1-5, 6_nt-9_nt, _cylon1-5
+const DEBRIS_RINGS = [61000015, 61000016];   // debrisring, debrisring_1
+const DEBRIS_WALL = 61000017;                // massive_debris_wall - at most one per graveyard
+const WRECKS_COLONIAL = seq(61000021, 16);   // humant1{fighter..stealth},t2..t4carrier + scout wrecks
+const WRECKS_CYLON = [...seq(61000037, 16), 61000087];  // cylon mirrors (37-52) + raider_wreck1
+/* Broken-capital chunk sets, grouped by the spec's listing order: each inner list is the pieces
+ * of ONE capital, kept within ~400 m of a shared anchor so the wreck reads as a single hull. */
+const CHUNK_SETS = [
+  seq(61000061, 7),   // helwreck01 + helwreck02_chunk1-6
+  seq(61000069, 6),   // humandefendert3_jotuun_debris_{b,engine,front,middle_*}
+  seq(61000075, 5),   // humant2defender_destroyed_a set + _b
+  seq(61000080, 3),   // cylont2command_destroyed_a + _fin + _wing
+  seq(61000083, 4),   // humanfightert2_scythe_debris back/back_fin/front + _b
+];
+const CAPITAL_HULKS = [61000061, 61000068];  // helwreck01 / jormungwreck01 - single-piece capitals
+const SCAV_PARTS = seq(61000091, 15);        // decoration_scavenger_station_* (assetmap holds 15)
+const CONTAINERS = seq(61000111, 5);         // item_container1-5
+const CORRIDOR_BEACON = { Colonial: 61000121, Cylon: 61000123 }; // ftl_jump_beacon_{blue,red}
+const SCAV_BEACON = 61000122;                // ftl_jump_beacon_green - the scavengers' own marker
+const NAV_BEACONS = seq(61000124, 3);        // jump_beacon_{standard,improved,advanced}
+const CRACKED_PLANET = seq(61000131, 4);     // planet_debrisring/rockbig/rocksmall/rocks_and_water
 const OUTPOST_GUID = { Colonial: 1450701610, Cylon: 1450701611 };
 /* Ring guards come in three tiers, humanstationary1..3 / cylonstationary1..3. The real game
  * upgraded an outpost's sentries light -> medium -> heavy as its progress level rose
@@ -121,30 +156,33 @@ const RING = 900.0;      // platform ring radius around an outpost; see the note
 const AGGRO_AUTO = 3500.0;
 const AGGRO_MAX = 4000.0;
 
-/* CLEARANCES ARE SIZED FOR THE BIGGEST THING THAT FLIES, NOT THE SMALLEST.
+/* ROCK SPACING IS UPSTREAM'S, NOT A NAVIGATION RULE.
  *
- * The first cut of this emitter spaced fields for strike craft: 120 m between asteroids and a 900 m
- * keep-out around each planetoid. A Viper has a World-card radius of 5, so that is enormous. A
- * Pegasus has a radius of 1,174 - it is wider than the gaps it was being asked to fly through, so a
- * capital simply cannot cross a generated field without grinding along something the whole way.
+ * An earlier cut of this emitter enforced ~1 km between rocks so a Pegasus could thread the field.
+ * That was measured against the wrong constraint TWICE. First: asteroids have no server collider
+ * at all - SpaceObjectFactory.wrapCollider:605-613 does optCollider.ifPresent(...), and
+ * ColliderTemplates holds hull shapes plus comet.json, nothing for rocks - so the only collision
+ * out there is the client's own mesh test. Second and decisive: upstream's own gold standard
+ * ignores the rule. Sector 10's 1,360-rock field runs a nearest-neighbour p50 of 108 m with pairs
+ * down to 7 m; belts were obstacles a capital routed AROUND, not through, and at ~1 km spacing the
+ * generated fields were 38x sparser than the game they were imitating (14 rocks in a 10 km sector
+ * against sector 10's 1,360). The 40 m floor below is cosmetic - it stops two meshes z-fighting -
+ * and NN_TARGET is the sector-10 median the belt sigmas are solved against.
  *
- * The server is NOT what stops it, which is worth knowing before anyone goes looking in the wrong
- * place: SpaceObjectFactory.wrapCollider:603-611 does optCollider.ifPresent(...), so an object whose
- * prefab has no ColliderTemplate gets NO collider at all - and ColliderTemplates holds hull shapes
- * plus comet.json, nothing for planetoids or asteroids. The collision a player feels out there is
- * the client's own geometry against the ship model.
- *
- * CAPITAL_RADIUS is the Pegasus/Basestar figure from HULLS. Everything below is expressed as a
- * multiple of it so the fields stay navigable if that number ever changes. */
-const CAPITAL_RADIUS = 1174.0;
-/* 1,174 is the World-card radius, i.e. the BOUNDING SPHERE - it is not the width that has to fit
- * through a gap. The Pegasus's own hardpoints span x = -350.9 .. +352.6, so the hull is 703 m
- * across, and the client collides against the mesh in ColliderTemplates/Colonial/pegasus.json
- * rather than against the sphere. Sizing gaps to the sphere would need 2,348 m between every pair
- * of rocks and would strip the fields bare; sizing them to the hull plus a rock's own bulk lands
- * just under a kilometre, which a battlestar can thread and a Viper still finds dense. */
-const AST_CLEARANCE = CAPITAL_RADIUS * 0.85;   // ~998 m between neighbouring rocks
-const PLANET_CLEARANCE = CAPITAL_RADIUS * 1.6; // ~1,880 m around a planetoid
+ * PLANET_CLEARANCE is different in kind, not just size: a planetoid is the one field object with a
+ * real server collider, hardcoded to a 900 m sphere (SpaceObjectFactory.java:261) regardless of
+ * template radius, so its keep-out is sized off CAPITAL_RADIUS to keep a battlestar from spawning
+ * into an invisible wall. */
+const CAPITAL_RADIUS = 1174.0;                 // Pegasus/Basestar World-card radius, from HULLS
+const ROCK_MIN_SEP = 40.0;                     // 3D floor between any two rocks; sector 10 goes lower
+/* Belt-CORE 2D nearest-neighbour target, CALIBRATED, not derived. Three effects sit between this
+ * number and the measured field p50: the median rock lives near 1.2 sigma where density has
+ * halved (~1.4x), the +-300 m y-slab pushes 3D distances past their 2D footprint (sector 10's own
+ * belts: 2D core NN ~67 m, measured 3D p50 107.8), and keep-out rejection thins the tails. Solving
+ * the core for 70 m lands the measured field p50 at ~135-150; 85 shipped 163-215, 120 shipped
+ * 165-240. Change it only against verify-sectors.js numbers, never against the formula. */
+const NN_TARGET = 70.0;
+const PLANET_CLEARANCE = CAPITAL_RADIUS * 1.6; // ~1,880 m around a planetoid's 900 m collider
 
 /* Resource tables copied VERBATIM from upstream's own sectors rather than invented: the asteroid
  * block is sectorTemplate10's (the richer of the two shapes, matching a contested system) and the
@@ -182,10 +220,39 @@ const PROGRESS = {
   ptsDrainPerSecond: 10, ptsAsteroidKilledWithRessources: 4,
   ptsNpcKilled: 8, ptsPlayerKilled: 14, ptsMiningShipIncome: 5,
 };
-/* Sectors 0 and 6 carry exactly these two fields and no npcGuidLootIds. Sector 10's escort list
- * names twelve NPC guids we have no cards for, so copying it would author a mining escort that
- * can never appear. The minimal form is the honest one. */
-const MINING = { extractPerSecond: 10, extractDelay: 60 };
+/* The FULL miningShipConfig, sector-10 shape. The generated files used to carry only
+ * extractPerSecond/extractDelay on the theory that the minimal form was the honest one - but a
+ * null npcGuidLootIds NPEs in MiningShipNpcAssassinTimer:69 two ticks after any player summons a
+ * mining ship, in every generated sector at once. The assassin table is Tannhauser's own 18-entry
+ * list MINUS what does not survive verification against our emitted catalogue:
+ *   - 66/68/70/72/92/94/96: zero cards at those guids (upstream heavies we never authored).
+ *     createBotFighter throws on a missing Ship card, ON A TIMER, so an unresolvable entry here
+ *     is a crash lottery on every assassin roll, not a silent no-op like a bot spawn entry.
+ *   - 90: resolves, but to OUR Colonial boss carrier - upstream's 90 was a Cylon wraith. The
+ *     Cylon faction column would pass the enemy-of-the-miner filter and then spawn a Colonial
+ *     hull, at boss stats, against a Colonial mining ship. Excluded rather than re-factioned.
+ * What survives is 5v5 symmetric: three strikes at loot 111 and two heavies at 114 per side.
+ * count is omitted exactly as upstream omits it (NpcGuidLootId overrides 0 -> 1);
+ * npcLifeTimeSeconds is parsed-but-dead (assassin behaviour is hardcoded) and kept because
+ * sector 10 carries it. */
+const MINING = {
+  extractPerSecond: 10, extractDelay: 60,
+  npcGuidLootIds: [
+    { npcGUID: 51, lootID: 111, faction: 'Colonial' },
+    { npcGUID: 54, lootID: 111, faction: 'Colonial' },
+    { npcGUID: 57, lootID: 111, faction: 'Colonial' },
+    { npcGUID: 60, lootID: 114, faction: 'Colonial' },
+    { npcGUID: 63, lootID: 114, faction: 'Colonial' },
+    { npcGUID: 75, lootID: 111, faction: 'Cylon' },
+    { npcGUID: 78, lootID: 111, faction: 'Cylon' },
+    { npcGUID: 81, lootID: 111, faction: 'Cylon' },
+    { npcGUID: 84, lootID: 114, faction: 'Cylon' },
+    { npcGUID: 87, lootID: 114, faction: 'Cylon' },
+  ],
+  secondsUntilNpcSpawns: 300,
+  npcInitialSpawnDelaySeconds: 10,
+  npcLifeTimeSeconds: 900,
+};
 
 // ---------------------------------------------------------------- deterministic RNG
 /* Numerical Recipes LCG. Seeded from the sector id so every sector's layout is a pure function of
@@ -207,13 +274,30 @@ const vec = (x, y, z) => ({ x: r3(x), y: r3(y), z: r3(z) });
 const rot = (yaw) => ({ pitch: 0.0, yaw: r3(((yaw + 180) % 360 + 360) % 360 - 180), roll: 0.0 });
 
 // ---------------------------------------------------------------- object builders
-function asteroid(guid, x, y, z) {
+/* Radius is the WIRE value: the client renders an asteroid at radius x 0.05 of the model
+ * (Asteroid.cs:100-110), so sector 10's 6-42 spread is 0.3x-2.1x natural size. rotationSpeed 3
+ * matches sector 10's whole field. respawnTime 60 is dead data (the reader overwrites it from
+ * asteroidDesc, SectorTemplateReader.java:94-97) - kept only so the diff against the old files
+ * stays about layout, not about a field the server never reads. */
+function asteroid(guid, x, y, z, radius, rotation) {
   return {
-    position: vec(x, y, z), rotation: rot(0), radius: 10, rotationSpeed: 0,
+    position: vec(x, y, z), rotation, radius: r3(radius), rotationSpeed: 3,
     objectGUID: guid, spaceEntityType: 'Asteroid',
     // "AlreadyExists", not upstream sector 0's "0". CreatingCause has two names and no numeric
     // form; Gson's lenient reader turns an unmatched name into null rather than erroring.
     creatingCause: 'AlreadyExists', respawnTime: 60, isInstantInSector: true,
+  };
+}
+/* Debris is the clean scenery type: no collider (no ColliderTemplate exists for any of these
+ * prefabs), no HP, HideStats client-side, and a GUI key that falls back to "Debris Field". Scale
+ * is a straight model multiplier (Vector3.one * scale, DebrisPile.java:28-36) - everything here
+ * ships at natural size. lootTemplateIds is dead on Debris (createDebrisPile never wires loot)
+ * and is deliberately not written. */
+function debris(guid, x, y, z, rotation) {
+  return {
+    position: vec(x, y, z), rotation, scale: 1.0, rotationSpeed: 0.0,
+    objectGUID: guid, spaceEntityType: 'Debris',
+    creatingCause: 'AlreadyExists', respawnTime: 0, isInstantInSector: true,
   };
 }
 function planetoid(guid, x, y, z) {
@@ -271,12 +355,48 @@ function platformRing(faction, tier, cx, cy, cz) {
   });
 }
 
+/* Per-sector census, for the emit log only - keyed by sector id, filled by buildSector. Kept out
+ * of the returned document so it can never leak into the JSON. */
+const META = new Map();
+
 // ---------------------------------------------------------------- one sector
 function buildSector(s) {
   const half = s.extent / 2;                   // Width is the FULL span - SpaceLevel.cs:134 halves it
+  /* Content is CONCENTRATED, not area-proportional. The three 40 km systems keep belts, clusters
+   * and junk inside a sector-10-sized core: 16x the area at sector-10 density would be ~4,500
+   * rocks (the DradisManager lag bug on purpose), and the same count smeared over the full span
+   * would be fog. Corridors, planetoids and the bounds assert still use the true half. */
+  const effHalf = Math.min(half, 8000);
   const R = rng(s.id);
   const objects = [];
   const keepOut = [];                          // {x,z,r} - nothing else may be placed inside
+
+  /* Threat level, needed up front now: the guid palette, junk generators and boss lairs key off
+   * it, not just the NPC wings. 255 is "the enemy may not enter", not a level, so it is dropped
+   * in favour of the real column. */
+  const lvl = Math.min(20, Math.max(s.colThreat, s.cylThreat) === 255
+    ? Math.min(s.colThreat, s.cylThreat) : Math.max(s.colThreat, s.cylThreat));
+
+  // Seeded helpers. Box-Muller consumes two draws per sample; everything stays on the one LCG
+  // stream, so any change here reshuffles every sector - expected, the full-diff is by design.
+  const gauss = () => Math.sqrt(-2 * Math.log(1 - R.f())) * Math.cos(2 * Math.PI * R.f());
+  const rotYaw = () => rot(R.range(-180, 180));
+  // Drifting hulks tumble: full euler for rocks and wreck pieces, yaw-only for everything else.
+  const eulerFull = () => ({
+    pitch: r3(R.range(-180, 180)), yaw: r3(R.range(-180, 180)), roll: r3(R.range(-180, 180)),
+  });
+  const shuffled = (arr) => {
+    const a = arr.slice();
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(R.f() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  };
+  const inBounds = (x, z) => Math.abs(x) <= half * 0.94 && Math.abs(z) <= half * 0.94;
+  /* Radius distribution matched to sector 10's measured field: min 5.2, p25 13.7, median 19.3,
+   * p75 25, max 42.9. u^1.35 over 6..42 reproduces the median (20.1) and the low skew. */
+  const rockRadius = () => 6 + 36 * Math.pow(R.f(), 1.35);
 
   /* Outposts sit on their faction's side of the sector, mirroring upstream's Tannhauser
    * (Colonial -5105, Cylon +5055) at roughly half the half-extent. A single-owner system puts its
@@ -305,94 +425,424 @@ function buildSector(s) {
     x: (sp.a.x + sp.b.x) / 2, z: 0, r: Math.abs(sp.a.x - sp.b.x) / 2 + sz + 400,
   }));
 
+  /* A jump beacon at each corridor's inner edge - the landmark a fresh arrival flies past on the
+   * way into the sector. Colonial approach lit blue, Cylon red. Pure Debris prop: the real
+   * JumpBeacon entity type has no server factory arm and cannot be placed. */
+  spawns.forEach(sp => {
+    const sign = sp.faction === 'Colonial' ? -1 : 1;
+    objects.push(debris(CORRIDOR_BEACON[sp.faction],
+      sign * half * 0.755, 0, R.range(-half * 0.2, half * 0.2), rotYaw()));
+  });
+
   const clear = (x, z, pad) => keepOut.every(k => Math.hypot(k.x - x, k.z - z) > k.r + pad);
+  /* Rocks use a keep-out entry's rockR where present, else its r. A planetoid claims a full
+   * PLANET_CLEARANCE circle against STRUCTURE centres (capital-navigation space around its 900 m
+   * collider) but only ~1 km against individual rocks - rocks have no collider, and a belt
+   * hugging a planetoid is scenery, not a hazard. Corridor/outpost/junk claims stay hard for
+   * rocks too. */
+  const clearRock = (x, z) => keepOut.every(k => Math.hypot(k.x - x, k.z - z) > (k.rockR || k.r));
+  /* Structure centres place by BEST-OF-N SCORING, not hard rejection. A 10 km sector's core is
+   * nearly covered by outpost, corridor and planetoid claims, and hard rejection starved whole
+   * sectors of belts (the first cut of this pass shipped skies with three rocks in them).
+   * Scoring keeps the deepest-clearance candidate of K draws, so a crowded sector gets a belt
+   * with a bite taken out of it - per-rock clearRock() still protects the claims themselves -
+   * instead of no belt at all. Draw count is fixed at K, so determinism is unaffected. */
+  const bestSpot = (K, sample, extra) => {
+    let best = null, bestScore = -Infinity;
+    for (let i = 0; i < K; i++) {
+      const c = sample();
+      let score = Infinity;
+      for (const k of keepOut) score = Math.min(score, Math.hypot(k.x - c[0], k.z - c[1]) - k.r);
+      if (extra) for (const k of extra) score = Math.min(score, Math.hypot(k.x - c[0], k.z - c[1]) - k.r);
+      if (score > bestScore) { bestScore = score; best = c; }
+    }
+    return best;
+  };
 
-  /* Planetoids first - they are the biggest things in the field and everything else works around
-   * them. Two to four, out toward the rim, in the sector's own vertical slab. */
-  const nPlanet = R.int(2, 4);
+  /* ------------------------------------------------------------ the shared rock discipline
+   * Every Asteroid-typed rock in the sector - belt, cluster, lair shell, junk - goes through
+   * addRock, which enforces one 3D 40 m minimum separation over the whole field via a spatial
+   * hash (cell 48 > 40, so a 3x3 neighbourhood provably covers every candidate violator). No
+   * O(n^2) scan: ~1,100 rocks cost ~1,100 grid lookups. */
+  const CELL = 48;
+  const rockGrid = new Map();
+  let rockCount = 0;
+  const rockFits = (x, y, z) => {
+    const cx = Math.floor(x / CELL), cz = Math.floor(z / CELL);
+    for (let i = cx - 1; i <= cx + 1; i++) {
+      for (let j = cz - 1; j <= cz + 1; j++) {
+        const cell = rockGrid.get(i + ',' + j);
+        if (!cell) continue;
+        for (const p of cell) {
+          const dx = p[0] - x, dy = p[1] - y, dz = p[2] - z;
+          if (dx * dx + dy * dy + dz * dz < ROCK_MIN_SEP * ROCK_MIN_SEP) return false;
+        }
+      }
+    }
+    return true;
+  };
+  const addRock = (guid, x, y, z, radius) => {
+    const k = Math.floor(x / CELL) + ',' + Math.floor(z / CELL);
+    if (!rockGrid.has(k)) rockGrid.set(k, []);
+    rockGrid.get(k).push([x, y, z]);
+    rockCount++;
+    objects.push(asteroid(guid, x, y, z, radius, eulerFull()));
+  };
+
+  /* Guid palette: three dominant variants carry ~95% of the field (sector 10's top three are
+   * 98.2%), a seeded handful of traces give each system its own seasoning. The coloured deco
+   * asteroids only appear from threat 10 up, so deep space looks stranger than the home lanes.
+   * Deco rocks are NOT in the palette - they are cluster/lair dressing only. */
+  const deck = shuffled(ASTEROIDS.concat(AST_VARIANTS));
+  const dominant = deck.slice(0, 3);
+  const trace = shuffled(deck.slice(3).concat(lvl >= 10 ? shuffled(DECO_ASTEROIDS).slice(0, 3) : []))
+    .slice(0, R.int(2, 4));
+  const rockGuid = () => R.f() < 0.95 ? R.pick(dominant) : R.pick(trace);
+
+  /* Planetoids first - the one field object with a real (900 m, hardcoded) server collider, so
+   * everything else works around them. Three to six, out toward the rim, sector-10-style vertical
+   * spread (its planetoids sit at |y| up to 1,050 on a 8,000 half). 2,200 m mutual spacing keeps
+   * two 900 m colliders from ever reading as one wall. */
+  const nPlanet = R.int(3, 6);
   const planetSpots = [];
+  const pDeck = shuffled(PLANETOIDS.concat(PLANETOID_VARIANTS));
+  /* Hard rejection here, NOT best-of-N: a planetoid is a real 900 m invisible wall, and scoring
+   * would happily bury one in a spawn corridor when the sector is crowded. 120 tries and a rim
+   * that reaches 0.8-half instead, so the poles beyond the corridors stay reachable. */
   for (let i = 0; i < nPlanet; i++) {
-    for (let tries = 0; tries < 60; tries++) {
+    for (let tries = 0; tries < 120; tries++) {
       const th = R.range(0, Math.PI * 2);
-      const rad = R.range(half * 0.35, half * 0.72);
+      const rad = R.range(half * 0.35, half * 0.8);
       const x = Math.cos(th) * rad, z = Math.sin(th) * rad;
-      if (!clear(x, z, PLANET_CLEARANCE)) continue;
-      if (planetSpots.some(p => Math.hypot(p.x - x, p.z - z) < half * 0.35)) continue;
-      const y = R.range(-half * 0.09, half * 0.09);
-      objects.push(planetoid(PLANETOIDS[i % PLANETOIDS.length], x, y, z));
+      // Pad is the planetoid's own collider (~950 m), not PLANET_CLEARANCE: every keep-out
+      // circle already carries its own margin, and double-padding left most sectors at two.
+      if (!clear(x, z, 1000)) continue;
+      if (planetSpots.some(p => Math.hypot(p.x - x, p.z - z) < 2200)) continue;
+      const y = R.range(-half * 0.15, half * 0.15);
+      objects.push(planetoid(pDeck[i % pDeck.length], x, y, z));
       planetSpots.push({ x, z });
-      keepOut.push({ x, z, r: PLANET_CLEARANCE });
+      keepOut.push({ x, z, r: PLANET_CLEARANCE, rockR: 1000 });
       break;
     }
   }
 
-  /* Asteroids. Roughly two thirds in belts, the rest scattered, so the field has somewhere worth
-   * mining rather than being uniform noise.
-   *
-   * COUNT IS DELIBERATELY WELL BELOW SECTOR 10's 1,360. That field is the one place we have
-   * measured a per-frame cost that scales with asteroid count - DradisManager walks every object
-   * in range ten times a second - and 1,360 is also upstream's densest sector by a factor of five
-   * over sectors 0 and 6 (256 each). 280 sits just above those two. The three 40,000 m systems get
-   * more, but nothing like area-proportional: 16x the area at the same density would be 4,480
-   * rocks in one sector, which is the lag bug on purpose. */
-  const nAst = s.extent > 20000 ? 640 : 280;
-  const nBelts = R.int(3, 5);
-  const belts = [];
-  for (let i = 0; i < nBelts; i++) {
-    for (let tries = 0; tries < 60; tries++) {
+  /* ------------------------------------------------------------ boss lairs
+   * Claimed BEFORE clusters and belts, because a lair is the biggest single structure in the
+   * sector: a hollow rock shell (inner ~900 m clear so the boss has room to patrol, outer
+   * ~2,200 m), a vein of gold/event asteroids in the hollow as the reason to come, and one or two
+   * broken capitals at the rim as the reason the last visitors did not leave. The boss's spawn
+   * box is pinned to the lair centre further down. Lair rocks pass clear() individually, so a
+   * shell near a corridor loses a bite rather than blocking placement outright. */
+  const lairs = [];
+  for (const f of ['Colonial', 'Cylon']) {
+    const own = f === 'Colonial' ? s.colThreat : s.cylThreat;
+    if (own < 18 || own === 255) continue;
+    const sign = f === 'Colonial' ? -1 : 1;    // a boss anchors its own faction's side
+    /* Lair siting is a three-body problem the verification pass measured the first cut losing:
+     * 33 of 46 lairs sat inside the enemy wing's patrol box (perpetual NPC war at the lair,
+     * guards chronically dead, claim pollution voiding the jackpot) and in 7 sectors the two
+     * bosses spawned within aggro of each other and ground each other down. So: +z band only
+     * (the wing boxes are biased -z and stop at z = 0.12*effHalf), outer-x band (wings stop at
+     * x = 0.40*effHalf), the two wing boxes join the scoring as avoid-circles, and the other
+     * faction's lair joins as a 5,000 m circle - boss auto-aggro is 2,500 m cast from a +-700 m
+     * patrol box, so 4,800 m of centre separation means the two bosses never meet. bestSpot
+     * scores rather than rejects, so a cramped sector degrades to "as far as possible" instead
+     * of failing. Corner shells may lose an out-of-bounds bite; that is the documented trade. */
+    const otherLair = lairs.length ? lairs[lairs.length - 1] : null;
+    const lairAvoid = [
+      { x: -effHalf * 0.28, z: -effHalf * 0.165, r: effHalf * 0.31 + 2500 },
+      { x:  effHalf * 0.28, z: -effHalf * 0.165, r: effHalf * 0.31 + 2500 },
+    ];
+    if (otherLair) lairAvoid.push({ x: otherLair.x, z: otherLair.z, r: 5000 });
+    const [cx, cz] = bestSpot(40, () => [
+      sign * R.range(effHalf * 0.48, effHalf * 0.66),
+      R.range(effHalf * 0.22, effHalf * 0.58),
+    ], lairAvoid);
+    const nShell = R.int(80, 140);
+    let made = 0, g = 0;
+    while (made < nShell && g < nShell * 30) {
+      g++;
       const th = R.range(0, Math.PI * 2);
-      const rad = R.range(half * 0.18, half * 0.66);
-      const x = Math.cos(th) * rad, z = Math.sin(th) * rad;
-      if (!clear(x, z, 700)) continue;
-      belts.push({ x, z, spread: R.range(half * 0.10, half * 0.20) });
-      break;
+      const rr = R.range(950, 2150);
+      const x = cx + Math.cos(th) * rr, z = cz + Math.sin(th) * rr;
+      const y = gauss() * 250;
+      if (!inBounds(x, z) || !clearRock(x, z) || !rockFits(x, y, z)) continue;
+      addRock(rockGuid(), x, y, z, rockRadius());
+      made++;
+    }
+    // The vein: 6-12 event rocks in the hollow, oversized so they read from the shell.
+    for (let i = 0, n = R.int(6, 12); i < n; i++) {
+      const th = R.range(0, Math.PI * 2);
+      const rr = R.range(120, 650);
+      const x = cx + Math.cos(th) * rr, z = cz + Math.sin(th) * rr;
+      const y = gauss() * 150;
+      if (!inBounds(x, z) || !clearRock(x, z) || !rockFits(x, y, z)) continue;
+      addRock(R.pick(GOLD_ASTEROIDS), x, y, z, R.range(15, 30));
+    }
+    // Rim wreckage: single-piece capital hulks (unambiguous guids), tumbling, plus piles.
+    for (let i = 0, n = R.int(1, 2); i < n; i++) {
+      const th = R.range(0, Math.PI * 2), rr = R.range(2000, 2400);
+      const x = cx + Math.cos(th) * rr, z = cz + Math.sin(th) * rr;
+      if (!inBounds(x, z) || !clearRock(x, z)) continue;
+      objects.push(debris(R.pick(CAPITAL_HULKS), x, gauss() * 200, z, eulerFull()));
+    }
+    for (let i = 0, n = R.int(2, 4); i < n; i++) {
+      const th = R.range(0, Math.PI * 2), rr = R.range(1900, 2400);
+      const x = cx + Math.cos(th) * rr, z = cz + Math.sin(th) * rr;
+      if (!inBounds(x, z) || !clearRock(x, z)) continue;
+      objects.push(debris(R.pick(DEBRIS_PILES), x, gauss() * 200, z, rotYaw()));
+    }
+    keepOut.push({ x: cx, z: cz, r: 2500 });
+    lairs.push({ faction: f, x: cx, z: cz });
+  }
+  const lairRocks = rockCount;                 // shell + vein rocks, deducted from the belt budget
+
+  /* ------------------------------------------------------------ dense clusters
+   * One to three tight rock knots - the somewhere-worth-mining structure the old lattice never
+   * had. Each claims its ground so the belts flow around it, and carries deco-rock and debris
+   * dressing so it reads as a place rather than a blob. */
+  let clustersMade = 0;
+  for (let i = 0, n = R.int(1, 3); i < n; i++) {
+    const [cx, cz] = bestSpot(30, () => {
+      const th = R.range(0, Math.PI * 2);
+      const rad = R.range(effHalf * 0.15, effHalf * 0.7);
+      return [Math.cos(th) * rad, Math.sin(th) * rad];
+    });
+    const sigma = R.range(350, 550);
+    const nRocks = R.int(40, 90);
+    let made = 0, g = 0;
+    while (made < nRocks && g < nRocks * 30) {
+      g++;
+      const x = cx + gauss() * sigma, z = cz + gauss() * sigma;
+      const y = gauss() * Math.min(300, sigma * 0.6);
+      if (!inBounds(x, z) || !clearRock(x, z) || !rockFits(x, y, z)) continue;
+      addRock(rockGuid(), x, y, z, rockRadius());
+      made++;
+    }
+    for (let d = 0, m = R.int(2, 5); d < m; d++) {  // deco rocks in the core
+      const x = cx + gauss() * sigma * 0.5, z = cz + gauss() * sigma * 0.5;
+      const y = gauss() * 150;
+      if (!inBounds(x, z) || !clearRock(x, z) || !rockFits(x, y, z)) continue;
+      addRock(R.pick(DECO_ROCKS), x, y, z, R.range(8, 18));
+    }
+    for (let d = 0, m = R.int(0, 2); d < m; d++) {  // a pile or two drifting through
+      const x = cx + gauss() * sigma, z = cz + gauss() * sigma;
+      if (!inBounds(x, z) || !clearRock(x, z)) continue;
+      objects.push(debris(R.pick(DEBRIS_PILES), x, gauss() * 150, z, rotYaw()));
+    }
+    keepOut.push({ x: cx, z: cz, r: sigma * 2 + 150 });
+    clustersMade++;
+  }
+
+  /* ------------------------------------------------------------ junk fields
+   * Skirmish scatter, every sector: a handful of wrecks from both sides, piles, and a few rocks
+   * near the midline - the residue of the last patrol clash. */
+  {
+    const [cx, cz] = bestSpot(20, () => [
+      R.range(-effHalf * 0.18, effHalf * 0.18),
+      R.range(-effHalf * 0.6, effHalf * 0.6),
+    ]);
+    const n = R.int(4, 10);
+    const nRocks = R.int(1, 3);
+    for (let i = 0; i < n; i++) {
+      const th = R.range(0, Math.PI * 2), rr = R.range(40, 400);
+      const x = cx + Math.cos(th) * rr, z = cz + Math.sin(th) * rr;
+      const y = R.range(-150, 150);
+      if (!inBounds(x, z)) continue;
+      if (i < nRocks) {
+        // clearRock too: the scatter centre is scored, not claimed, and without this a rock
+        // could legally land inside an outpost's gun-clearance ring (latent, per the verifiers).
+        if (clearRock(x, z) && rockFits(x, y, z)) addRock(rockGuid(), x, y, z, rockRadius());
+      } else if (R.f() < 0.55) {
+        objects.push(debris(R.f() < 0.5 ? R.pick(WRECKS_COLONIAL) : R.pick(WRECKS_CYLON),
+          x, y, z, eulerFull()));
+      } else {
+        objects.push(debris(R.pick(DEBRIS_PILES), x, y, z, rotYaw()));
+      }
+    }
+    keepOut.push({ x: cx, z: cz, r: 600 });
+  }
+
+  /* Graveyard, threat 10+ or the 40 km systems: a broken capital with its chunk set grouped
+   * within ~400 m of one anchor, ship wrecks of both factions, piles, debris rings, at most one
+   * massive_debris_wall, and loot-container props scattered through - all inside ~2.5 km. The
+   * client names all of it "Debris Field" for free. */
+  let graveyard = false;
+  if (lvl >= 10 || s.extent > 20000) {
+    const [cx, cz] = bestSpot(40, () => {
+      const th = R.range(0, Math.PI * 2);
+      const rad = R.range(effHalf * 0.2, effHalf * 0.65);
+      return [Math.cos(th) * rad, Math.sin(th) * rad];
+    });
+    const chunkSet = R.pick(CHUNK_SETS);
+    const ax = cx + R.range(-800, 800), az = cz + R.range(-800, 800);
+    for (const guid of chunkSet) {
+      const th2 = R.range(0, Math.PI * 2), rr = R.range(0, 400);
+      const x = ax + Math.cos(th2) * rr, z = az + Math.sin(th2) * rr;
+      if (!inBounds(x, z)) continue;
+      objects.push(debris(guid, x, R.range(-200, 200), z, eulerFull()));
+    }
+    let wall = 0;
+    for (let i = 0, n = Math.max(8, R.int(15, 30) - chunkSet.length); i < n; i++) {
+      const th2 = R.range(0, Math.PI * 2), rr = R.range(150, 2500);
+      const x = cx + Math.cos(th2) * rr, z = cz + Math.sin(th2) * rr;
+      const y = R.range(-250, 250);
+      if (!inBounds(x, z) || !clearRock(x, z)) continue;
+      const roll = R.f();
+      if (roll < 0.4) {
+        objects.push(debris(R.f() < 0.5 ? R.pick(WRECKS_COLONIAL) : R.pick(WRECKS_CYLON),
+          x, y, z, eulerFull()));
+      } else if (roll < 0.75) {
+        objects.push(debris(R.pick(DEBRIS_PILES), x, y, z, rotYaw()));
+      } else if (roll < 0.85 && wall < 1) {
+        wall++;
+        objects.push(debris(DEBRIS_WALL, x, y, z, rotYaw()));
+      } else {
+        objects.push(debris(R.pick(DEBRIS_RINGS), x, y, z, rotYaw()));
+      }
+    }
+    for (let i = 0, n = R.int(3, 8); i < n; i++) {   // loot-container props
+      const th2 = R.range(0, Math.PI * 2), rr = R.range(100, 1800);
+      const x = cx + Math.cos(th2) * rr, z = cz + Math.sin(th2) * rr;
+      if (!inBounds(x, z) || !clearRock(x, z)) continue;
+      objects.push(debris(R.pick(CONTAINERS), x, R.range(-200, 200), z, rotYaw()));
+    }
+    for (let i = 0, n = R.int(1, 2); i < n; i++) {   // beacons mark the field for passers-by
+      const th2 = R.range(0, Math.PI * 2), rr = R.range(2600, 3000);
+      const x = cx + Math.cos(th2) * rr, z = cz + Math.sin(th2) * rr;
+      if (!inBounds(x, z)) continue;
+      objects.push(debris(R.pick(NAV_BEACONS), x, 0, z, rotYaw()));
+    }
+    for (let i = 0, n = R.int(1, 2); i < n; i++) {   // cracked-planet fragments - the big bones
+      const th2 = R.range(0, Math.PI * 2), rr = R.range(400, 2200);
+      const x = cx + Math.cos(th2) * rr, z = cz + Math.sin(th2) * rr;
+      if (!inBounds(x, z) || !clearRock(x, z)) continue;
+      objects.push(debris(R.pick(CRACKED_PLANET), x, R.range(-250, 250), z, eulerFull()));
+    }
+    keepOut.push({ x: cx, z: cz, r: 2700 });
+    graveyard = true;
+  }
+
+  /* Scavenger yard, ~25% of sectors (seeded): station parts composed into one structure - a core
+   * piece at the centre, the rest stacked and offset within ~800 m - plus containers and piles.
+   * Yaw-only rotations: a station, even a scavenged one, is built level. */
+  let scavYard = false;
+  if (R.f() < 0.25) {
+    {
+      const [cx, cz] = bestSpot(30, () => {
+        const th = R.range(0, Math.PI * 2);
+        const rad = R.range(effHalf * 0.2, effHalf * 0.65);
+        return [Math.cos(th) * rad, Math.sin(th) * rad];
+      });
+      // The scavengers mark their claim: one green beacon at the yard's edge.
+      objects.push(debris(SCAV_BEACON, cx + R.range(900, 1100), 0, cz + R.range(-300, 300), rotYaw()));
+      const parts = shuffled(SCAV_PARTS).slice(0, R.int(6, 12));
+      parts.forEach((guid, i) => {
+        if (i === 0) { objects.push(debris(guid, cx, 0, cz, rotYaw())); return; }
+        const th2 = R.range(0, Math.PI * 2), rr = R.range(100, 800);
+        const x = cx + Math.cos(th2) * rr, z = cz + Math.sin(th2) * rr;
+        if (!inBounds(x, z)) return;
+        objects.push(debris(guid, x, R.range(-150, 150), z, rotYaw()));
+      });
+      for (let i = 0, n = R.int(2, 4); i < n; i++) {
+        const th2 = R.range(0, Math.PI * 2), rr = R.range(150, 700);
+        const x = cx + Math.cos(th2) * rr, z = cz + Math.sin(th2) * rr;
+        if (!inBounds(x, z)) continue;
+        objects.push(debris(R.pick(CONTAINERS), x, R.range(-100, 100), z, rotYaw()));
+      }
+      for (let i = 0, n = R.int(2, 4); i < n; i++) {
+        const th2 = R.range(0, Math.PI * 2), rr = R.range(200, 900);
+        const x = cx + Math.cos(th2) * rr, z = cz + Math.sin(th2) * rr;
+        if (!inBounds(x, z)) continue;
+        objects.push(debris(R.pick(DEBRIS_PILES), x, R.range(-150, 150), z, rotYaw()));
+      }
+      keepOut.push({ x: cx, z: cz, r: 1100 });
+      scavYard = true;
     }
   }
-  let placed = 0, guard = 0;
-  const spots = [];   // rocks placed so far, for the rock-to-rock spacing test below
-  while (placed < nAst && guard < nAst * 40) {
-    guard++;
-    let x, z;
-    if (belts.length && R.f() < 0.68) {
-      const b = R.pick(belts);
-      // Gaussian-ish via the sum of two uniforms: cheap, and it clusters without a hard edge.
-      x = b.x + (R.f() + R.f() - 1) * b.spread;
-      z = b.z + (R.f() + R.f() - 1) * b.spread;
-    } else {
-      x = R.range(-half * 0.92, half * 0.92);
-      z = R.range(-half * 0.92, half * 0.92);
+
+  /* ------------------------------------------------------------ the belts
+   * Two to three Gaussian belts carry whatever the field target has left after the structures
+   * above took their rocks. Targets are absolute, not per-km2 (the client's 10 Hz all-objects
+   * walk is why): 550-750 for a 10 km sector, 900-1,100 for the 40 km three - sector 10 runs
+   * 1,360 and is fine, and the hard assert below sits at 1,400.
+   *
+   * sigma_h is SOLVED, not drawn: for a 2D Gaussian of n rocks the core nearest-neighbour
+   * distance is ~0.5/sqrt(n / (2*pi*sigma^2)), so sigma = sqrt(n / (2*pi*lambda)) with lambda
+   * chosen for NN_TARGET puts the belt core at sector 10's measured p50 (~108 m) regardless of
+   * how the budget split between belts - then clamped to the 1,200-1,600 band so a thin belt
+   * cannot collapse into a dot nor a fat one smear away. sigma_y 260-320 is sector 10's own
+   * in-belt vertical sigma (260-305). */
+  /* The 550-750 / 900-1,100 target funds the BELTS for 10 km sectors - clusters ride on top, or
+   * every cluster rock would thin the belts below the NN signature. Only lair rocks are deducted
+   * (a two-lair boss sector adds ~300 rocks of its own), which keeps the worst-case total near
+   * 1,100 against the 1,400 assert. The 40 km sectors deduct everything: their target is already
+   * the ceiling of the budget. */
+  const fieldTarget = s.extent > 20000 ? R.int(900, 1100) : R.int(550, 750);
+  const beltBudget = s.extent > 20000
+    ? Math.max(220, fieldTarget - rockCount)
+    : Math.max(300, fieldTarget - lairRocks);
+  const belts = [];
+  /* Two belts is sector 10's own shape, and it is also load-bearing: the NN signature needs
+   * ~300+ rocks per belt, so a third belt only exists where the budget can feed it (a 40 km
+   * sector whose lairs and clusters left it at least 700). */
+  for (let i = 0, n = (s.extent > 20000 && beltBudget >= 700) ? R.int(2, 3) : 2; i < n; i++) {
+    // Mutual belt separation rides in the scoring as a phantom 3 km claim per placed belt, so
+    // two belts prefer opposite reaches of the sector (sector 10: opposite corners) but a
+    // crowded sky still gets its second belt somewhere rather than not at all.
+    const c = bestSpot(40, () => {
+      const th = R.range(0, Math.PI * 2);
+      const rad = R.range(effHalf * 0.25, effHalf * 0.7);
+      return [Math.cos(th) * rad, Math.sin(th) * rad];
+    }, belts.map(b => ({ x: b.x, z: b.z, r: 4500 })));
+    belts.push({ x: c[0], z: c[1] });
+  }
+  const NN_LAMBDA = Math.pow(0.5 / NN_TARGET, 2);
+  belts.forEach((b, i) => {
+    b.n = i === belts.length - 1
+      ? beltBudget - Math.floor(beltBudget / belts.length) * (belts.length - 1)
+      : Math.floor(beltBudget / belts.length);
+    /* Sigma floor is 1,000, DELIBERATELY under the spec's 1,200: sector 10 packs 680 rocks per
+     * belt, and at a 550-750 budget the only way to its NN signature is a slightly tighter belt.
+     * At >=460 rocks per belt the solver clears 1,200 on its own and the deviation vanishes. */
+    b.sigmaH = Math.min(1600, Math.max(1000, Math.sqrt(b.n / (2 * Math.PI * NN_LAMBDA))));
+    b.sigmaY = R.range(260, 320);
+  });
+  for (const b of belts) {
+    let made = 0, g = 0;
+    while (made < b.n && g < b.n * 40) {
+      g++;
+      const x = b.x + gauss() * b.sigmaH;
+      const z = b.z + gauss() * b.sigmaH;
+      const y = gauss() * b.sigmaY;
+      if (!inBounds(x, z) || !clearRock(x, z) || !rockFits(x, y, z)) continue;
+      addRock(rockGuid(), x, y, z, rockRadius());
+      made++;
     }
-    if (Math.abs(x) > half * 0.94 || Math.abs(z) > half * 0.94) continue;
-    if (!clear(x, z, AST_CLEARANCE)) continue;
-    /* ROCK-TO-ROCK SPACING, which clear() does NOT cover: it only tests the keep-out zones around
-     * outposts, spawns and planetoids, so raising its padding did nothing to how tightly the field
-     * itself packs. Without this, 103 Heleb's 288 objects had a tightest pair 28 m apart - a gap a
-     * Pegasus (radius 1,174) is forty times too wide to fit through, which is why a capital could
-     * not cross a field it could see straight through.
-     * Tested against the rocks placed so far, so the guarantee is over the whole field rather than
-     * per belt. O(n^2) on a few hundred objects per sector, which costs nothing at build time. */
-    if (spots.some(p => Math.hypot(p[0] - x, p[1] - z) < AST_CLEARANCE)) continue;
-    const y = R.range(-half * 0.045, half * 0.045);
-    objects.push(asteroid(R.pick(ASTEROIDS), x, y, z));
-    spots.push([x, z]);
-    placed++;
   }
 
   /* NPC patrol boxes, one per faction, on the far side from that faction's own spawn so a pilot
-   * meets the enemy rather than their own escort. Count rises with the system's threat level;
-   * the 255 sentinel means "the enemy may not come here" and is not a level, so it is clamped. */
-  const lvl = Math.min(20, Math.max(s.colThreat, s.cylThreat) === 255
-    ? Math.min(s.colThreat, s.cylThreat) : Math.max(s.colThreat, s.cylThreat));
-  const perEntry = Math.max(1, Math.min(4, 1 + Math.floor(lvl / 6)));
+   * meets the enemy rather than their own escort. Count rises with the system's threat level.
+   * perEntry floors at 2 so even the lowest-threat lanes field 2x3 strikes instead of a lone
+   * trio; escorts join at threat 6 (was 8), lines at 12 (was 14) - space got livelier on purpose
+   * in the same pass that made the fields 40x denser. */
+  const perEntry = Math.max(2, Math.min(4, 1 + Math.floor(lvl / 6)));
+  /* Wing boxes are effHalf-scaled and deliberately smaller than the first cut's half-scaled
+   * [0.18, 0.70] x [-0.62, 0.16]: at 40 km the old box patrolled 6 km of empty space beyond the
+   * content core, and at every size its x-edge sat within escort/line aggro (1,500/2,000 m) of
+   * the enemy spawn corridor, so fresh spawns were acquired before they finished orienting. The
+   * 0.40*effHalf x-edge leaves ~1,900 m to the corridor at 10 km - beyond escort aggro, a hair
+   * inside line aggro at the extreme corner - and the -z bias keeps the whole box out of the
+   * lair band in +z. */
   const box = (sign) => ({
-    min: vec(sign * half * 0.18, -100.0, -half * 0.62),
-    max: vec(sign * half * 0.70, 100.0, half * 0.16),
+    min: vec(sign * effHalf * 0.16, -100.0, -effHalf * 0.45),
+    max: vec(sign * effHalf * 0.40, 100.0, effHalf * 0.12),
   });
   const wing = (f) => {
     const t = NPCS[f];
     const e = t.strike.map(g => ({ guid: g, lootId: NPC_LOOT, count: perEntry }));
-    if (lvl >= 8) e.push(...t.escort.map(g => ({ guid: g, lootId: ESCORT_LOOT, count: Math.max(1, perEntry - 1) })));
-    if (lvl >= 14) e.push(...t.line.map(g => ({ guid: g, lootId: LINE_LOOT, count: 1 })));
+    if (lvl >= 6) e.push(...t.escort.map(g => ({ guid: g, lootId: ESCORT_LOOT, count: Math.max(1, perEntry - 1) })));
+    if (lvl >= 12) e.push(...t.line.map(g => ({ guid: g, lootId: LINE_LOOT, count: 1 })));
     return e;
   };
   const botSpawnTemplates = ['Colonial', 'Cylon'].map(f => ({
@@ -401,17 +851,40 @@ function buildSector(s) {
     faction: f,
     npcSpawnEntries: wing(f),
   }));
+  /* Ancient drone wing: VERIFIED OUT. The content pass wanted guid 41 (Tannhauser's own drone) at
+   * maxThreat 12+, but guid 41 has ZERO cards in the emitted catalogue (grep '"cardGUID": 41,'
+   * across JsonCards; guid 40 is known-broken too) and a bot guid with no Ship card silently
+   * never spawns - a wing of nothing. Restore it the day the drone cards exist, not before. */
   /* The bosses. One per faction, only where that faction's OWN threat is 18+ (so the Kraken
    * haunts deep Cylon space and the Poseidon deep Colonial space, matching where the events put
-   * them), two-hour respawn after a kill, and they keep the faction's spawn side - a boss is an
-   * anchor, not an ambush. 255 is the "may not enter" sentinel, not a threat level. */
+   * them). The spawn box is a +-700 m cube pinned to the lair built above, so the patrol
+   * objective keeps the boss circling its own hollow instead of wandering the sector; the old
+   * quadrant box is only a fallback for the (unseen) case where no lair found room. lifeTime
+   * 360000 is permanent-ish - a boss should not jump out from boredom - and the two-hour
+   * respawnTimeDeath stands. The guard wing shares the boss's exact box: two escorts and a line
+   * ship at the tier-3 loot step, on a much faster clock, so the lair is defended even between
+   * boss kills. */
   for (const f of ['Colonial', 'Cylon']) {
     const own = f === 'Colonial' ? s.colThreat : s.cylThreat;
-    if (own >= 18 && own !== 255) botSpawnTemplates.push({
-      spawnArea: box(f === 'Colonial' ? -1 : 1),
-      lifeTimeSeconds: 3600, respawnTimeSeconds: 300, respawnTimeDeath: 7200,
+    if (own < 18 || own === 255) continue;
+    const lair = lairs.find(l => l.faction === f);
+    const bossBox = lair
+      ? { min: vec(lair.x - 700, -100.0, lair.z - 700), max: vec(lair.x + 700, 100.0, lair.z + 700) }
+      : box(f === 'Colonial' ? -1 : 1);
+    botSpawnTemplates.push({
+      spawnArea: bossBox,
+      lifeTimeSeconds: 360000, respawnTimeSeconds: 300, respawnTimeDeath: 7200,
       faction: f,
       npcSpawnEntries: [{ guid: NPCS[f].boss, lootId: BOSS_LOOT, count: 1 }],
+    });
+    botSpawnTemplates.push({
+      spawnArea: bossBox,
+      lifeTimeSeconds: 3600, respawnTimeSeconds: 120, respawnTimeDeath: 1800,
+      faction: f,
+      npcSpawnEntries: [
+        { guid: R.pick(NPCS[f].escort), lootId: LINE_LOOT, count: 2 },
+        { guid: R.pick(NPCS[f].line), lootId: LINE_LOOT, count: 1 },
+      ],
     });
   }
 
@@ -442,6 +915,23 @@ function buildSector(s) {
         throw new Error(`sector ${s.id}: spawn corner (${c.x},${c.z}) outside +/-${half}`);
     }
   }
+
+  /* Budget asserts. 1,400 static field objects is the demonstrated-safe ceiling (sector 10 runs
+   * 1,374 and the per-tick server paths exclude rocks outright); the genuinely quadratic cost is
+   * collider-bearing station objects in CollisionUpdater's pair prep, held far below the ~100
+   * where it would begin to matter. Throwing rather than trimming: a sector over budget is a
+   * generator bug, and silently thinning it would hide which change caused it. */
+  const byType = {};
+  for (const o of objects) byType[o.spaceEntityType] = (byType[o.spaceEntityType] || 0) + 1;
+  if (objects.length > 1400)
+    throw new Error(`sector ${s.id}: ${objects.length} space objects exceeds the 1400 budget`);
+  const colliderBearing = (byType.Outpost || 0) + (byType.WeaponPlatform || 0) + (byType.Cruiser || 0);
+  if (colliderBearing > 30)
+    throw new Error(`sector ${s.id}: ${colliderBearing} collider-bearing objects exceeds 30`);
+  META.set(s.id, {
+    byType, belts: belts.length, clusters: clustersMade, lairs: lairs.length,
+    graveyard, scavYard,
+  });
   return out;
 }
 
@@ -607,6 +1097,22 @@ function augmentUpstream() {
                  `(${oob.map(t => `${t.spaceEntityType} ${t.objectGUID} at z=${t.position.z}`).join(', ')})`);
     }
 
+    /* Assassin config. Upstream's home sectors ship extract rates only, and a null
+     * npcGuidLootIds is an Arrays.stream(null) NPE every timer tick while a mining ship exists
+     * (MiningShipNpcAssassinTimer:69) - the same latent crash the 55 generated sectors were
+     * healed of this pass, fixed here with the same verified table. */
+    if (o.miningShipConfig && !o.miningShipConfig.npcGuidLootIds) {
+      o.miningShipConfig = {
+        ...o.miningShipConfig,
+        npcGuidLootIds: MINING.npcGuidLootIds,
+        secondsUntilNpcSpawns: MINING.secondsUntilNpcSpawns,
+        npcInitialSpawnDelaySeconds: MINING.npcInitialSpawnDelaySeconds,
+        npcLifeTimeSeconds: MINING.npcLifeTimeSeconds,
+      };
+      dirty = true;
+      notes.push(`sector ${id}: assassin config added to miningShipConfig (null table was a live NPE)`);
+    }
+
     if (tpl.some(t => t.spaceEntityType === 'Outpost' || t.spaceEntityType === 'WeaponPlatform')) {
       if (dirty) fs.writeFileSync(p, JSON.stringify(doc, null, 2) + '\n');
       notes.push(`sector ${id}: already has an outpost, unchanged`);
@@ -696,6 +1202,49 @@ function augmentUpstream() {
       }
     }
   }
+
+  /* ---- sector 10's assassin table: seven of its eighteen entries name guids with zero cards
+   * (66/68/70/72/92/94/96 - createBotFighter throws ON A TIMER, and setLastTimeAssassin only
+   * arms after a successful spawn, so a live mining session re-rolls the crash every cycle),
+   * and the "npcGUID": 90 row is upstream's Cylon wraith - a guid that now resolves to OUR
+   * level-120, 50k-HP Colonial boss carrier, which the enemy-of-the-miner filter would happily
+   * spawn 345 m from a Colonial mining ship. Replaced with the same verified 10-entry table
+   * every generated sector carries. Raw-text surgery, same discipline as the platform block:
+   * only the array's bytes move, and the sentinel is a property of the CONTENT (a broken guid
+   * still present), not a have-I-run flag. */
+  {
+    const file = fs.readdirSync(OUT).find(f => /^sectorTemplate10[._]/.test(f));
+    if (file) {
+      const p = path.join(OUT, file);
+      let raw = fs.readFileSync(p, 'utf8');
+      const start = raw.indexOf('"npcGuidLootIds": [');
+      if (start === -1) {
+        notes.push('sector 10: no npcGuidLootIds block found, unchanged');
+      } else {
+        let depth = 0, end = -1;
+        for (let i = raw.indexOf('[', start); i < raw.length; i++) {
+          if (raw[i] === '[') depth++;
+          else if (raw[i] === ']') { depth--; if (depth === 0) { end = i + 1; break; } }
+        }
+        const span = raw.slice(start, end);
+        if (!/"npcGUID":\s*(66|68|70|72|90|92|94|96)\b/.test(span)) {
+          notes.push('sector 10: assassin table already clean, unchanged');
+        } else {
+          const rows = MINING.npcGuidLootIds.map(e =>
+            '            {\n' +
+            `                "npcGUID": ${e.npcGUID},\n` +
+            `                "lootID": ${e.lootID},\n` +
+            `                "faction": "${e.faction}"\n` +
+            '            }').join(',\n');
+          const block = '"npcGuidLootIds": [\n' + rows + '\n        ]';
+          raw = raw.slice(0, start) + block + raw.slice(end);
+          fs.writeFileSync(p, raw);
+          notes.push('sector 10: assassin table 18 -> 10 entries ' +
+                     '(7 card-less crash guids and the boss-guid 90 row removed)');
+        }
+      }
+    }
+  }
   return notes;
 }
 
@@ -707,14 +1256,16 @@ function main() {
   }
   const generated = SECTORS.filter(s => !s.isUpstreamTemplate);
   const keep = new Set();
-  let written = 0;
+  let written = 0, totalObjects = 0;
 
   for (const s of generated) {
     if (UPSTREAM_TEMPLATES.has(s.id)) throw new Error('refusing to overwrite upstream sector ' + s.id);
     const safe = s.name.replace(/[^A-Za-z0-9]+/g, '');
     const file = `sectorTemplate${s.id}_${safe}.json_v3.json`;
     keep.add(file);
-    const body = JSON.stringify(buildSector(s), null, 2) + '\n';
+    const doc = buildSector(s);
+    totalObjects += doc.spaceObjectTemplates.length;
+    const body = JSON.stringify(doc, null, 2) + '\n';
     const p = path.join(OUT, file);
     // Only write when the bytes differ, so an unchanged sector keeps its mtime and a re-run of
     // the emitter after a STAGE bump shows exactly which files are new.
@@ -722,6 +1273,14 @@ function main() {
       fs.writeFileSync(p, body);
       written++;
     }
+    // Per-sector census: the emit log is where a budget regression shows first, not the diff.
+    const m = META.get(s.id), t = m.byType;
+    console.log(`  sector ${String(s.id).padStart(3)} ${s.name}: ` +
+      `${doc.spaceObjectTemplates.length} objects (ast ${t.Asteroid || 0}, ` +
+      `ptd ${t.Planetoid || 0}, debris ${t.Debris || 0}, op ${t.Outpost || 0}, ` +
+      `wp ${t.WeaponPlatform || 0}) belts ${m.belts} clusters ${m.clusters}` +
+      (m.lairs ? ` lairs ${m.lairs}` : '') +
+      (m.graveyard ? ' graveyard' : '') + (m.scavYard ? ' scavyard' : ''));
   }
 
   /* Sweep generated files whose star has left the stage. A template with no star is harmless -
@@ -747,7 +1306,6 @@ function main() {
   notes.push(...separateSector6Cruisers());
 
   const onDisk = fs.readdirSync(OUT).filter(f => f.endsWith('.json')).length;
-  const totalObjects = generated.reduce((n, s) => n + buildSector(s).spaceObjectTemplates.length, 0);
   console.log(`sector templates: ${generated.length} generated (${written} rewritten, ${removed} swept)`);
   console.log(`  ${onDisk} template files on disk for ${SECTORS.length} stars`);
   console.log(`  ${totalObjects} space objects across the generated sectors`);

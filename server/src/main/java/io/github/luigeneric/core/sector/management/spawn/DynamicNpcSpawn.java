@@ -54,7 +54,10 @@ public class DynamicNpcSpawn extends SpawnAble
         final Vector3 spawnVector3 = new Vector3(bgoRandom.getInsideVectors(
                 botTemplate.getSpawnBox().min().toArray(), botTemplate.getSpawnBox().max().toArray())
         );
-        final Quaternion spawnRotation = Quaternion.randomRotation(bgoRandom.getRndBetweenInt(0, 3));
+        /* Quaternion.randomRotation only ever yields identity or +-90 degree yaw (identity half
+         * the time), so a freshly spawned wing visibly shared three headings. Uniform yaw keeps
+         * the ships level (pitch/roll 0) but gives each bot its own heading. */
+        final Quaternion spawnRotation = Quaternion.euler(0f, bgoRandom.getRndBetween(0f, 360f), 0f);
         final Transform spawnTransform = new Transform(spawnVector3, spawnRotation);
         //behaviour template
         final NpcBehaviourTemplate behaviourTemplate = NpcBehaviourTemplates.createTemplateForTier(shipCard.getTier(),

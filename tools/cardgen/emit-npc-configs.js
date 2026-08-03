@@ -6,9 +6,10 @@
  * strike NPCs; this writes one file per heavy NPC, slotting tier-matched guns into the hull's
  * real level-1 weapon slots from hulls-real.js, so the hardpoints always exist on the prefab.
  *
- * Carrier launcher slots get the missile launcher + ammo pair the strike configs already use
- * (271446462 / 17980086) - that is the bosses' "nuke" battery, and only carriers and the two
- * stealth hulls have launcher slots at all.
+ * Carrier launcher slots (server_ids 8/9, the two level-1 'launcher' rows on both t4carrier
+ * hulls in hulls-real.js) get the capship launcher 6034 - the boss "nuke" battery. Only carriers
+ * and the two stealth hulls have launcher slots at all; the strike-side merit hulls keep the
+ * tier-1 missile launcher + ammo pair (271446462 / 17980086) their tier lock demands.
  *
  * Output goes to BOTH the live server tree and the repo's config/ overlay, same rule as the
  * collider and loot templates: ServerConfigurationUtils is gitignored upstream, so the overlay
@@ -26,6 +27,10 @@ const LIVE = path.join(CORE, 'ServerConfigurationUtils/global/ShipConfigTemplate
 const REPO = path.resolve(__dirname, '../../config/ShipConfigTemplates');
 
 const LAUNCHER = 271446462, MISSILE_AMMO = 17980086;
+// The capship launcher (600 dmg @ 3,900 m). Its ability is ConsumableOption NotUsing, so
+// FireMissileAction takes the default-projectile branch and the slot needs no consumableGUID -
+// unlike the t1 launcher above, whose Using ability demands the ammo pair (cards.js G13b).
+const CAP_LAUNCHER = 6034;
 
 /* The gun pool per tier, PICKED FROM THE CATALOGUE rather than listed here. The old table named
  * 6001-6023, eighteen hand-scaled weapons that no longer exist, and a config naming a deleted guid
@@ -77,16 +82,20 @@ for (const [guid, prefab, tier, level, faction] of NPCS) {
   for (const [slotId, type, , , slotLevel] of hull.slots) {
     if (slotLevel > 1) continue;                    // the server never instantiates these at level 1
     // Strike/escort/line hulls type their mounts 'weapon'; the carriers use the capital set:
-    // 'gun' (6031), 'defensive_weapon' (6032/6033) and 'launcher'. The launcher pair stays on
-    // the t1 missile launcher + ammo because that pairing is the one the upstream strike configs
-    // prove actually fires; the t4 launcher cards' ammo binding is unverified.
+    // 'gun' (6031 x4), 'defensive_weapon' (6032/6033 x2 each) and 'launcher' (6034 x2). The
+    // bosses used to carry the t1 light launcher + ammo pair here because the t4 launcher's ammo
+    // binding was unverified; 6034's ability ships NotUsing, which sidesteps ammo binding
+    // entirely (see CAP_LAUNCHER above), so the bosses now fire the battery their hull was
+    // built for. The merit hulls keep the proven t1 pair.
     if (type === 'weapon') {
       if (!guns) { console.error(prefab + ': tier ' + tier + ' has a weapon slot and no gun pool'); process.exit(1); }
       slotConfigs.push({ slotID: slotId, itemGUID: guns[g++ % guns.length] });
     }
     else if (type === 'gun') slotConfigs.push({ slotID: slotId, itemGUID: 6031 });
     else if (type === 'defensive_weapon') slotConfigs.push({ slotID: slotId, itemGUID: [6032, 6033][d++ % 2] });
-    else if (type === 'launcher') slotConfigs.push({ slotID: slotId, itemGUID: LAUNCHER, consumableGUID: MISSILE_AMMO });
+    else if (type === 'launcher') slotConfigs.push(tier === 4
+      ? { slotID: slotId, itemGUID: CAP_LAUNCHER }
+      : { slotID: slotId, itemGUID: LAUNCHER, consumableGUID: MISSILE_AMMO });
   }
   if (!slotConfigs.length) { console.error(prefab + ' produced no armed slots'); process.exit(1); }
   const json = JSON.stringify([{ id: guid, shipGUID: guid, level, slotConfigs }], null, 4) + '\n';

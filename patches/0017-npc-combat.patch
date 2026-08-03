@@ -1,5 +1,5 @@
 diff --git a/src/main/java/io/github/luigeneric/core/sector/SpaceObjectFactory.java b/src/main/java/io/github/luigeneric/core/sector/SpaceObjectFactory.java
-index ac9ec97..df1748b 100644
+index ac9ec97..a2bce04 100644
 --- a/src/main/java/io/github/luigeneric/core/sector/SpaceObjectFactory.java
 +++ b/src/main/java/io/github/luigeneric/core/sector/SpaceObjectFactory.java
 @@ -509,8 +509,10 @@ public class SpaceObjectFactory
@@ -15,7 +15,26 @@ index ac9ec97..df1748b 100644
  
          return missile;
      }
-@@ -649,9 +651,23 @@ public class SpaceObjectFactory
+@@ -551,11 +553,13 @@ public class SpaceObjectFactory
+         final long freeID = this.objectIDRegistry.getFreeObjectId(SpaceEntityType.BotFighter, shipCard.getFaction(),
+                 FactionGroup.Group0);
+         final ShipSubscribeInfo spaceSubscribeInfo = new ShipSubscribeInfo(freeID, shipCard.getStats());
+-        final ArrayList<NpcObjective> fullObjectiveLst = new ArrayList<>()
+-        {{
+-            new KillObjective(0, objectivesToKill);
+-            new DefendObjective(1, objectivesToDefend);
+-        }};
++        /* The former double-brace initializer only constructed the Kill/Defend objectives inside
++         * the instance-initializer block without ever calling add(), so every bot silently lost
++         * its kill list. Only Kill is wired back in: no timer reads Defend objectives, so a
++         * DefendObjective would be dead weight on every bot. An empty objectivesToKill list is
++         * harmless - hasKillObjectives() treats it as "no kill objectives". */
++        final ArrayList<NpcObjective> fullObjectiveLst = new ArrayList<>();
++        fullObjectiveLst.add(new KillObjective(0, objectivesToKill));
+         fullObjectiveLst.addAll(patrolObjectives);
+         final BotFighterMoving botFighterMoving = new BotFighterMoving(freeID, ownerCard, worldCard, shipCard, shipCard.getFaction(), FactionGroup.Group0,
+                 new ShipBindings(), new ShipAspects(), spaceSubscribeInfo, npcBehaviourTemplate, fullObjectiveLst, this.tick.getTimeStamp());
+@@ -649,9 +653,23 @@ public class SpaceObjectFactory
      }
      private void setupWeaponConfig(final Ship ship, final short level)
      {
@@ -40,7 +59,7 @@ index ac9ec97..df1748b 100644
  
          if (optionalShipConfigTemplate.isEmpty())
              return;
-@@ -664,6 +680,7 @@ public class SpaceObjectFactory
+@@ -664,6 +682,7 @@ public class SpaceObjectFactory
              return;
          }
          final ShipSlots slots = optSlots.get();
@@ -48,7 +67,7 @@ index ac9ec97..df1748b 100644
  
          for (final ShipSlotCard shipSlotCard : ship.getShipCard().getShipSlotCards())
          {
-@@ -688,9 +705,31 @@ public class SpaceObjectFactory
+@@ -688,9 +707,31 @@ public class SpaceObjectFactory
              }
  
              slots.addSlot(shipSlot);
@@ -106,6 +125,102 @@ index ca589ce..9403a63 100644
                          toCallOn.add(e);
  
                  });
+diff --git a/src/main/java/io/github/luigeneric/core/sector/management/spawn/DynamicNpcSpawn.java b/src/main/java/io/github/luigeneric/core/sector/management/spawn/DynamicNpcSpawn.java
+index 8938126..722b9e6 100644
+--- a/src/main/java/io/github/luigeneric/core/sector/management/spawn/DynamicNpcSpawn.java
++++ b/src/main/java/io/github/luigeneric/core/sector/management/spawn/DynamicNpcSpawn.java
+@@ -54,7 +54,10 @@ public class DynamicNpcSpawn extends SpawnAble
+         final Vector3 spawnVector3 = new Vector3(bgoRandom.getInsideVectors(
+                 botTemplate.getSpawnBox().min().toArray(), botTemplate.getSpawnBox().max().toArray())
+         );
+-        final Quaternion spawnRotation = Quaternion.randomRotation(bgoRandom.getRndBetweenInt(0, 3));
++        /* Quaternion.randomRotation only ever yields identity or +-90 degree yaw (identity half
++         * the time), so a freshly spawned wing visibly shared three headings. Uniform yaw keeps
++         * the ships level (pitch/roll 0) but gives each bot its own heading. */
++        final Quaternion spawnRotation = Quaternion.euler(0f, bgoRandom.getRndBetween(0f, 360f), 0f);
+         final Transform spawnTransform = new Transform(spawnVector3, spawnRotation);
+         //behaviour template
+         final NpcBehaviourTemplate behaviourTemplate = NpcBehaviourTemplates.createTemplateForTier(shipCard.getTier(),
+diff --git a/src/main/java/io/github/luigeneric/core/sector/timers/MiningShipNpcAssassinTimer.java b/src/main/java/io/github/luigeneric/core/sector/timers/MiningShipNpcAssassinTimer.java
+index 4e72bac..2bd9ad8 100644
+--- a/src/main/java/io/github/luigeneric/core/sector/timers/MiningShipNpcAssassinTimer.java
++++ b/src/main/java/io/github/luigeneric/core/sector/timers/MiningShipNpcAssassinTimer.java
+@@ -8,7 +8,8 @@ import io.github.luigeneric.core.sector.management.SectorSpaceObjects;
+ import io.github.luigeneric.core.spaceentities.MiningShip;
+ import io.github.luigeneric.core.spaceentities.SpaceObject;
+ import io.github.luigeneric.enums.SpaceEntityType;
+-import io.github.luigeneric.linearalgebra.base.StaticVectors;
++import io.github.luigeneric.linearalgebra.base.Euler3;
++import io.github.luigeneric.linearalgebra.base.Quaternion;
+ import io.github.luigeneric.linearalgebra.base.Transform;
+ import io.github.luigeneric.linearalgebra.base.Vector3;
+ import io.github.luigeneric.templates.npcbehaviour.NpcBehaviourTemplate;
+@@ -72,19 +73,22 @@ public class MiningShipNpcAssassinTimer extends DelayedTimer
+             final NpcGuidLootId npcGuidLootId = this.bgoRandom.getRandomListMember(res);
+             for (int i = 0; i < npcGuidLootId.count(); i++)
+             {
+-                final Transform assassinTransform = miningTransform.copy();
+-
+-                final Vector3 assassinPos = assassinTransform.getPosition();
+-                final Vector3 upAxis = assassinTransform.getRotation().mult(StaticVectors.UP);
+-                final Vector3 rightAxis = assassinTransform.getRotation().mult(StaticVectors.RIGHT);
+-                final Vector3 forwardAxis = assassinTransform.getRotation().mult(StaticVectors.FORWARD);
+-                assassinPos.add(assassinTransform.getRotation().direction().add(upAxis.mult(bgoRandom.getRndBetween(200, 1000))));
+-                assassinPos.add(assassinTransform.getRotation().direction().add(rightAxis.mult(bgoRandom.getRndBetween(-600, 600))));
+-                assassinPos.add(assassinTransform.getRotation().direction().add(forwardAxis.mult(bgoRandom.getRndBetween(450, 700))));
+-
+-                //test if distance between assassin and miningship is greater than autoAggroDistance?
+-                final float distance = assassinPos.distance(miningTransform.getPosition());
++                /* Offset must stay inside the 400 m auto-aggro radius: the old axis-stacked
++                 * offsets reached 1000+ m out, where the bots never engaged and idled out their
++                 * lifetime. Horizontal 150-330 m plus vertical <=100 m caps the total at ~345 m. */
++                final Vector3 offset = Quaternion.euler(0f, bgoRandom.getRndBetween(0f, 360f), 0f)
++                        .direction()
++                        .mult(bgoRandom.getRndBetween(150f, 330f));
++                final Vector3 assassinPos = Vector3.add(miningTransform.getPosition(), offset);
++                assassinPos.addY(bgoRandom.getRndBetween(-100f, 100f));
+ 
++                /* Face the mining ship (yaw only, level) instead of inheriting the mining spot's
++                 * rotation - that one carries the planetoid surface tilt, which left assassins
++                 * frozen at a visibly wrong pitch/roll. */
++                final float yawToMiningShip = Euler3.direction(
++                        Vector3.sub(miningTransform.getPosition(), assassinPos)).yaw();
++                final Transform assassinTransform =
++                        new Transform(assassinPos, Quaternion.euler(0f, yawToMiningShip, 0f));
+ 
+                 final SpaceObject newAssassin = this.spaceObjectFactory.createBotFighter(
+                         npcGuidLootId.npcGUID(),
+diff --git a/src/main/java/io/github/luigeneric/core/sector/timers/NpcDynamicTimer.java b/src/main/java/io/github/luigeneric/core/sector/timers/NpcDynamicTimer.java
+index 52af874..c9cb52a 100644
+--- a/src/main/java/io/github/luigeneric/core/sector/timers/NpcDynamicTimer.java
++++ b/src/main/java/io/github/luigeneric/core/sector/timers/NpcDynamicTimer.java
+@@ -91,12 +91,22 @@ public class NpcDynamicTimer extends NpcTimer
+             return;
+         }
+ 
+-        //check if rest maneuver(if so there would be no movement)
+-        if (npcShip.getMovementController().getCurrentManeuver() == null ||
+-                npcShip.getMovementController().getCurrentManeuver().getManeuverType() == ManeuverType.Rest)
++        /* Level the ship while patrolling. Two ways a tilt used to linger: a bot resuming from
++         * Rest re-applied its FULL current facing (pitch and bank included), and a bot whose
++         * target died keeps flying its last attack vector until it happens to exit the box -
++         * with a +-700 m lair box and boss Speed 12, effectively forever. Either way a capital
++         * cruising its own lair nosed 50 degrees up reads as "spawned sideways" to anyone who
++         * arrives later. Keep the heading, drop pitch and bank; once level, the condition goes
++         * false and nothing re-broadcasts. */
++        final boolean resting = npcShip.getMovementController().getCurrentManeuver() == null ||
++                npcShip.getMovementController().getCurrentManeuver().getManeuverType() == ManeuverType.Rest;
++        final Euler3 facing = Euler3.fromQuaternion(npcShip.getMovementController().getRotation());
++        final float pitchDeg = ((facing.pitch() % 360f) + 540f) % 360f - 180f;
++        final float rollDeg = ((facing.getRoll() % 360f) + 540f) % 360f - 180f;
++        if (resting || Math.abs(pitchDeg) > 10f || Math.abs(rollDeg) > 10f)
+         {
+             npcShip.getMovementController().setNextManeuver(
+-                    new DirectionalManeuver(Euler3.fromQuaternion(npcShip.getMovementController().getRotation())));
++                    new DirectionalManeuver(new Euler3(0f, facing.yaw(), 0f)));
+         }
+ 
+         final MovementOptions movementOptions = npcShip.getMovementController().getMovementOptions();
 diff --git a/src/main/java/io/github/luigeneric/core/sector/timers/NpcStaticTimer.java b/src/main/java/io/github/luigeneric/core/sector/timers/NpcStaticTimer.java
 index 45ffe58..5ab40b8 100644
 --- a/src/main/java/io/github/luigeneric/core/sector/timers/NpcStaticTimer.java
@@ -177,7 +292,7 @@ index 45ffe58..5ab40b8 100644
                  .map(SpaceObject::getObjectID)
                  .collect(Collectors.toSet());
 diff --git a/src/main/java/io/github/luigeneric/core/sector/timers/NpcTimer.java b/src/main/java/io/github/luigeneric/core/sector/timers/NpcTimer.java
-index 20994f9..0187efa 100644
+index 20994f9..4375c54 100644
 --- a/src/main/java/io/github/luigeneric/core/sector/timers/NpcTimer.java
 +++ b/src/main/java/io/github/luigeneric/core/sector/timers/NpcTimer.java
 @@ -45,6 +45,9 @@ public abstract class NpcTimer extends DelayedTimer
@@ -237,7 +352,19 @@ index 20994f9..0187efa 100644
          //get the enemy in auto aggro distance
          target = getEnemyInAutoAgroDistance(npcShip);
          if (target != null)
-@@ -133,6 +165,17 @@ public abstract class NpcTimer extends DelayedTimer
+@@ -127,12 +159,28 @@ public abstract class NpcTimer extends DelayedTimer
+                     .stream().filter(objective -> objective.getType() == NpcObjectiveType.Kill).findAny();
+             if (optObjective.isPresent())
+             {
+-                return ((KillObjective)optObjective.get()).getObjectivesToKill().get(0);
++                /* Removed targets stay in the objective list (nothing prunes it), so without the
++                 * filter an assassin whose mining ship just died re-acquires the corpse every pass
++                 * for the rest of its lifetime - flying at nothing and enqueueing casts the queue
++                 * then discards. Same retention rule isStillEngageable applies to live targets. */
++                return ((KillObjective)optObjective.get()).getObjectivesToKill()
++                        .stream().filter(o -> !o.isRemoved()).findFirst().orElse(null);
+             }
+         }
          return null;
      }
  
@@ -255,7 +382,7 @@ index 20994f9..0187efa 100644
      protected SpaceObject getEnemyInAutoAgroDistance(final NpcShip botFighter)
      {
          SpaceObject target = null;
-@@ -159,6 +202,9 @@ public abstract class NpcTimer extends DelayedTimer
+@@ -159,6 +207,9 @@ public abstract class NpcTimer extends DelayedTimer
                  .getSpaceObjectsNotOfEntityType(
                          SpaceEntityType.Missile, SpaceEntityType.Planetoid, SpaceEntityType.Asteroid, SpaceEntityType.Planet)
                  .stream()

@@ -91,12 +91,22 @@ public class NpcDynamicTimer extends NpcTimer
             return;
         }
 
-        //check if rest maneuver(if so there would be no movement)
-        if (npcShip.getMovementController().getCurrentManeuver() == null ||
-                npcShip.getMovementController().getCurrentManeuver().getManeuverType() == ManeuverType.Rest)
+        /* Level the ship while patrolling. Two ways a tilt used to linger: a bot resuming from
+         * Rest re-applied its FULL current facing (pitch and bank included), and a bot whose
+         * target died keeps flying its last attack vector until it happens to exit the box -
+         * with a +-700 m lair box and boss Speed 12, effectively forever. Either way a capital
+         * cruising its own lair nosed 50 degrees up reads as "spawned sideways" to anyone who
+         * arrives later. Keep the heading, drop pitch and bank; once level, the condition goes
+         * false and nothing re-broadcasts. */
+        final boolean resting = npcShip.getMovementController().getCurrentManeuver() == null ||
+                npcShip.getMovementController().getCurrentManeuver().getManeuverType() == ManeuverType.Rest;
+        final Euler3 facing = Euler3.fromQuaternion(npcShip.getMovementController().getRotation());
+        final float pitchDeg = ((facing.pitch() % 360f) + 540f) % 360f - 180f;
+        final float rollDeg = ((facing.getRoll() % 360f) + 540f) % 360f - 180f;
+        if (resting || Math.abs(pitchDeg) > 10f || Math.abs(rollDeg) > 10f)
         {
             npcShip.getMovementController().setNextManeuver(
-                    new DirectionalManeuver(Euler3.fromQuaternion(npcShip.getMovementController().getRotation())));
+                    new DirectionalManeuver(new Euler3(0f, facing.yaw(), 0f)));
         }
 
         final MovementOptions movementOptions = npcShip.getMovementController().getMovementOptions();

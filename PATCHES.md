@@ -5,10 +5,10 @@ These changes also live as one commit each on the
 which is what you actually clone and run. This file is the annotated changelog; the `patches/`
 files are the same changes as standalone diffs against pristine upstream, for review or reapply.
 
-Twenty patches against [BSGOCore](https://github.com/luigeneric/BSGOCore) at baseline
+Twenty-three patches against [BSGOCore](https://github.com/luigeneric/BSGOCore) at baseline
 **`23bad98a`** ("Fix PulseManeuver, fix DynamicMovementController", #10).
 
-Together they touch **40 files, +1 331 / −90**. Verified: applied in order with
+Together they touch **45 files, +1 717 / −150**. Verified: applied in order with
 `git apply --ignore-whitespace` to a clean worktree of `23bad98a`, the result is byte-identical
 (modulo CRLF) to the tree this server actually runs.
 
@@ -346,7 +346,7 @@ every armour-plating module and every hull `ArmorValue` decorative. V1 is the or
 
 ## 0015 — galaxy update payload
 
-`Galaxy.java` · 1 file, +37 −5
+`Galaxy.java` · 1 file, +45 −19
 
 Upstream shipped a hardcoded dynamic-mission probe — an Ancient mission in sector 63 — with its
 three siblings commented out. Sector 63 is not on our galaxy map, and
@@ -360,15 +360,41 @@ capital-rental price in 0016 is calculated against.
 
 ## 0016 — capital rental
 
-`Hangar.java`, `DialogProtocol.java`, `CapitalRental.java` · 3 files, +107 −0
+`Hangar.java`, `DialogProtocol.java`, `CapitalRental.java` · 3 files, +393 −19
 
 `CapitalRental.java` is a brand-new file, which made it invisible to `git diff` and it originally
 shipped in no patch — a fresh checkout built from the patch set alone would not compile.
 `mkpatches.js` now stages intent-to-add on new files so this class of gap diffs and is covered.
 
-The Pegasus and the Basestar are rented by the hour from the Admiral (Colonial) or Number Six
+The Pegasus and the Basestar are rented by the hour from Admiral Adama (Colonial) or Number One
 (Cylon), exactly as the original did it — the capital is never sold in the shop, it is authorised in
 the CIC. Charged in merits at the `CapitalRental` price, which falls as your faction loses the map.
+
+**The dialogue is a real menu now.** `DialogProtocol` used to answer every `Advance` with one
+hardcoded remark and treat the single reply index as "do everything": it ran the mission update
+*and* silently attempted the rental, so the only visible outcome was assignments refreshing and
+there was no way to ask for a flagship at all. It now tracks which NPC is speaking (set by
+`RoomProtocol` on the talk request) and what stage the conversation is at, and builds the answer
+list per advance: assignments for everyone, plus request-flagship → grant → confirm-or-cancel for
+the one officer who may authorise it. Nothing is charged until the confirmation comes back, and a
+player who cannot afford it gets the original's own "not enough merits" line instead of silence.
+
+**The rented hull has to land on `serverID == HangarID`.** `CapitalRental` used to park it at
+`30 + hangarId` to dodge a collision, which made the ship unreachable: `ShipCard.GetHangarShip`
+scans the hangar for `HangarID == ship.ServerID`, and the hangar window lights a flagship button
+only when `Game.Me.Hangar[variantHangarID]` resolves — so a paid-for Pegasus sat at slot 47 while
+every lookup asked for 18, invisible and uncommandable. The offset is gone (and it is no longer a compile-time constant trap: as a `static final int` it
+had been INLINED into `PlayerProtocol`, so changing it recompiled nothing and the ship kept
+landing on the old slot until a clean build). The collision it dodged is gone too, because the capitals now hold a `HangarID` of their own (card data) instead of
+sharing 17 with the stealth hulls, and they reach the UI as **variants** of the tier-4 carrier
+cell. The hangar grid is a fixed 3×5 of tier × role with two hardcoded cells, so a tier-4
+Mothership has no cell it could ever occupy directly.
+
+The phrases are the original game's, still in the client's locale bundle
+(`npc_adama.Phrase__35a28c51…__1` = "Requesting temporary command of the Pegasus, sir. [Command
+Battlestar]", and Number One's Basestar equivalent). The client substitutes `%CapShipCost%` from
+`Galaxy.CapitalShipCost` — which is why 0015 now sends the live rental price in the conquest-price
+update instead of a hardcoded 9 999 that matched nothing the server would charge.
 
 `Hangar.removeShip` exists for the expiry: if the rented hull was active, activation falls back to
 any remaining ship so the index cannot dangle. There is no server-to-client remove-ship message, so
@@ -376,8 +402,16 @@ expiry is enforced at hangar load (0007) where the client rebuilds its hangar an
 
 ## 0017 — NPC combat
 
-`SpaceObjectFactory.java`, `NpcTimer.java`, `NpcStaticTimer.java`, `NpcBehaviourTemplates.java`,
-`AbilityCastRequestQueue.java` · 5 files, +144 −9
+`SpaceObjectFactory.java`, `NpcTimer.java`, `NpcDynamicTimer.java`, `NpcStaticTimer.java`,
+`MiningShipNpcAssassinTimer.java`, `DynamicNpcSpawn.java`, `NpcBehaviourTemplates.java`,
+`AbilityCastRequestQueue.java` · 8 files, +192 −33
+
+Also in `NpcTimer`: the kill-objective fallback now skips removed targets — without the filter,
+an assassin whose mining ship just died re-acquired the corpse every pass for the rest of its
+lifetime, flying at nothing and enqueueing casts the queue then discarded. And in
+`NpcDynamicTimer`: patrolling bots re-level (keep heading, drop pitch and bank) — before, a bot
+whose target died kept flying its final attack vector until it happened to exit its patrol box,
+so a lair boss that fought once cruised its lair visibly tilted forever.
 
 Also in `SpaceObjectFactory`: player-fired missiles no longer get a loot association. It resolved
 to an empty template list (no `1_*.json` exists), harmless while nothing could kill a missile —
@@ -396,6 +430,16 @@ than flooding, stale target-cache entries are pruned when a station leaves the s
 stop casting and re-registering autocasts, and station aggro moved to 3 500 acquire / 4 000 leash so
 that something which opens fire from just outside acquisition range is not dropped the moment it
 drifts a metre further out.
+
+Three spawn fixes joined later. `createBotFighter` assembled its objectives with a double-brace
+initializer that constructed `KillObjective` and `DefendObjective` without ever calling `add()`, so
+both were discarded and every bot spawned objective-less. Kill is wired in properly now; Defend stays
+out because no timer reads it. The fix matters most for the mining-ship assassins, which had lost the
+one target they exist for. Their spawn also changed: instead of inheriting the mining ship's rotation
+(which carries the planetoid mining spot's surface tilt) at anywhere up to 1 000+ m out, they appear
+level, facing the mining ship, within ~350 m — inside their 400 m auto-aggro, so they actually
+attack. And wing bots no longer spawn via `Quaternion.randomRotation`, which despite the name returns
+only identity or ±90° yaw; each bot gets its own uniform random heading.
 
 ## 0018 — outpost death and loot
 
@@ -451,6 +495,45 @@ cannot ride in `ItemBuffAdd`, which is a fractional multiplier, not an absolute.
 feature lives with its owning groups (0014 missile spawn, 0017 loot association, 0018 death cause)
 and in card data: the Regulation card's target masks now include `Missile(8)` for every gun family,
 flak and point defence, and `DeflectMissile` targets only missiles.
+
+## 0022 — room NPCs
+
+`RoomProtocol.java` · 1 file, +20 −3
+
+The talk handler accepted exactly two names, `Apollo` and `Leoben`, and the Room cards listed
+exactly those two — so every other character standing in a room was scenery. In the Colonial CIC
+that meant Admiral Adama, Tyrol and Starbuck were lit, animated and completely unclickable, and
+clicking the obvious "admiral" in the room did nothing at all. The outpost hangars listed nobody,
+which is what put the flagship rental out of reach anywhere except the home CIC.
+
+The real cast list is recoverable from the client: each room scene carries one
+`camerabox_<name>` object per interactive character (`DialogCharacterInfo.FindCameraBox` resolves
+against the same string `RoomLevel` uses to find the NPC). Decompressing the four room bundles
+gives Apollo/Adama/Tyrol/Starbuck, Leoben/No1/No6/Sharon, Officer, and Sharon respectively. The
+handler now gates on that set; the cast itself is card data in `cards.js`.
+
+## 0023 — water for cubits
+
+`PlayerProtocolWriteOnly.java` · 1 file, +18 −0 (the dialogue side lives in `DialogProtocol`, which 0016 owns)
+
+Mining is the only source of water and this exchange is its only sink, which makes it the only
+cubit faucet a pilot controls — and it did not exist. Upstream reserved the `WaterExchangeValues`
+message id (60) and never sent it, so the client's `%WaterAmountExchange%`, `%CubitAmountExchange%`
+and `%MaxWaterAmountExchange%` placeholders had nothing to read and the quartermaster had nothing
+to say.
+
+The writer sends the five fields `Gui/Tools.cs` binds those placeholders to, so the officer's own
+phrases quote the real numbers. Rate and cast are the original's: **5 water to 1 cubit**
+(`research/bsgo_wiki/Water.txt:6`), offered by Starbuck aboard the Galactica, Number Six aboard
+the Basestar, and any outpost quartermaster — the four the wiki names (`:8-17`), which are exactly
+the four 0022 made clickable.
+
+The original's **280,000-per-week ceiling (`:18`) is deliberately not implemented.** It throttled
+the live game's only cubit faucet for an economy with a cash shop behind it; this server has
+neither, so ice is worth cubits without limit. Leaving it out also keeps the exchange stateless.
+
+The quote is recomputed against the hold at confirmation, so mining or moving water between the
+quote and the answer cannot pay out more than is actually carried.
 
 ---
 

@@ -20,9 +20,14 @@ public final class CapitalRental
     /** Shop items-tab passes; buying one starts the rental instead of delivering an item. */
     public static final long PASS_PEGASUS = 5020L;
     public static final long PASS_BASESTAR = 5120L;
-    /** Rented hulls take hangar slot 30+hangarId so they never collide with the listed ship
-     *  that owns the real slot (the stealth ships hold 17 now). */
-    public static final int SERVER_ID_OFFSET = 30;
+    /* A rented hull MUST sit at serverID == its card's HangarID. That is not a convention, it is
+     * how the client finds it: ShipCard.GetHangarShip scans the hangar for
+     * "HangarID == ship.ServerID", and the hangar window lights a flagship's variant button only
+     * when Game.Me.Hangar[variantHangarID] resolves. An offset slot is a ship the client can
+     * never see or command - which is what a paid-for Pegasus was, parked at slot 47 while every
+     * lookup asked for 18. The collision this offset existed to dodge is gone now that the
+     * capitals hold a HangarID of their own instead of sharing 17 with the stealth hulls. */
+    public static final int SERVER_ID_OFFSET = 0;
     public static final long BASE_PRICE = 20_000L;
     public static final long FLOOR_PRICE = 2_000L;
     public static final long DURATION_SECONDS = 3600L;

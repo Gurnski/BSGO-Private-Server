@@ -1,0 +1,51 @@
+diff --git a/src/main/java/io/github/luigeneric/core/protocols/room/RoomProtocol.java b/src/main/java/io/github/luigeneric/core/protocols/room/RoomProtocol.java
+index 50bad0f..a893a43 100644
+--- a/src/main/java/io/github/luigeneric/core/protocols/room/RoomProtocol.java
++++ b/src/main/java/io/github/luigeneric/core/protocols/room/RoomProtocol.java
+@@ -17,10 +17,16 @@ import lombok.extern.slf4j.Slf4j;
+ 
+ import java.io.IOException;
+ import java.util.Objects;
++import java.util.Set;
+ 
+ @Slf4j
+ public class RoomProtocol extends BgoProtocol
+ {
++    private static final Set<String> ACTIVE_NPCS =
++            Set.of("Apollo", "Adama", "Tyrol", "Starbuck",     // scene_human_cic
++                   "Leoben", "No1", "No6", "Sharon",           // scene_cylon_cic (Sharon also cylon outpost)
++                   "Officer");                                 // scene_human_outpost
++
+     public RoomProtocol(final ProtocolContext ctx)
+     {
+         super(ProtocolID.Room, ctx);
+@@ -39,15 +45,26 @@ public class RoomProtocol extends BgoProtocol
+             {
+                 final String npc = br.readString();
+                 log.info("User requested talk to npc {}", npc);
+-                final boolean npcActivated = npc.equals("Leoben") || npc.equals("Apollo");
++                /* Every character the room scenes actually offer, not just the two the CIC cards
++                 * used to list. The names come from each bundle's camerabox_<name> objects, which
++                 * are what DialogCharacterInfo resolves against, so this set matches the Room
++                 * cards exactly: the CICs hold Apollo/Adama/Tyrol/Starbuck and
++                 * Leoben/No1/No6/Sharon, and the outpost hangars hold Officer (Colonial
++                 * quartermaster) and Sharon. Anything else is a crafted packet: the client can
++                 * only click an NPCArea built from the Room card we sent it. */
++                final boolean npcActivated = ACTIVE_NPCS.contains(npc);
+                 if (!npcActivated)
+                     return;
+ 
+                 //Log.infoIn("Talk: " + npc);
+                 user().send(writeTalk(npc));
+-                Remark remark = new Remark((byte) 1, "%$bgo.npc_no8.Phrase__2382939f-71b5-4822-8549-a64bd9f47a6d__0%", "");
++                /* Hand the dialogue its speaker before the greeting goes out: which options the
++                 * player is offered depends on who is being talked to, and only the flagship
++                 * officer (Adama / Number One) may authorise a capital. */
+                 final DialogProtocol dialogProtocol = user().getProtocol(ProtocolID.Dialog);
+-                user().send(dialogProtocol.writeNpcRemark(remark));
++                dialogProtocol.beginDialog(npc);
++                user().send(dialogProtocol.writeNpcRemark(
++                        new Remark((byte) 1, dialogProtocol.greetingFor(npc), "")));
+             }
+             case Quit ->
+             {

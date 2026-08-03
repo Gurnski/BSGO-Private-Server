@@ -2,13 +2,13 @@
         "id": 121,
         "type": "Damage",
         "rewardCount": 4,
-        "experience": 5000,
+        "experience": 15000,
         "chance": 1.0,
         "lootEntryInfos": [{
                 "chance": 1.0,
                 "levelIntervall": [0, 255],
                 "shipItem": {
-                    "count": 25000,
+                    "count": 80000,
                     "cardGuid": 215278030,
                     "itemType": "Countable"
                 },
@@ -17,29 +17,38 @@
                 "chance": 1.0,
                 "levelIntervall": [0, 255],
                 "shipItem": {
-                    "count": 8000,
+                    "count": 25000,
                     "cardGuid": 207047790,
                     "itemType": "Countable"
                 },
                 "variationPercentage": 0.25
             }, {
-                "chance": 0.5,
+                "chance": 0.6,
                 "levelIntervall": [0, 255],
                 "shipItem": {
-                    "count": 500,
+                    "count": 1500,
                     "cardGuid": 264733124,
                     "itemType": "Countable"
                 },
                 "variationPercentage": 0.2
             }, {
-                "chance": 0.5,
+                "chance": 1.0,
                 "levelIntervall": [0, 255],
                 "shipItem": {
-                    "count": 2000,
+                    "count": 5000,
                     "cardGuid": 130762195,
                     "itemType": "Countable"
                 },
                 "variationPercentage": 0.25
+            }, {
+                "chance": 1.0,
+                "levelIntervall": [0, 255],
+                "shipItem": {
+                    "count": 10,
+                    "cardGuid": 172582782,
+                    "itemType": "Countable"
+                },
+                "variationPercentage": 0.0
             }
         ]
     }

@@ -1159,6 +1159,12 @@ public class PlayerProtocol extends BgoProtocol implements StatsProtocolSubscrib
         user().send(writeAddShip(newShip));
         user().send(writer.writeShipSlots(newShip));
         user().send(writer.writeShipInfoDurability(newShip));
+        /* Put the pilot IN it, rather than leaving them to find it in the hangar. The flagship is
+         * a one-hour authorisation, not a purchase, so "you now command the Pegasus" is what the
+         * dialogue actually promised - and it means the rental does not depend on the hangar grid
+         * being able to draw a tier-4 Mothership, which it cannot do without the variant plumbing
+         * on the carrier cell. Undocking now launches the battlestar. */
+        selectShip(rentalSlot);
     }
 
     public void addExperience(final long exp)

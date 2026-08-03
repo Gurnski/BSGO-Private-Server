@@ -50,6 +50,24 @@ public class PlayerProtocolWriteOnly extends WriteOnlyProtocol
 
         return bw;
     }
+    /* Feeds the client's water-exchange placeholders. Gui/Tools.cs binds %MaxWaterAmountExchange%,
+     * %WaterInHold%, %WaterAmountExchange%, %CubitAmountExchange% and %WaterCubitExchangeRate% to
+     * these five fields, in this order, so the quartermaster's own phrases state the real numbers
+     * and the server formats nothing. Upstream reserved the message id and never sent it. */
+    public BgoProtocolWriter writeWaterExchangeValues(final long maxWaterExchange, final long waterInHold,
+                                                      final long waterAmount, final long cubitAmount,
+                                                      final float waterPerCubit)
+    {
+        final BgoProtocolWriter bw = newMessage();
+        bw.writeMsgType(ServerMessage.WaterExchangeValues.value);
+        bw.writeUInt32(maxWaterExchange);
+        bw.writeUInt32(waterInHold);
+        bw.writeUInt32(waterAmount);
+        bw.writeUInt32(cubitAmount);
+        bw.writeSingle(waterPerCubit);
+        return bw;
+    }
+
     public BgoProtocolWriter writeShipInfoDurability(final HangarShip ship)
     {
         final int shipID = ship.getServerId();

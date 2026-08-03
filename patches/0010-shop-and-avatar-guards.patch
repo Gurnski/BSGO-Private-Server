@@ -59,7 +59,7 @@ index a46d26b..692fc75 100644
          if (!isEnoughInContainer) return false;
          buyPrice.addPrice(tmpPrice);
 diff --git a/src/main/java/io/github/luigeneric/core/protocols/player/PlayerProtocol.java b/src/main/java/io/github/luigeneric/core/protocols/player/PlayerProtocol.java
-index 29669b4..68cc38e 100644
+index 29669b4..5f9e3d3 100644
 --- a/src/main/java/io/github/luigeneric/core/protocols/player/PlayerProtocol.java
 +++ b/src/main/java/io/github/luigeneric/core/protocols/player/PlayerProtocol.java
 @@ -57,6 +57,9 @@ import io.github.luigeneric.templates.shipitems.ShipItem;
@@ -108,7 +108,7 @@ index 29669b4..68cc38e 100644
          //check buy price
          final Price buyPrice = shopItemCard.getBuyPrice();
          final ShopVisitor shopVisitor = new ShopVisitor(user(), null, ctx.rng());
-@@ -1090,6 +1115,52 @@ public class PlayerProtocol extends BgoProtocol implements StatsProtocolSubscrib
+@@ -1090,6 +1115,58 @@ public class PlayerProtocol extends BgoProtocol implements StatsProtocolSubscrib
          }
      }
  
@@ -156,6 +156,12 @@ index 29669b4..68cc38e 100644
 +        user().send(writeAddShip(newShip));
 +        user().send(writer.writeShipSlots(newShip));
 +        user().send(writer.writeShipInfoDurability(newShip));
++        /* Put the pilot IN it, rather than leaving them to find it in the hangar. The flagship is
++         * a one-hour authorisation, not a purchase, so "you now command the Pegasus" is what the
++         * dialogue actually promised - and it means the rental does not depend on the hangar grid
++         * being able to draw a tier-4 Mothership, which it cannot do without the variant plumbing
++         * on the carrier cell. Undocking now launches the battlestar. */
++        selectShip(rentalSlot);
 +    }
 +
      public void addExperience(final long exp)

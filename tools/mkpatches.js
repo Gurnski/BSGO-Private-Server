@@ -80,7 +80,10 @@ const GROUPS = [
   ['0017-npc-combat', [
     'src/main/java/io/github/luigeneric/core/sector/SpaceObjectFactory.java',
     'src/main/java/io/github/luigeneric/core/sector/timers/NpcTimer.java',
+    'src/main/java/io/github/luigeneric/core/sector/timers/NpcDynamicTimer.java',
     'src/main/java/io/github/luigeneric/core/sector/timers/NpcStaticTimer.java',
+    'src/main/java/io/github/luigeneric/core/sector/timers/MiningShipNpcAssassinTimer.java',
+    'src/main/java/io/github/luigeneric/core/sector/management/spawn/DynamicNpcSpawn.java',
     'src/main/java/io/github/luigeneric/templates/npcbehaviour/NpcBehaviourTemplates.java',
     'src/main/java/io/github/luigeneric/core/sector/management/abilities/AbilityCastRequestQueue.java']],
   ['0018-outpost-death-and-loot', [
@@ -100,6 +103,18 @@ const GROUPS = [
    * file no other group covers: the server-only card field the warhead override reads. */
   ['0021-missile-interception', [
     'src/main/java/io/github/luigeneric/templates/cards/ShipConsumableCard.java']],
+  /* Room NPCs. The talk handler accepted two hardcoded names, so every other character standing
+   * in the CIC and outpost scenes was unclickable even once the Room cards listed them - and the
+   * outpost rooms listed nobody at all, which put the flagship rental out of reach anywhere but
+   * the home CIC. The cast list itself is card data (cards.js ROOMS/NPC_GUI). */
+  ['0022-room-npcs', [
+    'src/main/java/io/github/luigeneric/core/protocols/room/RoomProtocol.java']],
+  /* Water for cubits. The exchange is the original's only player-controlled cubit faucet and the
+   * only sink for mined water; upstream reserved the WaterExchangeValues message id and never
+   * sent it, so the client's %WaterAmountExchange% placeholders had nothing to read. The dialogue
+   * side lives in DialogProtocol, which 0016 already owns. */
+  ['0023-water-exchange', [
+    'src/main/java/io/github/luigeneric/core/protocols/player/PlayerProtocolWriteOnly.java']],
 ];
 
 // A brand-new source file in the baseline working tree is invisible to `git diff` until it

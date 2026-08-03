@@ -159,7 +159,12 @@ public abstract class NpcTimer extends DelayedTimer
                     .stream().filter(objective -> objective.getType() == NpcObjectiveType.Kill).findAny();
             if (optObjective.isPresent())
             {
-                return ((KillObjective)optObjective.get()).getObjectivesToKill().get(0);
+                /* Removed targets stay in the objective list (nothing prunes it), so without the
+                 * filter an assassin whose mining ship just died re-acquires the corpse every pass
+                 * for the rest of its lifetime - flying at nothing and enqueueing casts the queue
+                 * then discards. Same retention rule isStillEngageable applies to live targets. */
+                return ((KillObjective)optObjective.get()).getObjectivesToKill()
+                        .stream().filter(o -> !o.isRemoved()).findFirst().orElse(null);
             }
         }
         return null;

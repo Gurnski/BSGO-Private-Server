@@ -553,11 +553,13 @@ public class SpaceObjectFactory
         final long freeID = this.objectIDRegistry.getFreeObjectId(SpaceEntityType.BotFighter, shipCard.getFaction(),
                 FactionGroup.Group0);
         final ShipSubscribeInfo spaceSubscribeInfo = new ShipSubscribeInfo(freeID, shipCard.getStats());
-        final ArrayList<NpcObjective> fullObjectiveLst = new ArrayList<>()
-        {{
-            new KillObjective(0, objectivesToKill);
-            new DefendObjective(1, objectivesToDefend);
-        }};
+        /* The former double-brace initializer only constructed the Kill/Defend objectives inside
+         * the instance-initializer block without ever calling add(), so every bot silently lost
+         * its kill list. Only Kill is wired back in: no timer reads Defend objectives, so a
+         * DefendObjective would be dead weight on every bot. An empty objectivesToKill list is
+         * harmless - hasKillObjectives() treats it as "no kill objectives". */
+        final ArrayList<NpcObjective> fullObjectiveLst = new ArrayList<>();
+        fullObjectiveLst.add(new KillObjective(0, objectivesToKill));
         fullObjectiveLst.addAll(patrolObjectives);
         final BotFighterMoving botFighterMoving = new BotFighterMoving(freeID, ownerCard, worldCard, shipCard, shipCard.getFaction(), FactionGroup.Group0,
                 new ShipBindings(), new ShipAspects(), spaceSubscribeInfo, npcBehaviourTemplate, fullObjectiveLst, this.tick.getTimeStamp());

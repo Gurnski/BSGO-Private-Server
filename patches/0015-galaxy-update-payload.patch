@@ -1,8 +1,16 @@
 diff --git a/src/main/java/io/github/luigeneric/core/galaxy/Galaxy.java b/src/main/java/io/github/luigeneric/core/galaxy/Galaxy.java
-index fac1596..2d16872 100644
+index fac1596..c66d2a8 100644
 --- a/src/main/java/io/github/luigeneric/core/galaxy/Galaxy.java
 +++ b/src/main/java/io/github/luigeneric/core/galaxy/Galaxy.java
-@@ -116,11 +116,15 @@ public class Galaxy
+@@ -3,6 +3,7 @@ package io.github.luigeneric.core.galaxy;
+ 
+ import io.github.luigeneric.binaryreaderwriter.BgoProtocolWriter;
+ import io.github.luigeneric.core.galaxy.galaxymapupdates.*;
++import io.github.luigeneric.core.protocols.player.CapitalRental;
+ import io.github.luigeneric.core.protocols.universe.UniverseProtocolWriteOnly;
+ import io.github.luigeneric.core.sector.Sector;
+ import io.github.luigeneric.core.sector.management.GalaxyBonus;
+@@ -116,11 +117,15 @@ public class Galaxy
      {
          final List<GalaxyMapUpdate> galaxyMapUpdates = new ArrayList<>();
  
@@ -23,7 +31,7 @@ index fac1596..2d16872 100644
          return galaxyMapUpdates;
      }
  
-@@ -310,6 +314,34 @@ public class Galaxy
+@@ -310,6 +315,34 @@ public class Galaxy
          return galaxyMapUpdates;
      }
  
@@ -58,3 +66,31 @@ index fac1596..2d16872 100644
      private List<GalaxyMapUpdate> getOutpostStates(final Faction faction)
      {
          final List<GalaxyMapUpdate> galaxyMapUpdates = new ArrayList<>();
+@@ -353,20 +386,13 @@ public class Galaxy
+     {
+         List<GalaxyMapUpdate> galaxyMapUpdates = new ArrayList<>();
+ 
+-        if (faction.equals(Faction.Colonial))
+-        {
+-            //final GalaxyMapUpdate conquestCol = new ConquestLocationUpdate(Faction.Colonial, 10, LocalDateTime.now(Clock.systemUTC()).plusMinutes(10));
+-            //galaxyMapUpdates.add(conquestCol);
+-            final GalaxyMapUpdate conquestPrice = new ConquestPriceUpdate(Faction.Colonial, 9999);
+-            galaxyMapUpdates.add(conquestPrice);
+-        }
+-        else
+-        {
+-            //final GalaxyMapUpdate conquestCol = new ConquestLocationUpdate(Faction.Colonial, 10, LocalDateTime.now(Clock.systemUTC()).plusMinutes(10));
+-            //galaxyMapUpdates.add(conquestCol);
+-            final GalaxyMapUpdate conquestPrice = new ConquestPriceUpdate(Faction.Cylon, 9999);
+-            galaxyMapUpdates.add(conquestPrice);
+-        }
++        /* This price IS the capital rental price the flagship dialog quotes: the client stores it
++         * as Galaxy.CapitalShipCost and substitutes it into every %CapShipCost% placeholder
++         * (Gui/Tools.cs:118), which the Adama and Number One phrases use to name the merit cost.
++         * Sending the hardcoded 9999 made the dialog quote a number the server would never
++         * charge, so it has to be the live figure. */
++        final long price = CapitalRental.priceFor(faction, this);
++        galaxyMapUpdates.add(new ConquestPriceUpdate(faction, price));
+         return galaxyMapUpdates;
+     }
+ 

@@ -368,7 +368,7 @@ const HULLS = [
     hp: 3600, pwr: 260, speed: 101, agility: 1.1, extent: 245 },
   { g: 5015, name: 'Brimir', faction: 'Colonial', hangar: 15, tier: 4,
     prefab: 'humant4carrier', objKey: 98636899, loca: 'ship_brimir', paperdoll: 'ship_brimir_paperdoll_layouts',
-    role: 'Carrier', roleDep: 'Carrier', lvl: 24, tyl: 420000,
+    role: 'Carrier', roleDep: 'Carrier', lvl: 24, tyl: 420000, variants: [18],
     hp: 14000, pwr: 600, speed: 52, agility: 0.55, extent: 379 },
   /* CAPITALS DO NOT FLY LIKE FIGHTERS, and until now this one did: speed 52 and agility 0.55 are
    * the same figures as a tier-4 strike hull, on a ship 1,174 units long. The dump has no Pegasus
@@ -388,7 +388,7 @@ const HULLS = [
    * light year is 50 tylium per unit - the affordability validator exists precisely to stop a
    * pilot being stranded, and one hop would cost a third of the starting grant. The Pegasus is a
    * one-hour rental, so its economics are a separate question from its handling. */
-  { g: 5017, name: 'Pegasus', faction: 'Colonial', hangar: 17, tier: 4,
+  { g: 5017, name: 'Pegasus', faction: 'Colonial', hangar: 18, parentHangar: 15, tier: 4,
     prefab: 'pegasus', loca: 'ship_commandtoken_pegasus', paperdoll: 'ship_commandtoken_pegasus_paperdoll_layouts',
     role: 'Mothership', roleDep: 'Mothership', lvl: 1, tyl: 25000, tokens: 20000, rentalOnly: true,
     hp: 15400, pwr: 660, speed: 52, agility: 0.55, extent: 1174,
@@ -444,12 +444,12 @@ const HULLS = [
     hp: 3600, pwr: 260, speed: 101, agility: 1.1, extent: 175 },
   { g: 5115, name: 'Surtur', faction: 'Cylon', hangar: 15, tier: 4,
     prefab: 'cylont4carrier', objKey: 114650019, loca: 'ship_surtur', paperdoll: 'ship_surtur_paperdoll_layouts',
-    role: 'Carrier', roleDep: 'Carrier', lvl: 24, tyl: 420000,
+    role: 'Carrier', roleDep: 'Carrier', lvl: 24, tyl: 420000, variants: [18],
     hp: 14000, pwr: 600, speed: 52, agility: 0.55, extent: 375 },
   /* The Basestar is the Pegasus's stated counterpart (the infobox says so on both pages) and the
    * two are deliberately matched in every other figure we ship, so it takes the same flight block.
    * Its own wiki page has no infobox numbers to check this against. */
-  { g: 5117, name: 'Basestar', faction: 'Cylon', hangar: 17, tier: 4,
+  { g: 5117, name: 'Basestar', faction: 'Cylon', hangar: 18, parentHangar: 15, tier: 4,
     prefab: 'basestar', loca: 'ship_commandtoken_basestar', paperdoll: 'ship_commandtoken_basestar_paperdoll_layouts',
     role: 'Mothership', roleDep: 'Mothership', lvl: 1, tyl: 25000, tokens: 20000, rentalOnly: true,
     hp: 15400, pwr: 660, speed: 52, agility: 0.55, extent: 863,
@@ -468,9 +468,31 @@ const NPC_HULLS = [50, 51, 52, 54, 55, 74, 75, 76, 78, 79].map(g => {
                  78: 'cylont1command', 79: 'cylont1command' }[g];
   // Toughness grade, NOT the card's Tier - see below.
   const grade = { 50: 1, 51: 2, 52: 3, 54: 2, 55: 3, 74: 1, 75: 2, 76: 3, 78: 2, 79: 3 }[g];
+  /* The live game's own NPC names. The client titles a ship from its GUI card -
+   * bgo.<key>.Name_<level> before bgo.<key>.Name (GUICard.cs:38-82) - so inheriting the player
+   * hull's key here made every bot render as the PLAYER ship it clones ("Viper Mk II"). These
+   * enemy_* families are the per-rank NPC name ladders the original shipped for exactly these
+   * hulls (dump: research/data/loca_values.json; e.g. enemy_colonial_viper Name_1..Name_13 =
+   * "Novice Viper".."Ace Viper"), and the level picks the rung. Strikes sit mid-ladder, riding
+   * the toughness grade, so a harder bot reads as a higher rank. All ten key+level pairs resolve
+   * in loca-keys.txt, and every family carries a bare .Description, which keeps the GUI
+   * validator's description warn quiet. */
+  const npcName = {
+    50: ['enemy_colonial_viper', 3],      // "Learned Viper"
+    51: ['enemy_colonial_viper', 4],      // "Competent Viper"
+    52: ['enemy_colonial_viper', 5],      // "Talented Viper"
+    54: ['enemy_colonial_raptor', 4],     // "Competent Raptor"
+    55: ['enemy_colonial_raptor', 5],     // "Talented Raptor"
+    74: ['enemy_cylon_raider', 3],        // "Improved Raider"
+    75: ['enemy_cylon_raider', 4],        // "Developed Raider"
+    76: ['enemy_cylon_raider', 5],        // "Intermediate Raider"
+    78: ['enemy_cylon_heavy_raider', 4],  // "Developed Heavy Raider"
+    79: ['enemy_cylon_heavy_raider', 5],  // "Intermediate Heavy Raider"
+  }[g];
   const src = HULLS.find(h => h.prefab === base);
   return Object.assign({}, src, {
     g, hangar: 12, starter: false, npcOnly: true,
+    loca: npcName[0], locaLevel: npcName[1],
     // Tier stays 1 no matter how hard the bot hits. Tier is a HULL-CLASS LOCK on what can be
     // equipped, and every shipped ShipConfigTemplate arms these guids with tier-1 weapons - a
     // tier-3 NPC hull would be asking for weapons that do not exist at that tier.
@@ -487,25 +509,65 @@ const NPC_HULLS = [50, 51, 52, 54, 55, 74, 75, 76, 78, 79].map(g => {
  * weapons now exist at every tier, and NpcBehaviourTemplates.createTemplateForTier scales the
  * brain by the ship card's tier. Stats ride along from the roster entry for the same prefab, so
  * an NPC Scythe flies like the player's Scythe.
- * The two capitals are the original event bosses: the Colonial C5-07 Poseidon and its "fearsome
- * cylon counterpart" the Kraken (10,290 HP, level 120, all cannons, per the wiki page). Ours sit
- * at 20,000 HP because they also field their carrier hull's missile pods - the wiki's Kraken had
- * no launchers. Their ShipConfigTemplates arm the launcher slots, which only carriers and the
- * stealth hulls actually have. */
+ *
+ * The two capitals are the original event bosses: the Colonial CS-07 Poseidon and its "fearsome
+ * cylon counterpart" the Kraken. Three per-boss overrides, each through a channel that survives
+ * the pipeline:
+ *   BOSS_STATS rides the realStats channel because a plain hp: override here is DEAD - the Stats
+ *     assign order puts HULLS_REAL last (shipCards below), hulls-real.js carries both carriers at
+ *     8,000 HP, and the 20,000 this table used to ask for silently shipped as 8,000. realStats is
+ *     applied AFTER that merge (the CAPITAL_FLIGHT precedent), so these are the emitted numbers.
+ *     50,000 HP is the Hestia figure, the wiki's model for a boss that expects a player squadron
+ *     (Twilight of the Gods: 50k HP, point defence, nuclear missiles, escorted); the wiki Kraken's
+ *     own 10,290 was sized against 2013 strike DPS. HullRecovery 100 is the disengage-reset
+ *     mechanic - NPCs regenerate out of combat via HullPointsTimer. Speed 12 anchors the patrol;
+ *     2000/100 power feeds the full 6031-6034 battery without a slot ever starving.
+ *   ownerLevel 120 is the wiki's boss level, and it is ALSO the ShipConfigTemplate lookup key:
+ *     setupWeaponConfig prefers config.level == ownerCard.getLevel() (SpaceObjectFactory.java:
+ *     654-670), so 120 turns the boss config from a fallback hit into an exact match. Every other
+ *     hull keeps Owner Level 1.
+ *   the GUI key column names the bosses "CS-07 Poseidon"/"Kraken" - no poseidon/kraken string
+ *     exists in the client outside these two winter-event NPC keys, and both are single-rung
+ *     ladders, so their GUI level is 1. Both verified in the locale bundle:
+ *     bgo.enemy_colonial_winter_event_aesir.Name_1 = "CS-07 Poseidon",
+ *     bgo.enemy_cylon_winter_event_fenrir.Name_1 = "Kraken".
+ * Their ShipConfigTemplates arm the launcher slots, which only carriers and the stealth hulls
+ * actually have (emit-npc-configs.js puts the capship launcher 6034 there).
+ *
+ * The GUI key + level columns name every row the way the strikes above are named: the client
+ * resolves bgo.<key>.Name_<level> from the GUI card (GUICard.cs:38-82), and the enemy_* families
+ * are the live game's own NPC rank ladders for these very hulls (dump:
+ * research/data/loca_values.json). Level places the hull on its ladder - escorts read as ranks
+ * 6-8, lines as 9-11 up to the family's top rung - so a line ship outranks an escort the way the
+ * original's spawns did. Every key+level pair resolves in loca-keys.txt, and each family carries
+ * a bare .Description, which satisfies the GUI validator's description check. */
+const BOSS_STATS = {
+  MaxHullPoints: 50000, MaxPowerPoints: 2000, ArmorValue: 60, CriticalDefense: 150,
+  Avoidance: 20, HullRecovery: 100, PowerRecovery: 100, Speed: 12,
+};
 const NPC_HEAVIES = [
-  // [guid, prefab, name override, hp override]
-  [60, 'humant2fighter'], [61, 'humant2command'], [62, 'humant2defender'],
-  [63, 'humant3fighter'], [64, 'humant3command'], [65, 'humant3defender'],
-  [84, 'cylont2fighter'], [85, 'cylont2command'], [86, 'cylont2defender'],
-  [87, 'cylont3fighter'], [88, 'cylont3command'], [89, 'cylont3defender'],
-  [90, 'humant4carrier', 'C5-07 Poseidon', 20000],
-  [91, 'cylont4carrier', 'Kraken', 20000],
-].map(([g, prefab, name, hp]) => {
+  // [guid, prefab, GUI key, GUI level, boss name override]
+  [60, 'humant2fighter',  'enemy_colonial_berserker',    6],  // "Experienced Scythe"
+  [61, 'humant2command',  'enemy_colonial_avenger',      7],  // "Seasoned Glaive"
+  [62, 'humant2defender', 'enemy_colonial_dominator',    8],  // "Accomplished Maul"
+  [63, 'humant3fighter',  'enemy_colonial_gunstar',      9],  // "Expert Aesir"
+  [64, 'humant3command',  'enemy_colonial_cruiser',     10],  // "Elite Vanir"
+  [65, 'humant3defender', 'enemy_colonial_dreadnought', 11],  // "Ace Jotunn"
+  [84, 'cylont2fighter',  'enemy_cylon_banshee',         6],  // "Advanced Banshee"
+  [85, 'cylont2command',  'enemy_cylon_spectre',         7],  // "Enhanced Spectre"
+  [86, 'cylont2defender', 'enemy_cylon_wrath',           8],  // "Evolved Wraith"
+  [87, 'cylont3fighter',  'enemy_cylon_nova',            9],  // "Elevated Fenrir"
+  [88, 'cylont3command',  'enemy_cylon_phantom',        10],  // "Exalted Hel"
+  [89, 'cylont3defender', 'enemy_cylon_sentinel',       11],  // "Apotheon Jormung"
+  [90, 'humant4carrier',  'enemy_colonial_winter_event_aesir', 1, 'CS-07 Poseidon'],
+  [91, 'cylont4carrier',  'enemy_cylon_winter_event_fenrir',   1, 'Kraken'],
+].map(([g, prefab, locaKey, locaLevel, bossName]) => {
   const src = HULLS.find(h => h.prefab === prefab);
   return Object.assign({}, src, {
     g, hangar: 12, starter: false, npcOnly: true, lvl: 1,
-    name: name || src.name,
-  }, hp ? { hp } : {});
+    name: bossName || src.name,
+    loca: locaKey, locaLevel,
+  }, bossName ? { realStats: BOSS_STATS, ownerLevel: 120 } : {});
 });
 
 // Slot ids come straight from the shipped configs: 0,1 always; 2 = missile launcher;
@@ -1401,11 +1463,18 @@ function shipCards(hull) {
       ShipRoles: hull.roleDep === 'Carrier' ? ['Carrier'] : [], ShipRoleDeprecated: hull.roleDep,
       PaperdollUiLayoutfile: hull.paperdoll,
       Slots: slotCards(hull.prefab), CubitOnlyRepair: false,
-      // MUST stay empty: HangarWindow.GetShipIcon dereferences every cell of the 3x5 grid
-      // unguarded, and with a tier-1-only roster 11 of 15 cells are null. Both call sites are
-      // reachable only through ItemPressed -> AnyVariantsOwned(icon.Card), which is false while
-      // this is empty.
-      VariantHangarIDs: [], ParentHangarID: -1,
+      /* The VARIANT mechanism, and the only way a rented flagship is reachable in the UI.
+       * The hangar grid is a fixed 3x5 of (tier 1-3) x (roleDep 1-5) plus two hardcoded cells
+       * (HangarWindow.cs:96-110 substitutes HangarID 16 and 15), so a tier-4 Mothership has no
+       * cell of its own and can never be drawn as a top-level icon. A card carrying a
+       * ParentHangarID is instead MOVED OUT of ShipListCard.ShipCards into VariantShipCards
+       * (ShipListCard.MoveVariants) and rendered as a small button on its parent's icon - which
+       * also keeps it out of the ship shop's queue, where an unknown HangarID would index
+       * ships[-1]. Variant buttons and the variant picker are text-and-fixed-texture only, so a
+       * variant needs no GUI/InfoJournal/Ships/<Faction><HangarID> art of its own.
+       * Anything with neither stays empty: HangarWindow.GetShipIcon walks all 15 cells
+       * unguarded, and AnyVariantsOwned(icon.Card) is what gates the deref. */
+      VariantHangarIDs: hull.variants || [], ParentHangarID: hull.parentHangar ?? -1,
       /* FLIGHT STATS COME FROM THE DUMP WHERE WE HAVE THEM.
        * The flightStats() call below is a formula keyed on role and tier, so every tier-1 fighter
        * flew identically - and it was wrong in both directions at once. A Viper Mk II really tops
@@ -1451,9 +1520,11 @@ function shipCards(hull) {
       targetable: true, showBracketWhenInRange: true, forceShowOnMap: false,
     }),
 
-    // level drives the loca suffix: bgo.<key>.Name_<level> then bgo.<key>.Name
+    // level drives the loca suffix: bgo.<key>.Name_<level> then bgo.<key>.Name. Player hulls
+    // stay at 1 - their ship_* keys only ship the _1/_2 forms. NPC hulls carry locaLevel to pick
+    // the rung of their enemy_* rank ladder (see NPC_HULLS / NPC_HEAVIES).
     card(guid, 'GUI', {
-      key: hull.loca, level: 1,
+      key: hull.loca, level: hull.locaLevel || 1,
       guiAtlasTexturePath: 'GUI/Inventory/items_atlas', frameIndex: 0,
       // Without guiAvatarSlotTexturePath the target bracket falls back to the ATLAS and crams the
       // whole 400x946 sheet into a 40x36 box; GUISlotPartyMember.cs:173 reads this field directly
@@ -1480,7 +1551,10 @@ function shipCards(hull) {
       CanBeSold: false,
     }),
 
-    card(guid, 'Owner', { IsDockable: false, DockRange: 0.0, Level: 1 }),
+    // ownerLevel is the boss override (NPC_HEAVIES): the client renders OwnerCard.Level as the
+    // ship's level (Ship.cs:37) and setupWeaponConfig uses it as the ShipConfigTemplate lookup
+    // key, so the two bosses carry 120 and every other hull stays at 1.
+    card(guid, 'Owner', { IsDockable: false, DockRange: 0.0, Level: hull.ownerLevel || 1 }),
 
     card(guid, 'Movement', {
       minYawSpeed: 0.1, maxPitch: 360.0, maxRoll: 80.0,
@@ -1681,14 +1755,16 @@ const UNDOCK_DOOR = 115200940;
  *
  * Interior prefab: the client ships exactly four room prefabs (cic_human, cic_cylon, hangar_human,
  * hangar_cylon). An outpost is a docking station, so the hangar is the right interior.
- * No NPC: RoomLevel.SetupAreaNpcs does GameObject.Find("NPCs").transform.FindChild(name) against
- * the room prefab, and the hangar prefabs have no NPC children - a wrong name would just log
- * "npcObject is null" and skip, but an empty list is honest. */
+ *
+ * The npcs lists are read out of the decompressed scene bundles - see NPC_GUI for the method and
+ * the full cast. The outpost rooms are NOT NPC-less as this comment used to claim: both ship a
+ * character (Officer / Sharon) that we simply never listed, which is why an outpost dock left you
+ * alone in a room with nothing to click and no way to reach the flagship dialog away from home. */
 const ROOMS = [
-  { guid: 3608851,   prefab: 'cic_human',    loca: 'room_outpost_cic',    npc: 'Apollo' },
-  { guid: 259498852, prefab: 'cic_cylon',    loca: 'room_basestar_cic',   npc: 'Leoben' },
-  { guid: 151517344, prefab: 'hangar_human', loca: 'room_outpost_human',  npc: null },
-  { guid: 151517343, prefab: 'hangar_cylon', loca: 'room_outpost_cylon',  npc: null },
+  { guid: 3608851,   prefab: 'cic_human',    loca: 'room_outpost_cic',    npcs: ['Apollo', 'Adama', 'Tyrol', 'Starbuck'] },
+  { guid: 259498852, prefab: 'cic_cylon',    loca: 'room_basestar_cic',   npcs: ['Leoben', 'No1', 'No6', 'Sharon'] },
+  { guid: 151517344, prefab: 'hangar_human', loca: 'room_outpost_human',  npcs: ['Officer'] },
+  { guid: 151517343, prefab: 'hangar_cylon', loca: 'room_outpost_cylon',  npcs: ['Sharon'] },
 ];
 
 function roomCards() {
@@ -1696,11 +1772,11 @@ function roomCards() {
     card(r.guid, 'Room', {
       doors: [{ Door: 'door_undock', roomGUID: UNDOCK_DOOR }],
       // The ONLY entry point to MissionDistributor. RoomLevel.SetupAreaNpcs does
-      // GameObject.Find("NPCs").transform.FindChild(NPC), so this string must match a child
+      // GameObject.Find("NPCs").transform.FindChild(NPC), so each string must match a child
       // transform of the room prefab, not a loca key. A wrong name is NOT fatal - the client
       // logs "Could not create NPC: X because npcObject is null" and skips it - so that log
-      // line is the runtime check. RoomProtocol.java:42 also hardcodes Leoben/Apollo.
-      NPCs: r.npc ? [{ NPC: r.npc, NPCGUID: NPC_GUI[r.npc] }] : [],
+      // line is the runtime check. RoomProtocol's talk handler gates on the same names.
+      NPCs: r.npcs.map(n => ({ NPC: n, NPCGUID: NPC_GUI[n] })),
       music: '',                       // no music *prefabs* exist in the bundles; empty is safe
     }),
     card(r.guid, 'World', {
@@ -2940,7 +3016,18 @@ const CRUISERS = [
  *                                              bgo.stationary_{colonial,cylon}_platform_{...}
  *   planetoid1_1 .. planetoid3_3               no loca key exists for planetoids at all
  */
-const PLANETOIDS = [47343042, 47344578, 47344835, 47344836];
+/* The first four guids are upstream's (referenced by the shipped Tannhauser template, prefabs
+ * exactly as the original derivation cycled them - do not re-derive, 47344836 really is a second
+ * planetoid1_1). The six at 47345001+ are ours: the planetoid_rock bundle holds ten planetoid
+ * prefabs and only four were ever carded, so a generated sector could not vary its skyline. All
+ * ten names are verified against the client assetmap by the World-prefab rule in validate(). */
+const PLANETOIDS = [
+  [47343042, 'planetoid1_1'], [47344578, 'planetoid2_2'],
+  [47344835, 'planetoid3_3'], [47344836, 'planetoid1_1'],
+  [47345001, 'planetoid1_2'], [47345002, 'planetoid1_3'],
+  [47345003, 'planetoid2_1'], [47345004, 'planetoid2_3'],
+  [47345005, 'planetoid3_1'], [47345006, 'planetoid3_2'],
+];
 
 /* THE TWO OUTPOSTS - one card per faction, instanced across the galaxy.
  *
@@ -3110,9 +3197,9 @@ function sectorFurnitureCards() {
   const out = [];
 
   // Planetoids are scenery: not targetable, no stats, but the factory still demands both cards.
-  PLANETOIDS.forEach((guid, i) => {
+  PLANETOIDS.forEach(([guid, prefab], i) => {
     out.push(card(guid, 'World', {
-      prefabName: 'planetoid' + ((i % 3) + 1) + '_' + ((i % 3) + 1), lodCount: 1, radius: 400.0,
+      prefabName: prefab, lodCount: 1, radius: 400.0,
       spots: [], systemMapTexutres: '',
       // -1, not 0: WorldCard.FrameIndex defaults to -1 and GUISystemMap hides anything below
       // zero. A 0 here claims atlas frame 0 and draws the wrong icon on the system map.
@@ -3420,6 +3507,166 @@ const ASTEROIDS = [
   57969842, 57969843, 57969844,
 ];
 
+/* ================================================================ SCENERY EXPANSION
+ *
+ * The client ships 846 prefabs and upstream carded exactly 9 asteroids + 4 planetoids of them as
+ * scenery, which is why every sector is the same grey rock field. These tables card the rest of
+ * the usable dressing at fresh guids (collision-checked against the whole emitted catalogue by
+ * the duplicate-guid rule) for emit-sector-templates.js to place. Two shapes, and only two:
+ *
+ *   ASTEROID-TYPE (5797xxxx): World+Owner+GUI, targetable, byte-for-byte the nine originals'
+ *     card shape. The server gives every Asteroid a SphereCollider at template-radius x 0.9
+ *     (SpaceObjectFactory.java:109) and rolls its resource from the sector's asteroidDesc - a
+ *     rock that rolls nothing scans red, which is the game's own resourceless-rock convention
+ *     (most of sector 10's rocks are empty). The World radius here is COSMETIC: the wire radius
+ *     is the template's own (Asteroid.java:34-41), so 60/85/110 cycled just mirrors the originals.
+ *
+ *   DEBRIS-TYPE (61000xxx): World+Owner+GUI, targetable:false. ColliderTemplates are looked up
+ *     by prefab name and none exists for any of these, so debris is fly-through dressing with no
+ *     HP and no stats (DebrisPile sets HideStats). The wire scale comes from the template, not
+ *     the World radius; radius is kept plausible anyway - wreck/chunk pieces borrow their parent
+ *     hull's extent so anything that ever reads it (loot scatter, bounds) stays sane.
+ *
+ * Every prefab name below is verified against the client assetmap at build time (the World-prefab
+ * rule in validate() fails the build on a miss) - a name the client cannot load silently renders
+ * as the placeholder ship model (RootScript.cs:69-101), which on a "debris pile" would be a
+ * ghost fleet. */
+
+/* Asteroid-type scenery. GUI keys are level-aware loca stems, all verified in the bundle:
+ * the plain rocks reuse the originals' enemy_stationary_silver_asteroid1-3 rotation; the event
+ * rocks get their own family's real names (Golden / Silver / Spooky Green / Spooky Orange
+ * Asteroid) - upstream flew these as AsteroidBot NPCs, we ship them as plain rocks for boss-lair
+ * "vein" dressing. */
+const SCENERY_ASTEROIDS = (() => {
+  const out = [];
+  const add = (guid, prefab, key) => out.push({ guid, prefab, key });
+  // 57970001-11: the 11 members of the carded asteroid1-4_1-5 family upstream never used.
+  // Same bundle (asteroid_rock) the nine originals already load, so zero new download risk.
+  ['1_2', '1_3', '2_3', '2_4', '2_5', '3_1', '3_4', '3_5', '4_1', '4_2', '4_5']
+    .forEach((s, i) => add(57970001 + i, 'asteroid' + s, 'enemy_stationary_silver_asteroid' + (i % 3 + 1)));
+  // 57970021-35: colored deco asteroids (deco_asteroids_space bundle) - the palette variety the
+  // original field lacks. Color-major so a palette picker can slice one color as a contiguous run.
+  ['black', 'bluesteel', 'bright', 'dark', 'precious'].forEach((c, ci) =>
+    [1, 2, 3].forEach(n => add(57970021 + ci * 3 + n - 1, `decoasteroid_${c}_${n}`,
+      'enemy_stationary_silver_asteroid' + n)));
+  // 57970041-49: deco rocks (deco_rocks bundle) - cluster/lair dressing.
+  [1, 2, 3].forEach((n, ni) => ['a', 'b', 'c'].forEach((l, li) =>
+    add(57970041 + ni * 3 + li, `deco_rock_${n}_${l}`, 'enemy_stationary_silver_asteroid' + (li + 1))));
+  // 57970051-62: event rocks (asteroid_gold bundle).
+  [['gold', 'golden'], ['silver', 'silver'], ['spookygreen', 'green'], ['spookyorange', 'orange']]
+    .forEach(([p, k], pi) => [1, 2, 3].forEach(n =>
+      add(57970051 + pi * 3 + n - 1, `asteroid${p}_${n}`, `enemy_stationary_${k}_asteroid${n}`)));
+  return out;
+})();
+
+/* Debris-type scenery. The GUI key is load-bearing in a way no other type's is: DebrisPile.cs
+ * :10-25 renders the GUI card's Name UNLESS it resolves to a raw "%$bgo." string, in which case
+ * the client substitutes the localized "Debris Field". DEBRIS_FALLBACK_KEY exploits that on
+ * purpose: bgo.common.debris_field exists in the bundle only as a BARE key (no .Name form), so
+ * GUICard.Name misses, DebrisPile catches the miss, and the object reads "Debris Field" - the
+ * spelling keeps the intent greppable against the loca dump. The GUI-key validator carves out
+ * exactly this guid set for it; everything else still has to resolve.
+ * Keys that DO resolve and fit are used instead: the two akh wrecks ("Lost Watchdog"/"Lost
+ * Argus"), five scavenger-station parts ("ScavengerStation" - the un-carded parts borrow the
+ * generic ring_segment key so the whole structure reads as one station), the cargo-parcel key
+ * ("Container") for the loot-container props, and the two jump-beacon keys ("Colonial/Cylon Jump
+ * Beacon", split three prefabs per faction so the emitter can landmark either side's corridor). */
+const DEBRIS_FALLBACK_KEY = 'common.debris_field';
+const DEBRIS_SCENERY = (() => {
+  const out = [];
+  const add = (guid, prefab, radius, key) =>
+    out.push({ guid, prefab, radius, key: key || DEBRIS_FALLBACK_KEY });
+  const donorRadius = donor => {
+    const h = HULLS.find(x => x.prefab === donor);
+    if (!h) throw new Error('DEBRIS_SCENERY: no HULLS donor "' + donor + '" for a wreck radius');
+    return h.extent;
+  };
+  // 61000001-17: debris piles and rings (decor_debris_piles bundle + massive_debris_wall).
+  for (let i = 1; i <= 5; i++) add(61000000 + i, 'debrispile' + i, 100);
+  for (let i = 6; i <= 9; i++) add(61000000 + i, `debrispile${i}_nt`, 100);
+  for (let i = 1; i <= 5; i++) add(61000009 + i, 'debrispile_cylon' + i, 100);
+  add(61000015, 'debrisring', 100);
+  add(61000016, 'debrisring_1', 100);
+  add(61000017, 'massive_debris_wall', 300);
+  /* 61000021-52: one wreck per hull, in that hull's own bundle. 32, not the 30 the guid plan
+   * guessed: the scout wreck exists for BOTH factions (nobody flies the scout, but the wreck is
+   * scenery), so the run extends two guids into the unallocated 61000053-60 gap. Order is
+   * human-then-cylon, t1 {fighter,command,defender,merit,multi2,scout,stealth}, t2/t3
+   * {fighter,command,defender,merit}, t4carrier. The scout borrows the t1fighter's extent -
+   * there is no scout HULLS entry to donate one. */
+  const wreckHulls = [];
+  for (const f of ['human', 'cylon']) {
+    ['fighter', 'command', 'defender', 'merit', 'multi2', 'scout', 'stealth']
+      .forEach(t => wreckHulls.push(f + 't1' + t));
+    for (const tier of [2, 3])
+      ['fighter', 'command', 'defender', 'merit'].forEach(t => wreckHulls.push(f + 't' + tier + t));
+    wreckHulls.push(f + 't4carrier');
+  }
+  wreckHulls.forEach((hull, i) => {
+    const donor = hull.endsWith('t1scout') ? hull.replace('scout', 'fighter') : hull;
+    const key = hull === 'humant1fighter' ? 'decoration_sm_akh_co_t1fighter_wreck'
+              : hull === 'cylont1fighter' ? 'decoration_sm_akh_cy_t1fighter_wreck' : undefined;
+    add(61000021 + i, hull + '_wreck', donorRadius(donor), key);
+  });
+  /* 61000061-87: broken-capital chunk sets, the graveyard set pieces. 27, not the 25 the plan
+   * counted - its own enumeration lists 27 - so the run extends two guids into the unallocated
+   * 61000088-90 gap. Radius donor is the capital the chunks came off, per set. */
+  [
+    ['helwreck01', 'cylont3command'],
+    ['helwreck02_chunk1', 'cylont3command'], ['helwreck02_chunk2', 'cylont3command'],
+    ['helwreck02_chunk3', 'cylont3command'], ['helwreck02_chunk4', 'cylont3command'],
+    ['helwreck02_chunk5', 'cylont3command'], ['helwreck02_chunk6', 'cylont3command'],
+    ['jormungwreck01', 'cylont3defender'],
+    ['humandefendert3_jotuun_debris_b', 'humant3defender'],
+    ['humandefendert3_jotuun_debris_engine', 'humant3defender'],
+    ['humandefendert3_jotuun_debris_front', 'humant3defender'],
+    ['humandefendert3_jotuun_debris_middle_b', 'humant3defender'],
+    ['humandefendert3_jotuun_debris_middle_m', 'humant3defender'],
+    ['humandefendert3_jotuun_debris_middle_t', 'humant3defender'],
+    ['humant2defender_destroyed_a', 'humant2defender'],
+    ['humant2defender_destroyed_a_antenna', 'humant2defender'],
+    ['humant2defender_destroyed_a_arm', 'humant2defender'],
+    ['humant2defender_destroyed_a_engine', 'humant2defender'],
+    ['humant2defender_destroyed_b', 'humant2defender'],
+    ['cylont2command_destroyed_a', 'cylont2command'],
+    ['cylont2command_destroyed_a_fin', 'cylont2command'],
+    ['cylont2command_destroyed_a_wing', 'cylont2command'],
+    ['humanfightert2_scythe_debris_back', 'humant2fighter'],
+    ['humanfightert2_scythe_debris_back_fin', 'humant2fighter'],
+    ['humanfightert2_scythe_debris_front', 'humant2fighter'],
+    ['humant2fighter_scythe_debris_b', 'humant2fighter'],
+    ['raider_wreck1', 'cylont1fighter'],
+  ].forEach(([p, donor], i) => add(61000061 + i, p, donorRadius(donor)));
+  /* 61000091-105: scavenger station parts. The assetmap holds 15 (the plan guessed 16); five
+   * carry their own loca key, the rest borrow ring_segment's so the assembled structure is one
+   * "ScavengerStation" on every nameplate. */
+  const PART_LOCA = new Set(['inner_ring', 'ring_segment', 'ring_segment_left',
+                             'ring_segment_right', 'shaft_stack_medium_2']);
+  ['deco', 'inner_ring', 'reactor', 'ring_arm', 'ring_segment', 'ring_segment_joint',
+   'ring_segment_left', 'ring_segment_right', 'shaft_sphere_middle', 'shaft_sphere_top',
+   'shaft_stack_long', 'shaft_stack_medium', 'shaft_stack_medium_2', 'shaft_stack_small',
+   'shaft_stack_small_2',
+  ].forEach((p, i) => add(61000091 + i, 'decoration_scavenger_station_' + p, 300,
+    'decoration_scavenger_station_' + (PART_LOCA.has(p) ? p : 'ring_segment')));
+  // 61000111-115: loot-container props (decor_loot bundle) - "Container" on the nameplate.
+  for (let i = 1; i <= 5; i++) add(61000110 + i, 'item_container' + i, 30, 'sector_cargo_parcel_event');
+  // 61000121-126: jump-beacon props. Cosmetic landmarks only - the real JumpBeacon type has no
+  // server factory arm. Three named Colonial, three Cylon; the emitter picks by corridor side.
+  [['ftl_jump_beacon_blue', 'jump_beacon_human'], ['ftl_jump_beacon_green', 'jump_beacon_cylon'],
+   ['ftl_jump_beacon_red', 'jump_beacon_cylon'], ['jump_beacon_standard', 'jump_beacon_human'],
+   ['jump_beacon_improved', 'jump_beacon_human'], ['jump_beacon_advanced', 'jump_beacon_cylon'],
+  ].forEach(([p, k], i) => add(61000121 + i, p, 30, k));
+  // 61000131-134: cracked-planet dressing. Radii are eyeballed off the model families - nothing
+  // reads them for Debris, but a future Asteroid re-type would inherit something sane.
+  add(61000131, 'planet_debrisring', 300);
+  add(61000132, 'planet_rockbig', 150);
+  add(61000133, 'planet_rocksmall', 60);
+  add(61000134, 'planet_rocks_and_water', 300);
+  return out;
+})();
+// The GUI-key validator's carve-out set: only these guids may carry the deliberate-miss key.
+const DEBRIS_SCENERY_GUIDS = new Set(DEBRIS_SCENERY.map(d => d.guid));
+
 function sectorObjectCards() {
   const out = [];
 
@@ -3483,6 +3730,42 @@ function sectorObjectCards() {
     }));
   });
 
+  // The expansion rocks: same three cards, same 60/85/110 rotation, same avatar - see the
+  // SCENERY EXPANSION comment above for why the shape is copied rather than varied.
+  SCENERY_ASTEROIDS.forEach((a, i) => {
+    out.push(card(a.guid, 'World', {
+      prefabName: a.prefab, lodCount: 1, radius: 60.0 + (i % 3) * 25.0,
+      spots: [], systemMapTexutres: '',
+      frameIndex: 0, secondaryFrameIndex: 0,
+      targetable: true, showBracketWhenInRange: true, forceShowOnMap: false,
+    }));
+    out.push(card(a.guid, 'Owner', { IsDockable: false, DockRange: 0.0, Level: 1 }));
+    out.push(card(a.guid, 'GUI', {
+      key: a.key, level: 1,
+      guiAtlasTexturePath: 'GUI/Inventory/items_atlas', frameIndex: 0,
+      guiIcon: '', guiAvatarSlotTexturePath: 'GUI/Slots/avatar_asteroid_temp', guiTexturePath: '', args: [],
+    }));
+  });
+
+  /* Debris scenery. targetable:false - no bracket, no red box, no DRADIS entry, and the
+   * portrait/frame validator deliberately skips untargetable World cards, so the empty avatar is
+   * fine. frameIndex -1 like the planetoids: the system map hides anything below zero, and 0
+   * would claim atlas frame 0 and draw the wrong icon. */
+  DEBRIS_SCENERY.forEach(d => {
+    out.push(card(d.guid, 'World', {
+      prefabName: d.prefab, lodCount: 1, radius: d.radius,
+      spots: [], systemMapTexutres: '',
+      frameIndex: -1, secondaryFrameIndex: -1,
+      targetable: false, showBracketWhenInRange: false, forceShowOnMap: false,
+    }));
+    out.push(card(d.guid, 'Owner', { IsDockable: false, DockRange: 0.0, Level: 1 }));
+    out.push(card(d.guid, 'GUI', {
+      key: d.key, level: 1,
+      guiAtlasTexturePath: 'GUI/Inventory/items_atlas', frameIndex: 0,
+      guiIcon: '', guiAvatarSlotTexturePath: '', guiTexturePath: '', args: [],
+    }));
+  });
+
   return out;
 }
 
@@ -3505,7 +3788,14 @@ function bootstrapCards() {
     const has = id => mine.some(h => h.hangar === id);
     const order = [1, 4, ...(has(16) ? [16] : []), 7, 11, ...(has(17) ? [17] : []),
                    2, 5, 8, 13, 3, 6, 9, 14, 15];
-    return mine.sort((a, b) => order.indexOf(a.hangar) - order.indexOf(b.hangar)).map(h => h.g);
+    const listed = mine.sort((a, b) => order.indexOf(a.hangar) - order.indexOf(b.hangar)).map(h => h.g);
+    /* The rented flagships ride along at the END, after the queue-ordered hulls. They must be in
+     * the list at all - a card the ShipList never names is a card the hangar can never show, and
+     * that is exactly why a paid-for Pegasus was invisible - but they carry a ParentHangarID, so
+     * ShipListCard.MoveVariants lifts them out of ShipCards into VariantShipCards before either
+     * the hangar grid or the shop queue iterates it. Appending rather than splicing keeps
+     * shipOrder aligned for every hull that IS queue-drawn. */
+    return listed.concat(HULLS.filter(h => h.faction === f && h.rentalOnly).map(h => h.g));
   };
   const colonial = listFor('Colonial');
   const cylon = listFor('Cylon');
@@ -3860,7 +4150,40 @@ function skillCards() {
   return out;
 }
 
-const NPC_GUI = { Apollo: 575838400, Leoben: 575838401 };
+/* Room NPCs, keyed by the GameObject name the room prefab actually uses.
+ *
+ * The names are NOT guesses: each room scene carries a `camerabox_<name>` object per interactive
+ * character (DialogCharacterInfo.FindCameraBox does the lookup by the same string RoomLevel used
+ * to find the NPC), so the set of cameraboxes in a bundle IS the room's cast list. Read out of
+ * the decompressed bundles:
+ *   scene_human_cic     -> Apollo, Adama, Tyrol, Starbuck   (Apollo and Adama also have spotlights)
+ *   scene_cylon_cic     -> Leoben, No1, No6, Sharon
+ *   scene_human_outpost -> Officer
+ *   scene_cylon_outpost -> Sharon
+ * We shipped only Apollo and Leoben, so every other figure in those rooms was scenery: visible,
+ * lit, and completely unclickable. In the Colonial CIC that meant clicking Admiral Adama - the
+ * obvious "admiral" in the room - did nothing at all, and the outposts had nobody to talk to,
+ * which is what made the flagship rental unreachable anywhere but the home CIC.
+ *
+ * A name with no matching child is not fatal: RoomLevel logs "Could not create NPC" and skips.
+ * But every NPC listed here MUST have a GUI card at its guid - NPCArea.Update dereferences
+ * npc.NPCGUICard on hover with no null guard. */
+const NPC_GUI = {
+  Apollo:   575838400,   // npc_apollo       Apollo
+  Leoben:   575838401,   // npc_no2          Number Two 'Leoben'
+  Adama:    575838402,   // npc_adama        Admiral Adama 'The Old Man'
+  Tyrol:    575838403,   // npc_tyrol        SCPO Tyrol 'The Chief'
+  Starbuck: 575838404,   // npc_starbuck     Starbuck
+  No1:      575838405,   // npc_no1          Number One 'Cavil'
+  No6:      575838406,   // npc_no6          Number Six 'Caprica'
+  Sharon:   575838407,   // npc_no8          Number Eight 'Sharon'
+  Officer:  575838408,   // npc_humanoutpost Outpost Quartermaster
+};
+const NPC_LOCA = {
+  Apollo: 'npc_apollo', Leoben: 'npc_no2', Adama: 'npc_adama', Tyrol: 'npc_tyrol',
+  Starbuck: 'npc_starbuck', No1: 'npc_no1', No6: 'npc_no6', Sharon: 'npc_no8',
+  Officer: 'npc_humanoutpost',
+};
 
 const MISSIONS = [
   { id: 2001, guid: 575838305, rewardGuid: 575839305, faction: 'Colonial',
@@ -3943,8 +4266,9 @@ function missionCards() {
     }));
     out.push(card(m.rewardGuid, 'GUI', missionGui(m.key)));
   }
-  out.push(card(NPC_GUI.Apollo, 'GUI', missionGui('npc_apollo')));
-  out.push(card(NPC_GUI.Leoben, 'GUI', missionGui('npc_no2')));
+  // One GUI card per room NPC: NPCArea.Update reads Name and Description off it for the hover
+  // tooltip, with no null guard, so a listed NPC without one crashes the room on mouseover.
+  for (const [npc, guid] of Object.entries(NPC_GUI)) out.push(card(guid, 'GUI', missionGui(NPC_LOCA[npc])));
   return out;
 }
 
@@ -4444,6 +4768,14 @@ function validate(cards) {
           Asteroid:       ['World', 'Owner', 'GUI'],
           Cruiser:        ['World', 'Owner', 'GUI'],
           MiningShip:     ['World', 'Owner', 'GUI'],
+          /* Debris and Planet do NOT go through SpawnController - buildSectorSpaceObjects spawns
+           * them directly at sector creation (SectorFactory.java:477-488), and createDebrisPile /
+           * createPlanet still fetch World+Owner and throw on a miss (SpaceObjectFactory.java:205,
+           * :285-289) - at BOOT, inside the SectorRegistry constructor, so a missing card here is
+           * a server that never comes up rather than a truncated tick. GUI is the same client
+           * rule as everything else: no GUI card, no construction, invisible object. */
+          Debris:         ['World', 'Owner', 'GUI'],
+          Planet:         ['World', 'Owner', 'GUI'],
         };
         const BASE_OWNER = { 0: 'Colonial', 49: 'Colonial', 6: 'Cylon', 50: 'Cylon' };
         const outpostSpawnIsLive = (sid, faction) => {
@@ -4459,7 +4791,7 @@ function validate(cards) {
           const seenPair = new Set();
           for (const o of (t.spaceObjectTemplates || [])) {
             const need = NEED[o.spaceEntityType];
-            if (!need) continue;                      // Debris and friends are skipped by the spawner
+            if (!need) continue;                      // anything else has no NEED row yet
             const soft = o.spaceEntityType === 'Outpost' && !outpostSpawnIsLive(sid, String(o.faction));
             for (const v of need) {
               const kk = `${o.objectGUID}|${v}`;
@@ -4865,14 +5197,53 @@ function validate(cards) {
     if (!LOCA_KEYS) errs.push('could not read loca-keys.txt - cannot verify GUI keys');
     else {
       cards.filter(c => c.cardView2 === 'GUI' && c.key).forEach(c => {
+        /* The debris scenery guids are the ONE sanctioned exception, and only with the one
+         * sanctioned key. DebrisPile.cs:19-22 substitutes the localized "Debris Field" whenever
+         * GUICard.Name resolves to a raw "%$bgo." string, and DEBRIS_FALLBACK_KEY misses ON
+         * PURPOSE to trigger exactly that (bgo.common.debris_field exists only as a bare key, no
+         * .Name form). Scoped by guid so an unresolvable key anywhere else - including a debris
+         * entry that MEANT to use a real key and typoed it - still fails the build; these guids
+         * are only ever placed as SpaceEntityType.Debris, the one type with the fallback. The
+         * Description miss is equally deliberate there: DebrisPile hides the stats panel, so the
+         * tooltip widgets that NRE on a null Description never run for it. */
+        const debrisFallback = DEBRIS_SCENERY_GUIDS.has(c.cardGUID) && c.key === DEBRIS_FALLBACK_KEY;
         // Both lookups are level-aware (GUICard.cs:38-82): Name tries NameCylon, then
         // Name_<Level>, then Name; Description tries Description_<Level>, then Description. Any
         // one of those forms satisfies it - the ship keys only ship the _1/_2 variants.
         const anyOf = (...forms) => forms.some(f => LOCA_KEYS.has(`bgo.${c.key}.${f}`));
-        if (!anyOf('name', `name_${c.level}`, 'namecylon'))
+        if (!debrisFallback && !anyOf('name', `name_${c.level}`, 'namecylon'))
           errs.push(`GUI ${c.cardGUID}: bgo.${c.key}.Name is not in the client bundle - the raw %$bgo...% prints on screen`);
-        if (!anyOf('description', `description_${c.level}`))
+        if (!debrisFallback && !DEBRIS_SCENERY_GUIDS.has(c.cardGUID) && !anyOf('description', `description_${c.level}`))
           console.warn(`GUI ${c.cardGUID}: bgo.${c.key}.Description is not in the client bundle - GUICard.Description yields null and NREs the widgets that .Replace() on it`);
+      });
+    }
+
+    /* ---- EVERY World PREFAB MUST EXIST IN THE CLIENT ASSETMAP.
+     * RootScript.Construct requests PrefabName + ".prefab" (then "_lowres.prefab") from the
+     * bundle catalogue; a name no bundle carries falls through BOTH lookups to the placeholder
+     * ship model (RootScript.cs:69-101) with nothing but a client-side log line. On a hull that
+     * is at least obvious; on scenery it is a fleet of ghost placeholder ships parked in a
+     * "debris field". Historically every prefab here was verified by hand against
+     * assetmap.json - this rule is that verification, kept honest for the ~150 scenery prefabs
+     * the expansion tables add. Checked case-insensitively: bundle asset names are lowercase. */
+    {
+      const amPath = path.resolve(__dirname, '../../BSGOCore/client/live/assetbundles/assetmap.json');
+      let amPrefabs = null;
+      try {
+        amPrefabs = new Set(JSON.parse(fs.readFileSync(amPath, 'utf8'))
+          .flatMap(b => b.assets || [])
+          .filter(a => a.endsWith('.prefab'))
+          .map(a => a.slice(0, -'.prefab'.length).toLowerCase()));
+      } catch { /* reported below - a missing assetmap must not silently skip the rule */ }
+      if (!amPrefabs || !amPrefabs.size)
+        errs.push(`could not read the client assetmap at ${amPath} - cannot verify World prefab names, refusing to emit blind`);
+      else cards.filter(c => c.cardView2 === 'World' && c.prefabName).forEach(c => {
+        const p = String(c.prefabName).toLowerCase();
+        // A lowres-only prefab is loadable: the hi-res miss falls back to _lowres before the
+        // placeholder does. Live case: decoration_scavenger_station_ring_segment ships ONLY as
+        // its _lowres variant, and the client renders that.
+        if (!amPrefabs.has(p) && !amPrefabs.has(p + '_lowres'))
+          errs.push(`World ${c.cardGUID}: prefab "${c.prefabName}" is in no client asset bundle - RootScript falls through hi-res and lowres to the placeholder ship model, silently`);
       });
     }
 
