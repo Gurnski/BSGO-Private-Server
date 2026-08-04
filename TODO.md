@@ -40,6 +40,26 @@ one launcher pair. The flagships now mount fewer tubes than the twelve-bay Pegas
 on the FLAGSHIP stat block instead — that trade moves to Balance below. **Check:** every
 Galactica bay renders a turret and fires from it.
 
+### Station missiles at warhead-class HP — from the first flight's reports
+
+Live play found the outpost round at 15 HP (the dump's value, from a game where missiles could
+not be shot) and the light-platform interceptor at 30, while every capital launcher fires the
+same ordnance class at 200. Both are 200 now: the outpost round through gen-systems-real's
+station-override floor (self-checked, plus a G14 validator row), the interceptor in its stat
+block. The outpost round still arrives from 4,000 m - that is its design envelope, set so a
+sniper can never sit outside the station's reach - but at 200 HP its 50-second crawl is a fair
+interception target instead of a free kill. **Check:** select an incoming outpost missile and
+read 200 HP.
+
+### Missile-shooting is a strike and escort privilege now
+
+Guns could aim at warheads from every hull, battlestars included. The Regulation gun policy now
+class-gates Missile(8) by the owning system's tier: t1/t2 gun groups keep it, the line and
+capital cannon groups (including the capship battery) lose it, and flak/point defence keep it
+everywhere - interception on the big hulls belongs to their screens. The dump's own ability
+groups split cleanly along this line, so no group had to be fought. **Check:** in the Pegasus,
+guns refuse a selected missile; in a Viper they still track one; capital flak still sweeps them.
+
 ### Rental clocks across relogs
 
 `CounterCardType` now carries `capital_rental_{pegasus,basestar,galactica,guardian}` at the four

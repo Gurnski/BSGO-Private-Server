@@ -121,3 +121,4 @@ loading screen → read the client's `output_log.txt`.** They almost never both 
 | A `patches/` file fails to apply to pristine upstream | Wrong baseline (`git checkout 23bad98a`) or missing `--ignore-whitespace` — only relevant when reviewing, the fork already carries them |
 | Server does not boot, exception does not name a sector | A star in `galaxy.js` has no sector template on disk — run `emit-sector-templates.js`; validator V2a in `cards.js` catches this first and lists every missing id |
 | Client build fails under `mvnw` | `JAVA_HOME` points at the wrong Java — it must be a JDK 21 |
+| Every label shows its raw key (`BGO.HUB.MENU.SHIP_HANGAR`), client log says `Requested unknown asset 'locale_0.xml'` | The `+language` launcher argument matched no locale bundle (a typo like `e` for `en`) — the client loads an empty string table with no error. `runclient.bat` validates the code and falls back to `en` |

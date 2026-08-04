@@ -2108,12 +2108,22 @@ const REGULATION_POLICY = [
   { types: ['FireMissle', 'FireTorpedo', 'FireHeavyMissile', 'FireLightMissile'],
     relations: [16], targets: [2] },
   /* Guns of every description. Shooting rocks is how mining works, so these keep Neutral+Asteroid.
-   * Missile(8) is what lets a strike gun down an incoming warhead: the client's TargetTypeCheck
+   * Missile(8) is what lets a gun down an incoming warhead: the client's TargetTypeCheck
    * consults exactly this mask per ability group, and without the flag a selected missile is
    * nulled out as an ability target the moment the weapon validates (ShipAbstractAbility.cs:78-81).
-   * The server accepts the cast either way - this mask is what the CLIENT enforces. */
+   * The server accepts the cast either way - this mask is what the CLIENT enforces.
+   *
+   * missileTiers CLASS-GATES the flag: only gun abilities on t1/t2 systems (strike and escort
+   * hulls) contribute Missile(8) to their group. Downing a torpedo with guns is the dogfighter's
+   * job; the line ships and capitals carry flak and point-defence bays for exactly that, and a
+   * main battery that can snipe warheads makes those bays pointless. The dump's own group ids
+   * split cleanly along this line - 63996350/12398942/971742/22860668 are the t1-t2 gun groups,
+   * 3162894 and hand group 1 (GROUP_CANNON, the capship battery) are t3-t4 - so the gate lands on
+   * whole groups rather than fighting mixed ones. The one mixed group, 41011982 (t1 flechette +
+   * t4 shrapnel flak), keeps Missile(8) through both of its rows: the flechette by tier, the
+   * shrapnel because Flak's row carries it unconditionally. */
   { types: ['FireCannon', 'FireMachineGun', 'FireShotgun', 'FireKillCannon'],
-    relations: [4, 16], targets: [1, 2, 8] },
+    relations: [4, 16], targets: [1, 2], missileTiers: [1, 2] },
   // Mining lasers keep rocks-and-ships only; a mining beam has no business aiming at a warhead.
   { types: ['FireMining'],
     relations: [4, 16], targets: [1, 2] },
@@ -2144,22 +2154,33 @@ const REGULATION_DEFAULT = { relations: [4, 16], targets: [1, 2] };
 const REGULATION_BASE_GROUPS = [0, 1, 2, 3];
 
 function applyRegulationTargeting(cards) {
-  const byGroup = new Map(REGULATION_BASE_GROUPS.map(g => [String(g), new Set()]));
+  /* The system tier is the hull class (t1 strike .. t4 capital), and missileTiers reads it per
+   * ability. An ability referenced by no ShipSystem card has no tier and never gates IN - the
+   * safe direction, since the flag it would gain is the permissive one. */
+  const abilityTier = new Map();
+  cards.filter(c => c.cardView2 === 'ShipSystem').forEach(s => {
+    (s.shipAbilityCards || []).forEach(g => {
+      const prev = abilityTier.get(g);
+      if (prev === undefined || s.Tier < prev) abilityTier.set(g, s.Tier);
+    });
+  });
+  const byGroup = new Map(REGULATION_BASE_GROUPS.map(g => [String(g), []]));
   cards.filter(c => c.cardView2 === 'ShipAbility').forEach(a => {
     const k = String(a.AbilityGroupId);
-    if (!byGroup.has(k)) byGroup.set(k, new Set());
-    byGroup.get(k).add(a.ActionType);
+    if (!byGroup.has(k)) byGroup.set(k, []);
+    byGroup.get(k).push({ action: a.ActionType, tier: abilityTier.get(a.cardGUID) });
   });
   const relations = {}, targets = {};
-  for (const [g, actions] of byGroup) {
+  for (const [g, entries] of byGroup) {
     const rel = new Set(), tgt = new Set();
     let matched = false;
-    for (const a of actions) {
-      const p = REGULATION_POLICY.find(x => x.types.includes(a));
+    for (const { action, tier } of entries) {
+      const p = REGULATION_POLICY.find(x => x.types.includes(action));
       if (!p) continue;
       matched = true;
       p.relations.forEach(v => rel.add(v));
       p.targets.forEach(v => tgt.add(v));
+      if (p.missileTiers && p.missileTiers.includes(tier)) tgt.add(8);
     }
     // An unclassified action type, or a base group with no abilities at all, takes the default.
     if (!matched) { REGULATION_DEFAULT.relations.forEach(v => rel.add(v)); REGULATION_DEFAULT.targets.forEach(v => tgt.add(v)); }
@@ -2823,13 +2844,17 @@ function weaponCards() {
     // not the dump's 300). LifeTime 30, NOT the naive 3500/150 ~= 23.3 s: the 15 m/s^2 ramp to
     // 150 m/s costs 150^2/(2*15) = 750 m, so a full 3,500 m shot needs ~28.3 s - the same physics
     // as the B override above. 30 covers it with margin.
+    // MaxHullPoints 200, not the 30 this shipped with: every heavy round on the board carries 200
+    // (the capital launcher families, and the outpost round via the gen-systems-real B override),
+    // and a 600-damage missile that dies to one flak puff is not an interception mechanic. Same
+    // reasoning as that override; see its comment.
     { sys: 6042, ab: 71002042, key: 'item_slot_strike_stealth_weapon_system_interceptor_missile',
       restrict: SENTRY_HULLS, frame: 177,
       action: 'FireMissle', affect: 'MultiWeaponTarget', group: GROUP_MISSILE,
       sort: 'missile', tyl: 20000, dur: 17500, views: STATION_VIEWS_MSL,
       st: { Angle: 180, ArmorPiercing: 15, Cooldown: 45, CriticalOffense: 100,
             DamageLow: 600, DamageHigh: 600, MinRange: 200, MaxRange: 3500, PowerPointCost: 15,
-            Speed: 150, Acceleration: 15, LifeTime: 30, MaxHullPoints: 30, Avoidance: 650,
+            Speed: 150, Acceleration: 15, LifeTime: 30, MaxHullPoints: 200, Avoidance: 650,
             InertiaCompensation: 100,
             YawAcceleration: 30, YawMaxSpeed: 30, PitchAcceleration: 30, PitchMaxSpeed: 30,
             RollAcceleration: 30, RollMaxSpeed: 30 } },
@@ -6994,6 +7019,7 @@ function validate(cards) {
         [3400376042, 'Angle', 360, 'outpost point defence: a last-ditch bubble with a 90 deg cone'],
         [1849929854, 'MaxRange', 4000, 'outpost missile: station aggro is 3500/4000, so a 2000 m round can never answer a sniper'],
         [1849929854, 'LifeTime', 55, 'outpost missile: 50 s dies ~213 m short of 4 km once the 15 m/s^2 ramp is paid'],
+        [1849929854, 'MaxHullPoints', 200, 'outpost missile: the dump\'s 15 HP predates shootable missiles - the capital long-range launcher fires the same 4 km class at 200, and a 50 s round should survive more than one flak puff'],
       ];
       STATION_OVERRIDES.forEach(([g, k, want, why]) => {
         const a = cards.find(c => c.cardGUID === g && c.cardView2 === 'ShipAbility');

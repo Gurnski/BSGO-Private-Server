@@ -115,12 +115,19 @@ const PROJECTILE_STATS = ['YawAcceleration', 'YawMaxSpeed', 'PitchAcceleration',
  *     silent - the original field-report symptom. C is a point-defence bubble, which is the one
  *     thing that should never have had a cone at all. The Pegasus wiki arcs (180 cannon / 360 PD)
  *     are the precedent.
- *   B (3756543070, large long range launcher) MaxRange 2000 -> 4000, LifeTime 50 -> 55
+ *   B (3756543070, large long range launcher) MaxRange 2000 -> 4000, LifeTime 50 -> 55,
+ *     MaxHullPoints 15 -> 200
  *     Station aggro is already 3500/4000 (NpcBehaviourTemplates.java:42-45), so a sniper sitting
  *     at 2.1 km could never be answered. The dump sized the round for 4 km (50 s x 80 m/s) but
  *     ignored the ramp: spawning at rest and accelerating at 15 m/s^2 costs 80^2/(2*15) ~= 213 m,
  *     so a 50 s round dies ~3,787 m out. 55 s covers a full 4,000 m shot with margin.
  *     B's Angle is deliberately NOT changed - it is a launcher, not a battery.
+ *     MaxHullPoints is the warhead's own HP now that missiles are shootable. The dump's 15 dates
+ *     from a game where nothing could target a missile; the capital long-range launcher family
+ *     (item_slot_capital_ability_launcher_long_range, 4020047009) fires the same 4 km ordnance
+ *     class at 200, and a 50-second flight is exactly the round that SHOULD be interceptable on
+ *     honest terms - 15 made it die to a single flak puff, and inconsistently with every other
+ *     heavy round on the board.
  *   D (4001980506) and E (2936089294) are already dump-verbatim and get nothing.
  *
  * Each override is a FLOOR, not an assignment, and that distinction is load-bearing. Angle is
@@ -136,7 +143,7 @@ const PROJECTILE_STATS = ['YawAcceleration', 'YawMaxSpeed', 'PitchAcceleration',
  */
 const STATION_OVERRIDES = {
   1957961850: { Angle: 180 },
-  3756543070: { MaxRange: 4000, LifeTime: 55 },
+  3756543070: { MaxRange: 4000, LifeTime: 55, MaxHullPoints: 200 },
   1277437130: { Angle: 360 },
 };
 
