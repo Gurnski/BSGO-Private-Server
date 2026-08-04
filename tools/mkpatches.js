@@ -123,6 +123,12 @@ const GROUPS = [
    * side lives in DialogProtocol, which 0016 already owns. */
   ['0023-water-exchange', [
     'src/main/java/io/github/luigeneric/core/protocols/player/PlayerProtocolWriteOnly.java']],
+  /* The sector-entry ghost state machine could dead-end: one missed CompleteJump left a player
+   * invisible under a stuck "perform any action" overlay with no path back. The GameProtocol
+   * half of the fix (the flag set before the join-queue race) rides in 0006, which owns that
+   * file. */
+  ['0024-sector-entry-visibility', [
+    'src/main/java/io/github/luigeneric/core/spaceentities/bindings/PlayerVisibility.java']],
 ];
 
 // A brand-new source file in the baseline working tree is invisible to `git diff` until it

@@ -486,12 +486,20 @@ public class GameProtocol extends BgoProtocol implements StatsProtocolSubscriber
             }
             case CompleteJump ->
             {
+                /* The flag is set BEFORE the presence check now. The client sends CompleteJump
+                 * once its own player ship has loaded, but the server-side ship comes out of the
+                 * SectorJoinQueue on a sector tick - lose that race and the old early return
+                 * dropped the one message that ever starts the ghost-jump state machine, leaving
+                 * the player invisible under a stuck "perform any action" overlay (see
+                 * PlayerVisibility, which now also self-heals). The flag is an AtomicBoolean the
+                 * VisibilityTimer only consumes once a ship exists, so setting it early is safe;
+                 * the warn stays because the race is worth counting. */
+                this.completeJumpFlag.set(true);
 
                 final SectorPlayerShipFetchResult secPlayerShip = getSectorAndPlayerShip();
                 if (!secPlayerShip.bothPresent())
                 {
-                    log.warn("Cheat {} RequestCompleteJump but sector or ship not present", user().getUserLog());
-                    return;
+                    log.warn("CompleteJump before ship present (join-queue race) - flag kept for the VisibilityTimer {}", user().getUserLog());
                 }
 
                 /*
@@ -501,7 +509,6 @@ public class GameProtocol extends BgoProtocol implements StatsProtocolSubscriber
                 this.sector.getSectorSender().sendToAllClients(bw);
                 this.user().send(bw);
                  */
-                this.completeJumpFlag.set(true);
             }
             case SelectRespawnLocation ->
             {

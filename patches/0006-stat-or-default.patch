@@ -17,7 +17,7 @@ index 0c6d6bd..7857ea9 100644
          }
  
 diff --git a/src/main/java/io/github/luigeneric/core/protocols/game/GameProtocol.java b/src/main/java/io/github/luigeneric/core/protocols/game/GameProtocol.java
-index 3f48b97..b7fbf86 100644
+index 3f48b97..2220360 100644
 --- a/src/main/java/io/github/luigeneric/core/protocols/game/GameProtocol.java
 +++ b/src/main/java/io/github/luigeneric/core/protocols/game/GameProtocol.java
 @@ -357,7 +357,7 @@ public class GameProtocol extends BgoProtocol implements StatsProtocolSubscriber
@@ -38,7 +38,38 @@ index 3f48b97..b7fbf86 100644
                  final boolean isInCombat = playerShip.getSpaceSubscribeInfo().isInCombat();
  
                  this.jumpProcedure(secPlayerShip.sector().getJumpRegistry(), sectorID, charge, isInCombat);
-@@ -673,7 +673,7 @@ public class GameProtocol extends BgoProtocol implements StatsProtocolSubscriber
+@@ -486,12 +486,20 @@ public class GameProtocol extends BgoProtocol implements StatsProtocolSubscriber
+             }
+             case CompleteJump ->
+             {
++                /* The flag is set BEFORE the presence check now. The client sends CompleteJump
++                 * once its own player ship has loaded, but the server-side ship comes out of the
++                 * SectorJoinQueue on a sector tick - lose that race and the old early return
++                 * dropped the one message that ever starts the ghost-jump state machine, leaving
++                 * the player invisible under a stuck "perform any action" overlay (see
++                 * PlayerVisibility, which now also self-heals). The flag is an AtomicBoolean the
++                 * VisibilityTimer only consumes once a ship exists, so setting it early is safe;
++                 * the warn stays because the race is worth counting. */
++                this.completeJumpFlag.set(true);
+ 
+                 final SectorPlayerShipFetchResult secPlayerShip = getSectorAndPlayerShip();
+                 if (!secPlayerShip.bothPresent())
+                 {
+-                    log.warn("Cheat {} RequestCompleteJump but sector or ship not present", user().getUserLog());
+-                    return;
++                    log.warn("CompleteJump before ship present (join-queue race) - flag kept for the VisibilityTimer {}", user().getUserLog());
+                 }
+ 
+                 /*
+@@ -501,7 +509,6 @@ public class GameProtocol extends BgoProtocol implements StatsProtocolSubscriber
+                 this.sector.getSectorSender().sendToAllClients(bw);
+                 this.user().send(bw);
+                  */
+-                this.completeJumpFlag.set(true);
+             }
+             case SelectRespawnLocation ->
+             {
+@@ -673,7 +680,7 @@ public class GameProtocol extends BgoProtocol implements StatsProtocolSubscriber
                  final MovementController movementController = playerShip.getMovementController();
                  final MovementOptions movementOptions = movementController.getMovementOptions();
                  float speed = 0;
@@ -47,7 +78,7 @@ index 3f48b97..b7fbf86 100644
                  switch (newGear)
                  {
                      case Regular ->
-@@ -683,8 +683,8 @@ public class GameProtocol extends BgoProtocol implements StatsProtocolSubscriber
+@@ -683,8 +690,8 @@ public class GameProtocol extends BgoProtocol implements StatsProtocolSubscriber
  
                      case Boost ->
                      {
@@ -58,7 +89,7 @@ index 3f48b97..b7fbf86 100644
                          acceleration *= accBonus;
                          if (movementController.getCurrentManeuver() != null && movementController.getCurrentManeuver() instanceof TurnByPitchYawStrikes oldTurnByPitchYawStrikes)
                          {
-@@ -739,7 +739,7 @@ public class GameProtocol extends BgoProtocol implements StatsProtocolSubscriber
+@@ -739,7 +746,7 @@ public class GameProtocol extends BgoProtocol implements StatsProtocolSubscriber
                  final MovementController movementController = playerShip.getMovementController();
                  final Maneuver maneuver = movementController.getCurrentManeuver();
                  final MovementOptions movementOptions = movementController.getMovementOptions();
@@ -67,7 +98,7 @@ index 3f48b97..b7fbf86 100644
  
  
                  final float clientSpeedCleaned = Mathf.clampSafe(clientSpeed, 0, maxSpeed);
-@@ -838,6 +838,24 @@ public class GameProtocol extends BgoProtocol implements StatsProtocolSubscriber
+@@ -838,6 +845,24 @@ public class GameProtocol extends BgoProtocol implements StatsProtocolSubscriber
                      log.error("Caught cheating by docking on nondockable ship " + user().getPlayer().getPlayerLog());
                      return;
                  }

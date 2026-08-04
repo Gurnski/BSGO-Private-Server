@@ -5,11 +5,13 @@ import io.github.luigeneric.binaryreaderwriter.BgoProtocolWriter;
 import io.github.luigeneric.binaryreaderwriter.IProtocolWrite;
 import io.github.luigeneric.core.sector.Tick;
 import io.github.luigeneric.enums.ChangeVisibilityReason;
+import lombok.extern.slf4j.Slf4j;
 
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
+@Slf4j
 public class PlayerVisibility implements IProtocolWrite
 {
     private boolean isVisible;
@@ -79,13 +81,21 @@ public class PlayerVisibility implements IProtocolWrite
         return changeVisibilityReason;
     }
 
+    /* Both this and finishGhostJumpInIfNotFinished used to demand state == STARTED, and STARTED
+     * only ever came from the client's CompleteJump message via GameProtocol's flag. Every fresh
+     * PlayerShip is born invisible with reason Default (constructor below), so ONE missed or
+     * mistimed CompleteJump left a ship the state machine could never make visible again: the
+     * 10-second timer refused, and so did the perform-any-action lift on the first maneuver -
+     * the player sat under a stuck "perform any action to enter the sector" overlay, untouchable
+     * and untargetable, forever. Invisible-by-Default has exactly one meaning in this codebase
+     * (sector entry - the constructor and startGhostJump are its only writers), so both gates
+     * now accept the never-started state too. FINISHED is still terminal. */
     public boolean requiredJumpIn(final Tick currentTick)
     {
         if (this.isVisible)
             return false;
 
-        final boolean isGhostStarted = this.ghostJumpState == GhostJumpState.STARTED;
-        if (!isGhostStarted)
+        if (this.ghostJumpState == GhostJumpState.FINISHED)
             return false;
 
         final boolean isDefault = this.changeVisibilityReason == ChangeVisibilityReason.Default;
@@ -116,7 +126,7 @@ public class PlayerVisibility implements IProtocolWrite
     }
     public void finishGhostJumpInIfNotFinished()
     {
-        if (this.ghostJumpState != GhostJumpState.STARTED)
+        if (this.ghostJumpState == GhostJumpState.FINISHED)
             return;
 
         if (this.changeVisibilityReason != ChangeVisibilityReason.Default)
@@ -124,6 +134,13 @@ public class PlayerVisibility implements IProtocolWrite
             return;
         }
 
+        if (!this.isVisible && this.ghostJumpState == GhostJumpState.NOT_STARTED)
+        {
+            /* Lifting a ghost that was never started means the CompleteJump handshake was missed
+             * for this ship - the lift is correct either way, but the miss is worth a trace so
+             * the flaky link has a name the day someone wonders why this line is in their log. */
+            log.info("ghost jump lifted from NOT_STARTED - the client's CompleteJump never took effect for this ship");
+        }
         this.changeVisibility(true, ChangeVisibilityReason.Jump);
         this.ghostJumpState = GhostJumpState.FINISHED;
     }

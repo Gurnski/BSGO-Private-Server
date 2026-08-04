@@ -110,9 +110,15 @@ than the login path because `sendLoadNextScene()` has nine call sites.
 
 ## 0006 — getStatOrDefault
 
-`GameProtocol.java`, `MovementController.java` · 2 files, +26 −8
+`GameProtocol.java`, `MovementController.java` · 2 files, +38 −9
 
 Eight unguarded `getStat` calls become `getStatOrDefault`.
+
+Also in `GameProtocol` (this group owns the file): `CompleteJump` sets its flag before the
+ship-presence check instead of after. The client sends `CompleteJump` once its own ship has
+loaded, but the server-side ship comes out of the `SectorJoinQueue` on a sector tick — lose that
+race and the old early return dropped the one message that ever starts the sector-entry ghost
+state machine. The other half of that fix is patch 0024.
 
 **If missing:** an instant disconnect. `ObjectStats.getStat` returns a boxed `Float` from a plain
 map lookup, so a missing stat auto-unboxes `null`:
@@ -609,6 +615,25 @@ neither, so ice is worth cubits without limit. Leaving it out also keeps the exc
 
 The quote is recomputed against the hold at confirmation, so mining or moving water between the
 quote and the answer cannot pay out more than is actually carried.
+
+## 0024 — sector-entry visibility
+
+`PlayerVisibility.java` · 1 file, +28 −5 (the `GameProtocol` half rides in 0006, which owns that file)
+
+Every fresh `PlayerShip` is born invisible with reason `Default` — that is the sector-entry spawn
+protection the client shows as the "perform any action to enter the sector" countdown. Lifting it
+required ghost state `STARTED`, and `STARTED` came from exactly one place: the client's
+`CompleteJump` message surviving a race against the `SectorJoinQueue`. Lose that race once and
+the ship was stuck: the 10-second timer refused (`requiredJumpIn` demanded `STARTED`), the
+perform-any-action lift on the first maneuver refused for the same reason, and the player sat
+under the overlay indefinitely — invisible to NPCs, exempt from ship collisions, and wondering
+which of their actions counted.
+
+Invisible-by-`Default` has exactly one meaning in this codebase — sector entry; the constructor
+and `startGhostJump` are its only writers — so both gates now accept the never-started state, and
+`FINISHED` stays terminal. A lift from `NOT_STARTED` logs one line naming the missed handshake,
+so the flaky link is countable instead of invisible. Belt half in 0006: `CompleteJump` sets its
+flag before the presence check, so the race no longer drops the message.
 
 ---
 
