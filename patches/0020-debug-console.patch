@@ -1,8 +1,27 @@
 diff --git a/src/main/java/io/github/luigeneric/core/protocols/debug/DebugProtocol.java b/src/main/java/io/github/luigeneric/core/protocols/debug/DebugProtocol.java
-index 76d27dc..0784bb6 100644
+index 76d27dc..3ac105a 100644
 --- a/src/main/java/io/github/luigeneric/core/protocols/debug/DebugProtocol.java
 +++ b/src/main/java/io/github/luigeneric/core/protocols/debug/DebugProtocol.java
-@@ -61,6 +61,10 @@ import io.github.luigeneric.templates.utils.ShipSlotType;
+@@ -5,7 +5,18 @@ import io.github.luigeneric.binaryreaderwriter.BgoProtocolReader;
+ import io.github.luigeneric.binaryreaderwriter.BgoProtocolWriter;
+ import io.github.luigeneric.core.*;
+ import io.github.luigeneric.core.movement.maneuver.PulseManeuver;
++import io.github.luigeneric.core.movement.maneuver.TargetLaunchManeuver;
+ import io.github.luigeneric.core.movement.maneuver.TeleportManeuver;
++import io.github.luigeneric.core.sector.npcbehaviour.PatrolObjective;
++import io.github.luigeneric.linearalgebra.collidershapes.AABB;
++import io.github.luigeneric.linearalgebra.utility.Algorithm3D;
++import io.github.luigeneric.templates.cards.CardView;
++import io.github.luigeneric.templates.cards.GuiCard;
++import io.github.luigeneric.templates.cards.ShipCard;
++import io.github.luigeneric.templates.cards.WorldCard;
++import io.github.luigeneric.templates.npcbehaviour.NpcBehaviourTemplate;
++import io.github.luigeneric.templates.npcbehaviour.NpcBehaviourTemplates;
++import io.github.luigeneric.templates.utils.SpotDesc;
+ import io.github.luigeneric.core.player.AdminRoles;
+ import io.github.luigeneric.core.player.HangarShip;
+ import io.github.luigeneric.core.player.MailBox;
+@@ -61,6 +72,10 @@ import io.github.luigeneric.templates.utils.ShipSlotType;
  import io.github.luigeneric.utils.BgoRandom;
  import io.github.luigeneric.utils.Utils;
  import jakarta.enterprise.inject.spi.CDI;
@@ -13,7 +32,7 @@ index 76d27dc..0784bb6 100644
  import lombok.extern.slf4j.Slf4j;
  
  import java.io.IOException;
-@@ -438,6 +442,121 @@ public class DebugProtocol extends BgoProtocol
+@@ -438,6 +453,121 @@ public class DebugProtocol extends BgoProtocol
                      sendEzMsg("ERROR:" + exception.getMessage());
                  }
              }
@@ -135,8 +154,65 @@ index 76d27dc..0784bb6 100644
              case "set_counter_by" ->
              {
                  try
-@@ -489,11 +608,52 @@ public class DebugProtocol extends BgoProtocol
+@@ -487,13 +617,109 @@ public class DebugProtocol extends BgoProtocol
+                     sendEzMsg(ex.getMessage());
+                 }
              }
++            /* spawn <ship> [x] [y] [z] - an NPC of any hull in the catalogue, next to you.
++             * <ship> is a guid or a piece of a GUI key (raider, viper, dreadnought, brimir...);
++             * list_ships prints what matches. Offsets are in YOUR ship's frame: x right, y forward,
++             * z up. All blank = parked in front of your nose at a polite distance. */
++            case "spawn" -> spawnNpcCommand(br);
++            // spawn_wing <ship> <count> - the same, as a ring around you. Capped at 12.
++            case "spawn_wing" ->
++            {
++                final String shipToken = br.readString();
++                final int count = (int) Math.min(12, Math.max(1, parseStringAsLong(br)));
++                spawnWing(shipToken, count);
++            }
++            case "list_ships" -> listShips(tryReadString(br).orElse(""));
++            /* god_mode true|false - live-ship max hull/power to a billion and full heal; off
++             * recomputes the real stats from the hangar card (applyStats), so nothing persists.
++             * Same non-persistence contract as push: die, dock or relog and the ship is stock. */
++            case "god_mode" -> godMode(Boolean.parseBoolean(br.readString()));
++            /* Panel buttons. kill_em_all and reset_mobs are the same act on this server: dead
++             * NPCs pay nothing without damage claims, and the sector timers respawn their waves
++             * on their own schedule. */
++            case "kill_em_all", "reset_mobs" -> killAllNpcs();
++            case "tp" ->
++            {
++                final float x = Float.parseFloat(br.readString());
++                final float y = Float.parseFloat(br.readString());
++                final float z = Float.parseFloat(br.readString());
++                teleportTo(new Vector3(x, y, z));
++            }
++            case "tp_target" -> teleportToTarget();
++            /* spawn_missile - your current TARGET fires one standard missile at YOU. The one
++             * honest way to conjure an interceptable warhead on demand: a missile needs a hostile
++             * caster, and the ship you have selected is the hostile thing at hand. */
++            case "spawn_missile" -> spawnMissileFromTarget();
++            // hp <value> - set your live hull. For testing kill thresholds and damage math.
++            case "hp" ->
++            {
++                final float value = Float.parseFloat(br.readString());
++                withOwnShip(ship ->
++                {
++                    final var stats = ship.getSpaceSubscribeInfo();
++                    stats.setHp(Math.min(value, stats.getStatOrDefault(ObjectStat.MaxHullPoints)));
++                    sendEzMsg(String.format("hp: %.0f", stats.getHp()));
++                });
++            }
++            /* The admin panel has buttons for these; answer honestly instead of silently. */
++            case "spawn_mine", "spawn_flare" ->
++                    sendEzMsg(command + ": not implemented - no server-side factory for this object yet");
++            case "to_zone" ->
++                    sendEzMsg("to_zone: not implemented - zone/arena transfer never worked upstream");
++            case "map_part" ->
++                    sendEzMsg("map_part: not implemented - wheel-of-fortune map parts have no server side yet");
++            case "restart_sector" ->
++                    sendEzMsg("restart_sector: not implemented - restart the server instead, sectors rebuild at boot");
++            case "loot_target_x10" ->
++                    sendEzMsg("loot_target_x10: not implemented - loot rolls once per kill; use loot_target");
          }
      }
 +
@@ -189,6 +265,456 @@ index 76d27dc..0784bb6 100644
  
          final Player player = this.ctx.user().getPlayer();
          final AdminRoles roles = player.getBgoAdminRoles();
+@@ -977,7 +1203,7 @@ public class DebugProtocol extends BgoProtocol
+ 
+                     case "resource" ->
+                     {
+-                        addResources(br.readString(), br.readString(), player);
++                        addResources(br);
+                     }
+                     case "augmentItemTest" ->
+                     {
+@@ -1641,6 +1867,340 @@ public class DebugProtocol extends BgoProtocol
+ 
+ 
+ 
++    /** readString past the end of the console message throws; an Optional is the honest shape. */
++    private Optional<String> tryReadString(final BgoProtocolReader br)
++    {
++        try
++        {
++            return Optional.of(br.readString());
++        }
++        catch (final Exception endOfMessage)
++        {
++            return Optional.empty();
++        }
++    }
++
++    /** Run an action with the ship the operator is flying, or say why not. */
++    private void withOwnShip(final java.util.function.Consumer<PlayerShip> action)
++    {
++        final Player player = ctx.user().getPlayer();
++        sectorRegistry.getSectorById(player.getSectorId())
++                .flatMap(sec -> sec.getCtx().users().getPlayerShipByUserID(player.getUserID()))
++                .ifPresentOrElse(action, () -> sendEzMsg("no ship in space - undock first"));
++    }
++
++    /**
++     * <ship> to guid. A number is taken as a guid directly; anything else is matched
++     * case-insensitively against the GUI key of every Ship card (underscores and spaces
++     * interchangeable). Grades of one family share a key (enemy_cylon_raider is three guids),
++     * so same-key hits collapse to the lowest guid - the base grade - while hits on DIFFERENT
++     * keys are ambiguity the operator has to resolve, and the candidates are printed.
++     */
++    private OptionalLong resolveShipToken(final String token)
++    {
++        try
++        {
++            final long guid = Long.parseLong(token);
++            if (catalogue.fetchCard(guid, CardView.Ship).isPresent())
++                return OptionalLong.of(guid);
++            sendEzMsg("no Ship card at guid " + guid);
++            return OptionalLong.empty();
++        }
++        catch (final NumberFormatException notANumber)
++        {
++            // fall through to name matching
++        }
++        final String needle = token.toLowerCase(Locale.ROOT).replace(' ', '_');
++        final Map<String, Long> keyToMinGuid = new TreeMap<>();
++        for (final ShipCard shipCard : catalogue.<ShipCard>getAllCardsOfView(CardView.Ship))
++        {
++            final Optional<GuiCard> optGui = catalogue.fetchCard(shipCard.getCardGuid(), CardView.GUI);
++            if (optGui.isEmpty())
++                continue;
++            final String key = optGui.get().getKey().toLowerCase(Locale.ROOT);
++            if (!key.contains(needle))
++                continue;
++            keyToMinGuid.merge(key, shipCard.getCardGuid(), Math::min);
++        }
++        if (keyToMinGuid.isEmpty())
++        {
++            sendEzMsg("no ship matches '" + token + "' - try list_ships " + token);
++            return OptionalLong.empty();
++        }
++        if (keyToMinGuid.size() > 1)
++        {
++            final StringBuilder sb = new StringBuilder("ambiguous, matches:");
++            keyToMinGuid.forEach((k, g) -> sb.append('\n').append("  ").append(k).append(" (").append(g).append(')'));
++            sendEzMsg(sb);
++            return OptionalLong.empty();
++        }
++        return OptionalLong.of(keyToMinGuid.values().iterator().next());
++    }
++
++    private void spawnNpcCommand(final BgoProtocolReader br) throws IOException
++    {
++        final String token = br.readString();
++        final Optional<String> rawX = tryReadString(br);
++        final Optional<String> rawY = tryReadString(br);
++        final Optional<String> rawZ = tryReadString(br);
++        final OptionalLong optGuid = resolveShipToken(token);
++        if (optGuid.isEmpty())
++            return;
++        withOwnShip(ship ->
++        {
++            try
++            {
++                final float x = rawX.map(Float::parseFloat).orElse(0f);
++                final float y = rawY.map(Float::parseFloat).orElse(0f);
++                final float z = rawZ.map(Float::parseFloat).orElse(0f);
++                spawnNpcAtOffset(ship, optGuid.getAsLong(), x, y, z, rawX.isEmpty() && rawY.isEmpty());
++            }
++            catch (final NumberFormatException nan)
++            {
++                sendEzMsg("spawn <ship> [x] [y] [z] - offsets must be numbers");
++            }
++        });
++    }
++
++    /**
++     * Offsets are in the OPERATOR's ship frame - x right, y forward, z up - because "500 to my
++     * left" is what a pilot means, not a world axis nobody can see. No offsets parks the NPC dead
++     * ahead with both hulls' World-card radii of clearance, so a spawned capital cannot be born
++     * inside your own collider.
++     */
++    private void spawnNpcAtOffset(final PlayerShip ship, final long guid,
++                                  final float x, final float y, final float z, final boolean noOffsetsGiven)
++    {
++        final Optional<Sector> optSector = sectorRegistry.getSectorById(ctx.user().getPlayer().getSectorId());
++        if (optSector.isEmpty())
++            return;
++        final Sector sector = optSector.get();
++
++        final Optional<ShipCard> optShipCard = catalogue.fetchCard(guid, CardView.Ship);
++        final Optional<WorldCard> optWorldCard = catalogue.fetchCard(guid, CardView.World);
++        final Optional<GuiCard> optGuiCard = catalogue.fetchCard(guid, CardView.GUI);
++        if (optShipCard.isEmpty() || optWorldCard.isEmpty())
++        {
++            sendEzMsg("guid " + guid + " is missing its Ship or World card");
++            return;
++        }
++        final ShipCard shipCard = optShipCard.get();
++
++        final Vector3 ownPos = ship.getMovementController().getPosition();
++        final float clearance = ship.getWorldCard().getRadius() + optWorldCard.get().getRadius() + 200f;
++        final Vector3 local = noOffsetsGiven ? new Vector3(0, 0, clearance) : new Vector3(x, z, y);
++        final Vector3 spawnPos = Algorithm3D.getPointPositionRelativeTo(local,
++                ownPos, ship.getMovementController().getRotation());
++        // Nose towards the operator: if it is hostile it should already be committed to you.
++        final Quaternion facing = Euler3.direction(Vector3.sub(ownPos, spawnPos)).quaternion();
++
++        /* The same recipe DynamicNpcSpawn cooks for a wave bot: tier behaviour, a patrol box
++         * around the spawn so it does not wander off, and the by-tier loot the sector waves pay.
++         * One deliberate difference: no lifetime jump-out - a spawned sparring partner that
++         * despawns mid-fight is a bug report waiting to happen. */
++        // Ten years of lifetime, not MAX_VALUE: a timer multiplying by 1000 must never overflow.
++        final NpcBehaviourTemplate behaviour =
++                NpcBehaviourTemplates.createTemplateForTier(shipCard.getTier(), 315_360_000L, false, 400);
++        final Vector3 boxHalf = new Vector3(2500, 2500, 2500);
++        final PatrolObjective patrol = new PatrolObjective(0,
++                new AABB(Vector3.sub(spawnPos, boxHalf), Vector3.add(spawnPos, boxHalf)));
++        final long lootId = switch (shipCard.getTier())
++        {
++            case 2 -> 114L;
++            case 3, 4 -> 116L;
++            default -> 111L;
++        };
++        final BotFighterMoving bot = sector.getCtx().spaceObjectFactory().createBotFighter(
++                guid, List.of(), List.of(), List.of(patrol),
++                new Transform(spawnPos, facing), behaviour, lootId);
++        sector.getSectorJoinQueue().addSpaceObject(bot);
++
++        final String label = optGuiCard.map(GuiCard::getKey).orElse("guid " + guid);
++        sendEzMsg(String.format("spawned %s (%d, %s, t%d) at %.0f/%.0f/%.0f",
++                label, guid, shipCard.getFaction(), shipCard.getTier(),
++                spawnPos.getX(), spawnPos.getY(), spawnPos.getZ()));
++    }
++
++    private void spawnWing(final String token, final int count)
++    {
++        final OptionalLong optGuid = resolveShipToken(token);
++        if (optGuid.isEmpty())
++            return;
++        withOwnShip(ship ->
++        {
++            final Optional<WorldCard> optWorldCard = catalogue.fetchCard(optGuid.getAsLong(), CardView.World);
++            final float ring = ship.getWorldCard().getRadius()
++                    + optWorldCard.map(WorldCard::getRadius).orElse(50f) + 400f;
++            for (int i = 0; i < count; i++)
++            {
++                final double angle = (2 * Math.PI * i) / count;
++                spawnNpcAtOffset(ship, optGuid.getAsLong(),
++                        (float) (Math.sin(angle) * ring), (float) (Math.cos(angle) * ring), 0f, false);
++            }
++        });
++    }
++
++    private void listShips(final String filter)
++    {
++        final String needle = filter.toLowerCase(Locale.ROOT).replace(' ', '_');
++        final Map<String, Long> keyToMinGuid = new TreeMap<>();
++        for (final ShipCard shipCard : catalogue.<ShipCard>getAllCardsOfView(CardView.Ship))
++        {
++            catalogue.<GuiCard>fetchCard(shipCard.getCardGuid(), CardView.GUI).ifPresent(g ->
++            {
++                final String key = g.getKey().toLowerCase(Locale.ROOT);
++                if (key.contains(needle))
++                    keyToMinGuid.merge(key, shipCard.getCardGuid(), Math::min);
++            });
++        }
++        final StringBuilder sb = new StringBuilder("spawnable (" + keyToMinGuid.size() + "):");
++        int shown = 0;
++        for (final Map.Entry<String, Long> e : keyToMinGuid.entrySet())
++        {
++            if (++shown > 40)
++            {
++                sb.append("\n  ... +").append(keyToMinGuid.size() - 40).append(" more, narrow the filter");
++                break;
++            }
++            sb.append('\n').append("  ").append(e.getKey()).append(" (").append(e.getValue()).append(')');
++        }
++        sendEzMsg(sb);
++    }
++
++    private void godMode(final boolean enable)
++    {
++        withOwnShip(ship ->
++        {
++            final var stats = ship.getSpaceSubscribeInfo();
++            if (enable)
++            {
++                stats.setStat(ObjectStat.MaxHullPoints, 1_000_000_000f);
++                stats.setStat(ObjectStat.MaxPowerPoints, 1_000_000_000f);
++                stats.setHp(1_000_000_000f);
++                stats.setPp(1_000_000_000f);
++                sendEzMsg("god mode ON (live ship only - dock or relog and it is gone)");
++            }
++            else
++            {
++                /* The live SpaceSubscribeInfo IS the hangar ship's stats object, so recomputing
++                 * from the cards puts every buffed stat back exactly - the same call the rental
++                 * arm path leans on. */
++                ctx.user().getPlayer().getHangar().getActiveShip().getShipStats().applyStats();
++                final float maxHp = stats.getStatOrDefault(ObjectStat.MaxHullPoints);
++                final float maxPp = stats.getStatOrDefault(ObjectStat.MaxPowerPoints);
++                stats.setHp(Math.min(stats.getHp(), maxHp));
++                stats.setPp(Math.min(stats.getPp(), maxPp));
++                sendEzMsg("god mode OFF - stats recomputed from the hangar card");
++            }
++        });
++    }
++
++    private void killAllNpcs()
++    {
++        final Optional<Sector> optSector = sectorRegistry.getSectorById(ctx.user().getPlayer().getSectorId());
++        if (optSector.isEmpty())
++            return;
++        final Sector sector = optSector.get();
++        int removed = 0;
++        for (final SpaceObject npc : sector.getCtx().spaceObjects()
++                .getSpaceObjectsOfEntityType(SpaceEntityType.BotFighter))
++        {
++            sector.getSpaceObjectRemover().notifyRemovingCauseAdded(npc, RemovingCause.Death);
++            removed++;
++        }
++        sendEzMsg("removed " + removed + " NPC fighter(s) - the sector's own timers will respawn their waves");
++    }
++
++    private void teleportTo(final Vector3 destination)
++    {
++        withOwnShip(ship ->
++        {
++            ship.getMovementController().setNextManeuver(new TeleportManeuver(destination));
++            sendEzMsg(String.format("teleport to %.0f/%.0f/%.0f",
++                    destination.getX(), destination.getY(), destination.getZ()));
++        });
++    }
++
++    private void teleportToTarget()
++    {
++        final Optional<Sector> optSector = sectorRegistry.getSectorById(ctx.user().getPlayer().getSectorId());
++        if (optSector.isEmpty())
++            return;
++        final Sector sector = optSector.get();
++        withOwnShip(ship ->
++        {
++            final Optional<AtomicLong> optTargetId = ship.getSpaceSubscribeInfo().getTargetObjectID();
++            if (optTargetId.isEmpty())
++            {
++                sendEzMsg("tp_target: select a target first");
++                return;
++            }
++            final Optional<SpaceObject> optTarget = sector.getCtx().spaceObjects().get(optTargetId.get().get());
++            if (optTarget.isEmpty())
++            {
++                sendEzMsg("tp_target: target is gone");
++                return;
++            }
++            final SpaceObject target = optTarget.get();
++            final Vector3 targetPos = target.getMovementController().getPosition();
++            final Vector3 ownPos = ship.getMovementController().getPosition();
++            final Vector3 back = Vector3.sub(ownPos, targetPos);
++            final float distance = back.magnitude();
++            final float keep = ship.getWorldCard().getRadius() + target.getWorldCard().getRadius() + 300f;
++            // Arrive on your current bearing, radii + 300 short of the hull - not inside it.
++            final Vector3 destination = distance < 1f
++                    ? Vector3.add(targetPos, new Vector3(0, 0, keep))
++                    : Vector3.add(targetPos, Vector3.mult(back, keep / distance));
++            ship.getMovementController().setNextManeuver(new TeleportManeuver(destination));
++            sendEzMsg("teleported to target " + target.getObjectID());
++        });
++    }
++
++    private void spawnMissileFromTarget()
++    {
++        final Optional<Sector> optSector = sectorRegistry.getSectorById(ctx.user().getPlayer().getSectorId());
++        if (optSector.isEmpty())
++            return;
++        final Sector sector = optSector.get();
++        withOwnShip(ship ->
++        {
++            final Optional<AtomicLong> optTargetId = ship.getSpaceSubscribeInfo().getTargetObjectID();
++            final Optional<SpaceObject> optTarget = optTargetId
++                    .flatMap(id -> sector.getCtx().spaceObjects().get(id.get()));
++            if (optTarget.isEmpty() || !(optTarget.get() instanceof Ship caster))
++            {
++                sendEzMsg("spawn_missile: select the SHIP that should fire at you");
++                return;
++            }
++            final SpotDesc[] spots = caster.getWorldCard().getSpots();
++            if (spots.length == 0)
++            {
++                sendEzMsg("spawn_missile: that hull has no spots to launch from");
++                return;
++            }
++            final SpaceObject missile = sector.getCtx().spaceObjectFactory().createMissile(
++                    caster, ship, spots[0], StaticCardGUID.MissileCard.getValue(),
++                    sector.getCtx().tick().getTimeStamp());
++            /* The stats a launcher's ItemBuffAdd would have contributed, at the values the
++             * outpost round flies with post-retune - this exists to give flak and the missile
++             * bracket something honest to intercept. */
++            final var stats = missile.getSpaceSubscribeInfo().getStats();
++            stats.setStat(ObjectStat.Speed, 120f);
++            stats.setStat(ObjectStat.MaxHullPoints, 200f);
++            stats.setStat(ObjectStat.LifeTime, 90f);
++            stats.setStat(ObjectStat.DamageLow, 55f);
++            stats.setStat(ObjectStat.DamageHigh, 150f);
++            stats.setStat(ObjectStat.Avoidance, 650f);
++            missile.getMovementController().getMovementOptions().setGear(Gear.Regular);
++            missile.getMovementController().getMovementOptions().setThrottleSpeed(120f);
++            missile.getSpaceSubscribeInfo().setMaxHpPp();
++            missile.getMovementController().setNextManeuver(
++                    new TargetLaunchManeuver(caster, spots[0], 0f, ship));
++            sector.getSectorJoinQueue().addSpaceObject(missile);
++            sendEzMsg("missile away from " + caster.getObjectID() + " - it is homing on YOU");
++        });
++    }
++
+     private void selfBuff(final String type, final Player player)
+     {
+         final Optional<Sector> optSector = sectorRegistry.getSectorById(player.getSectorId());
+@@ -1660,36 +2220,78 @@ public class DebugProtocol extends BgoProtocol
+                 direction.mult(400);
+                 ship.getMovementController().setNextManeuver(new PulseManeuver(direction));
+             }
++            // The panel's Heal button sends self_buff heal, the console's own heal is the same act.
++            case "heal" ->
++            {
++                final var stats = ship.getSpaceSubscribeInfo();
++                stats.setHp(stats.getStatOrDefault(ObjectStat.MaxHullPoints));
++                stats.setPp(stats.getStatOrDefault(ObjectStat.MaxPowerPoints));
++                this.sendEzMsg("healed");
++            }
++            /* Live-ship only, like push and god_mode: the doubled maximum vanishes on dock/relog
++             * because the hangar recomputes stats from the cards. */
++            case "hp" ->
++            {
++                final var stats = ship.getSpaceSubscribeInfo();
++                final float doubled = stats.getStatOrDefault(ObjectStat.MaxHullPoints) * 2f;
++                stats.setStat(ObjectStat.MaxHullPoints, doubled);
++                stats.setHp(doubled);
++                this.sendEzMsg(String.format("max hull doubled to %.0f", doubled));
++            }
++            case "dmg" -> this.sendEzMsg(
++                    "self_buff dmg: not implemented - damage lives on the ability cards, and those are " +
++                    "shared templates a buff would poison for every ship that fires the same weapon");
+             default -> this.sendEzMsg("Dev Buf " + type + " not implemented!");
+         }
+     }
+ 
+-    private void addResources(final String resourceType, final String rawAmount, final Player player)
++    /**
++     * Two shapes reach this handler and both have to work:
++     *   resource <type> <amount> [...]        - the console and the panel's self buttons; the
++     *                                           panel appends two "false" strings nothing reads.
++     *   resource <player> <typeOrGuid> <amount> - the panel's Give Resource button, which the old
++     *                                           two-read parser silently misread as (type, amount)
++     *                                           and dropped on the floor.
++     * A first argument that names a connected player selects the targeted shape; everything else
++     * is the classic self shape.
++     */
++    private void addResources(final BgoProtocolReader br) throws IOException
+     {
+-        ShopVisitor shopVisitor = new ShopVisitor(user(), null, ctx.rng());
+-
++        final String first = br.readString();
++        final Optional<User> optTargetUser = usersContainer.get(first);
++        final User receiver;
++        final String rawType;
++        if (optTargetUser.isPresent())
++        {
++            receiver = optTargetUser.get();
++            rawType = br.readString();
++        }
++        else
++        {
++            receiver = user();
++            rawType = first;
++        }
++        final String rawAmount = br.readString();
+         try
+         {
+-            final int amount = Integer.parseInt(rawAmount);
+-            ResourceType resourceTypeActual = null;
+-
+-            switch (resourceType)
++            final long amount = Long.parseLong(rawAmount);
++            final long guid = switch (rawType)
+             {
+-                case "resource_cubits" -> resourceTypeActual = ResourceType.Cubits;
+-                case "resource_tylium" -> resourceTypeActual = ResourceType.Tylium;
+-                case "resource_titanium" -> resourceTypeActual = ResourceType.Titanium;
+-                case "resource_water" -> resourceTypeActual = ResourceType.Water;
+-                case "resource_token" -> resourceTypeActual = ResourceType.Token;
+-            }
+-            if (resourceTypeActual != null)
+-            {
+-                ItemCountable itemCountable = ItemCountable.fromGUID(resourceTypeActual.guid, amount);
+-                shopVisitor.addShipItem(itemCountable, player.getHold());
+-            }
+-
+-        } catch (NumberFormatException e)
++                case "resource_cubits", "cubits" -> ResourceType.Cubits.guid;
++                case "resource_tylium", "tylium" -> ResourceType.Tylium.guid;
++                case "resource_titanium", "titanium" -> ResourceType.Titanium.guid;
++                case "resource_water", "water" -> ResourceType.Water.guid;
++                case "resource_token", "token" -> ResourceType.Token.guid;
++                // The panel's Give Resource sends a raw guid, not a keyword.
++                default -> Long.parseLong(rawType);
++            };
++            final ShopVisitor shopVisitor = new ShopVisitor(receiver, null, ctx.rng());
++            shopVisitor.addShipItem(ItemCountable.fromGUID(guid, amount), receiver.getPlayer().getHold());
++            sendEzMsg("gave " + amount + " of " + rawType + " to " + receiver.getPlayer().getName());
++        }
++        catch (final NumberFormatException e)
+         {
+-            log.warn("wrong DebugProtocol syntax " + e.getMessage());
++            sendEzMsg("resource <type|guid> <amount>  or  resource <player> <type|guid> <amount>");
+         }
+     }
+ 
 diff --git a/src/main/java/io/github/luigeneric/core/spaceentities/statsinfo/stats/SpaceSubscribeInfo.java b/src/main/java/io/github/luigeneric/core/spaceentities/statsinfo/stats/SpaceSubscribeInfo.java
 index 69e527e..9f14f44 100644
 --- a/src/main/java/io/github/luigeneric/core/spaceentities/statsinfo/stats/SpaceSubscribeInfo.java

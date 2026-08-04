@@ -487,13 +487,38 @@ path; missiles were the odd one out.
 
 ## 0020 — debug console
 
-`DebugProtocol.java`, `SpaceSubscribeInfo.java` · 2 files, +127 −0
+`DebugProtocol.java`, `SpaceSubscribeInfo.java` · 2 files, +648 −23
 
-Four operator commands: `where`, `npcs`, `heal` and `push <speed> [seconds]`. `push` is why
+Operator commands: `where`, `npcs`, `heal` and `push <speed> [seconds]`. `push` is why
 `SpaceSubscribeInfo` gained a live stat overwrite — the server clamps every client speed report to
 the ship's max, so the stat has to move for the shove to survive. Nothing here is persisted and
 ordinary gameplay never uses that setter; stats otherwise change through buffs and modifiers, which
 the client is told about.
+
+The second wave hooks up the GameBridge admin panel and adds spawning:
+
+- `spawn <ship> [x] [y] [z]` — an NPC of any hull in the catalogue, resolved by guid or by a
+  piece of its GUI key (`raider`, `dreadnought`, `brimir`…), armed and flying the same
+  behaviour/patrol/loot recipe as a sector wave bot. Offsets are in the operator's ship frame
+  (x right, y forward, z up); no offsets parks it off your bow with both hulls' radii of
+  clearance. `spawn_wing <ship> <count>` rings up to twelve of them around you;
+  `list_ships [filter]` prints what a name resolves to. Same-key grade families collapse to the
+  base grade; hits on different keys are listed instead of guessed at.
+- `spawn_missile` — your selected ship fires one standard round at YOU, statted like the
+  post-retune outpost round (200 HP, 120 m/s). Exists to test interception on demand.
+- `god_mode true|false` — billion-point hull/power and full heal; off recomputes the real stats
+  from the hangar card via `applyStats`, the same call the rental arm path uses. Live ship only,
+  like `push`.
+- `tp <x> <y> <z>`, `tp_target` (arrives radii + 300 short of the hull), `hp <value>`,
+  `kill_em_all`/`reset_mobs` (dead NPCs pay nothing without damage claims; the wave timers
+  respawn on their own schedule).
+- `self_buff` grew `heal` and `hp` (doubled max hull, live only); `dmg` explains why it refuses —
+  damage lives on shared ability card templates a buff would poison globally.
+- `resource` accepts both shapes the panel sends: `resource <type> <amount>` for yourself and
+  `resource <player> <typeOrGuid> <amount>` for the Give button, which the old two-read parser
+  silently misparsed.
+- Panel buttons with no server side yet answer with a reason instead of silence: `spawn_mine`,
+  `spawn_flare`, `to_zone`, `map_part`, `restart_sector`, `loot_target_x10`.
 
 ## 0021 — missile interception
 
