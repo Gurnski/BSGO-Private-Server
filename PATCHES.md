@@ -423,6 +423,15 @@ lifetime, flying at nothing and enqueueing casts the queue then discarded. And i
 whose target died kept flying its final attack vector until it happened to exit its patrol box,
 so a lair boss that fought once cruised its lair visibly tilted forever.
 
+Also in `NpcDynamicTimer`, the standoff rule: a bot stops at `speedZeroDistance` only if its
+target is "almost standing" (speed < 5). Against a player that clause is right — nobody wants a
+bot parked on a ship that is merely throttled down for a beat. Between two NPCs it could never be
+true while both chased, so a pair of hostile bots — two spawned capitals, most visibly — drove
+into each other by construction, forever: pure pursuit has no other brake, ship-×-ship contact
+deals no damage, and the only separation is the reactive collision pulse. The clause now applies
+to player targets only; an NPC target holds at `speedZeroDistance` unconditionally, so the pair
+squares up and shells each other.
+
 Also in `SpaceObjectFactory`: player-fired missiles no longer get a loot association. It resolved
 to an empty template list (no `1_*.json` exists), harmless while nothing could kill a missile —
 now that they are shootable it would be live claim surface for no benefit.
@@ -501,9 +510,14 @@ The second wave hooks up the GameBridge admin panel and adds spawning:
   piece of its GUI key (`raider`, `dreadnought`, `brimir`…), armed and flying the same
   behaviour/patrol/loot recipe as a sector wave bot. Offsets are in the operator's ship frame
   (x right, y forward, z up); no offsets parks it off your bow with both hulls' radii of
-  clearance. `spawn_wing <ship> <count>` rings up to twelve of them around you;
-  `list_ships [filter]` prints what a name resolves to. Same-key grade families collapse to the
-  base grade; hits on different keys are listed instead of guessed at.
+  clearance. Its standoff distance scales with the hull — twice the bounding radius, floored at
+  the wave-strike 400 and capped at 2200 — so a spawned capital holds a gun-range fight instead
+  of parking inside its enemy. `spawn_wing <ship> <count>` rings up to twelve of them around
+  you; `list_ships [filter]` prints what a name resolves to. Same-key grade families collapse to
+  the base grade; hits on different keys are listed instead of guessed at. Player capital hulls
+  are armed through six new ShipConfigTemplates (see `config/README.md`) — any other player hull
+  with no config still spawns unarmed, and the server warns `ZERO armed slots` at target
+  acquisition when that happens.
 - `spawn_missile` — your selected ship fires one standard round at YOU, statted like the
   post-retune outpost round (200 HP, 120 m/s). Exists to test interception on demand.
 - `god_mode true|false` — billion-point hull/power and full heal; off recomputes the real stats

@@ -1,0 +1,15 @@
+[{
+    "id": 5119,
+    "shipGUID": 5119,
+    "level": 1,
+    "slotConfigs": [
+        { "slotID": 0,  "itemGUID": 6034 },
+        { "slotID": 1,  "itemGUID": 6034 },
+        { "slotID": 2,  "itemGUID": 6031 },
+        { "slotID": 3,  "itemGUID": 6031 },
+        { "slotID": 4,  "itemGUID": 6031 },
+        { "slotID": 5,  "itemGUID": 6031 },
+        { "slotID": 6,  "itemGUID": 6032 },
+        { "slotID": 7,  "itemGUID": 6033 }
+    ]
+}]

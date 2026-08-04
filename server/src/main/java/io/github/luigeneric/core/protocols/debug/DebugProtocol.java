@@ -1892,9 +1892,8 @@ public class DebugProtocol extends BgoProtocol
     /**
      * <ship> to guid. A number is taken as a guid directly; anything else is matched
      * case-insensitively against the GUI key of every Ship card (underscores and spaces
-     * interchangeable). Grades of one family share a key (enemy_cylon_raider is three guids),
-     * so same-key hits collapse to the lowest guid - the base grade - while hits on DIFFERENT
-     * keys are ambiguity the operator has to resolve, and the candidates are printed.
+     * interchangeable). Hits on DIFFERENT keys are ambiguity the operator has to resolve, and
+     * the candidates are printed. Hits sharing ONE key collapse by pickFromKeyFamily below.
      */
     private OptionalLong resolveShipToken(final String token)
     {
@@ -1911,7 +1910,7 @@ public class DebugProtocol extends BgoProtocol
             // fall through to name matching
         }
         final String needle = token.toLowerCase(Locale.ROOT).replace(' ', '_');
-        final Map<String, Long> keyToMinGuid = new TreeMap<>();
+        final Map<String, List<Long>> keyToGuids = new TreeMap<>();
         for (final ShipCard shipCard : catalogue.<ShipCard>getAllCardsOfView(CardView.Ship))
         {
             final Optional<GuiCard> optGui = catalogue.fetchCard(shipCard.getCardGuid(), CardView.GUI);
@@ -1920,21 +1919,37 @@ public class DebugProtocol extends BgoProtocol
             final String key = optGui.get().getKey().toLowerCase(Locale.ROOT);
             if (!key.contains(needle))
                 continue;
-            keyToMinGuid.merge(key, shipCard.getCardGuid(), Math::min);
+            keyToGuids.computeIfAbsent(key, k -> new ArrayList<>()).add(shipCard.getCardGuid());
         }
-        if (keyToMinGuid.isEmpty())
+        if (keyToGuids.isEmpty())
         {
             sendEzMsg("no ship matches '" + token + "' - try list_ships " + token);
             return OptionalLong.empty();
         }
-        if (keyToMinGuid.size() > 1)
+        if (keyToGuids.size() > 1)
         {
             final StringBuilder sb = new StringBuilder("ambiguous, matches:");
-            keyToMinGuid.forEach((k, g) -> sb.append('\n').append("  ").append(k).append(" (").append(g).append(')'));
+            keyToGuids.forEach((k, guids) -> sb.append('\n').append("  ").append(k)
+                    .append(" (").append(pickFromKeyFamily(guids)).append(')'));
             sendEzMsg(sb);
             return OptionalLong.empty();
         }
-        return OptionalLong.of(keyToMinGuid.values().iterator().next());
+        return OptionalLong.of(pickFromKeyFamily(keyToGuids.values().iterator().next()));
+    }
+
+    /**
+     * One GUI key can cover several Ship guids, and they are not equals: 'cruiser_galactica' is
+     * BOTH the flyable flagship (5019, armed via its ShipConfigTemplate) and the decorative gate
+     * cruiser (29, no config, no drive) - the plain lowest-guid rule this replaced spawned the
+     * statue. Prefer a guid a ShipConfigTemplate can arm; lowest guid only breaks the remaining
+     * tie (grade families like enemy_cylon_raider pick their lowest CONFIGURED grade).
+     */
+    private static long pickFromKeyFamily(final List<Long> guids)
+    {
+        return guids.stream()
+                .filter(g -> io.github.luigeneric.templates.shipconfigs.ShipConfigs.getFirstBestConfigForGUID(g).isPresent())
+                .min(Long::compare)
+                .orElseGet(() -> guids.stream().min(Long::compare).orElseThrow());
     }
 
     private void spawnNpcCommand(final BgoProtocolReader br) throws IOException
@@ -1998,9 +2013,15 @@ public class DebugProtocol extends BgoProtocol
          * around the spawn so it does not wander off, and the by-tier loot the sector waves pay.
          * One deliberate difference: no lifetime jump-out - a spawned sparring partner that
          * despawns mid-fight is a bug report waiting to happen. */
+        /* speedZeroDistance is CENTER-to-center and the wave value (400) is sized for strikes -
+         * a capital's own collider is bigger than that, so two spawned capitals drove into each
+         * other before their hulls even counted as apart. Twice the bounding radius holds a
+         * flagship pair around 1.8 km, inside the capital guns' 4.1 km envelope and under the
+         * tier-4 auto-aggro of 2.5 km; strikes still get their 400 floor. */
+        final float standoff = Math.max(400f, Math.min(2200f, optWorldCard.get().getRadius() * 2f));
         // Ten years of lifetime, not MAX_VALUE: a timer multiplying by 1000 must never overflow.
         final NpcBehaviourTemplate behaviour =
-                NpcBehaviourTemplates.createTemplateForTier(shipCard.getTier(), 315_360_000L, false, 400);
+                NpcBehaviourTemplates.createTemplateForTier(shipCard.getTier(), 315_360_000L, false, standoff);
         final Vector3 boxHalf = new Vector3(2500, 2500, 2500);
         final PatrolObjective patrol = new PatrolObjective(0,
                 new AABB(Vector3.sub(spawnPos, boxHalf), Vector3.add(spawnPos, boxHalf)));
@@ -2016,9 +2037,13 @@ public class DebugProtocol extends BgoProtocol
         sector.getSectorJoinQueue().addSpaceObject(bot);
 
         final String label = optGuiCard.map(GuiCard::getKey).orElse("guid " + guid);
-        sendEzMsg(String.format("spawned %s (%d, %s, t%d) at %.0f/%.0f/%.0f",
+        // The no-config path inside setupWeaponConfig is silent; the operator should not be.
+        final boolean armed = io.github.luigeneric.templates.shipconfigs.ShipConfigs
+                .getFirstBestConfigForGUID(guid).isPresent();
+        sendEzMsg(String.format("spawned %s (%d, %s, t%d) at %.0f/%.0f/%.0f%s",
                 label, guid, shipCard.getFaction(), shipCard.getTier(),
-                spawnPos.getX(), spawnPos.getY(), spawnPos.getZ()));
+                spawnPos.getX(), spawnPos.getY(), spawnPos.getZ(),
+                armed ? "" : " - UNARMED: no ShipConfigTemplate for this hull"));
     }
 
     private void spawnWing(final String token, final int count)
@@ -2043,26 +2068,30 @@ public class DebugProtocol extends BgoProtocol
     private void listShips(final String filter)
     {
         final String needle = filter.toLowerCase(Locale.ROOT).replace(' ', '_');
-        final Map<String, Long> keyToMinGuid = new TreeMap<>();
+        final Map<String, List<Long>> keyToGuids = new TreeMap<>();
         for (final ShipCard shipCard : catalogue.<ShipCard>getAllCardsOfView(CardView.Ship))
         {
             catalogue.<GuiCard>fetchCard(shipCard.getCardGuid(), CardView.GUI).ifPresent(g ->
             {
                 final String key = g.getKey().toLowerCase(Locale.ROOT);
                 if (key.contains(needle))
-                    keyToMinGuid.merge(key, shipCard.getCardGuid(), Math::min);
+                    keyToGuids.computeIfAbsent(key, k -> new ArrayList<>()).add(shipCard.getCardGuid());
             });
         }
-        final StringBuilder sb = new StringBuilder("spawnable (" + keyToMinGuid.size() + "):");
+        final StringBuilder sb = new StringBuilder("spawnable (" + keyToGuids.size() + "):");
         int shown = 0;
-        for (final Map.Entry<String, Long> e : keyToMinGuid.entrySet())
+        for (final Map.Entry<String, List<Long>> e : keyToGuids.entrySet())
         {
             if (++shown > 40)
             {
-                sb.append("\n  ... +").append(keyToMinGuid.size() - 40).append(" more, narrow the filter");
+                sb.append("\n  ... +").append(keyToGuids.size() - 40).append(" more, narrow the filter");
                 break;
             }
-            sb.append('\n').append("  ").append(e.getKey()).append(" (").append(e.getValue()).append(')');
+            final long pick = pickFromKeyFamily(e.getValue());
+            final boolean armed = io.github.luigeneric.templates.shipconfigs.ShipConfigs
+                    .getFirstBestConfigForGUID(pick).isPresent();
+            sb.append('\n').append("  ").append(e.getKey()).append(" (").append(pick)
+                    .append(armed ? ", armed)" : ", UNARMED)");
         }
         sendEzMsg(sb);
     }

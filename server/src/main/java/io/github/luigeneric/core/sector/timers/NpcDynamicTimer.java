@@ -13,6 +13,7 @@ import io.github.luigeneric.core.sector.management.damage.SectorDamageHistory;
 import io.github.luigeneric.core.sector.npcbehaviour.KillObjective;
 import io.github.luigeneric.core.sector.npcbehaviour.PatrolObjective;
 import io.github.luigeneric.core.spaceentities.NpcShip;
+import io.github.luigeneric.core.spaceentities.PlayerShip;
 import io.github.luigeneric.core.spaceentities.SpaceObject;
 import io.github.luigeneric.enums.ManeuverType;
 import io.github.luigeneric.enums.RemovingCause;
@@ -142,10 +143,17 @@ public class NpcDynamicTimer extends NpcTimer
         final Maneuver newManeuver = isDirectionWithRoll ? new DirectionalManeuver(direction) : new DirectionalWithoutRollManeuver(direction);
         botFighterMoving.getMovementController().setNextManeuver(newManeuver);
 
-        //speed to 0, if distance to target is close enough and the target-speed is less than 5(almost standing)
-        //else max flank-speed
+        /* Speed to 0 when close enough - but the "target almost standing" clause only applies to
+         * PLAYER targets. Against a player it exists so a bot never parks next to someone who is
+         * merely throttled down for a moment; between two NPCs it could never be true while both
+         * chased, so a pair of hostile bots (two spawned capitals, most visibly) drove into each
+         * other by construction, forever - pure pursuit has no other brake and ship-x-ship contact
+         * deals no damage, just the reactive collision pulse. An NPC target holds at
+         * speedZeroDistance unconditionally; the pair squares up and shells each other instead. */
+        final boolean targetHoldsStill = !(closest instanceof PlayerShip)
+                || closest.getMovementController().getFrame().getLinearSpeed().magnitude() < 5f;
         final float speed = closestDistance < botFighterMoving.getNpcBehaviourTemplate().speedZeroDistance()
-                && closest.getMovementController().getFrame().getLinearSpeed().magnitude() < 5f ?
+                && targetHoldsStill ?
                 0 :
                 botFighterMoving.getSpaceSubscribeInfo().getStatOrDefault(ObjectStat.Speed);
 

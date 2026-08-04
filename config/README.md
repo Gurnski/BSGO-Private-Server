@@ -187,6 +187,14 @@ The light and heavy platforms need no such entry. Their launchers (`6042`, `6052
 hand-authored `NotUsing` weapons, and on the `NotUsing` path `getMissileGUID` never reads the
 loaded countable — it fires the default missile directly.
 
+The six capital files `colonial/{5015,5017,5019}` and `cylon/{5115,5117,5119}` — Brimir, Pegasus,
+Galactica and their Cylon counterparts — are **ours**, hand-authored for the debug console's
+`spawn` command, which can put any hull in the catalogue into space as an NPC. These hulls are
+player ships and had no config, so a spawned flagship was an unarmed punching bag that could only
+ram. Each seats the rental stock (`6031` guns, `6034` launchers) plus a point-defence/flak pair
+(`6032`/`6033`) on the defensive bays — all four are `NotUsing`, so no ammunition entries. Ids
+equal ship guids, matching the directory's convention.
+
 ## Not included
 
 The three sector templates (`sectorTemplate0`, `6`, `10`) are ~750 KB of upstream data with small
