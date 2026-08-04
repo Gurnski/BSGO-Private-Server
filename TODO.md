@@ -1,4 +1,4 @@
-# TODO
+﻿# TODO
 
 Ordered by what unblocks the most. Each item says what is actually wrong, not just what to build.
 
@@ -10,7 +10,7 @@ by name, and a spawned Pegasus held its standoff against a Cylon outpost and tra
 Still to see:
 
 - **Flak screens thinning missiles, in both directions.** NPC area weapons used to receive
-  exactly one target id — the closest enemy ship — and stations refreshed their sweep list only
+  exactly one target id â€” the closest enemy ship â€” and stations refreshed their sweep list only
   when their target changed, so neither side's flak ever rolled against a missile launched
   mid-fight.
 - **An outpost missile reading 200 HP when selected.** It was 15, the dump's value from a game
@@ -19,8 +19,8 @@ Still to see:
   Interception on line ships and capitals belongs to their flak and point-defence screens now.
 - **A missile detonating at the Brimir's hull** instead of ~260 units off it (the capital
   colliders are measured boxes now, not length-sized spheres), and **a missile actually hurting
-  a gate basestar** (missile × Cruiser collisions used to pair up and then resolve to nothing).
-- **Every bay on a Galactica rendering a turret.** The synthesised `bullet09`–`12` are gone;
+  a gate basestar** (missile Ã— Cruiser collisions used to pair up and then resolve to nothing).
+- **Every bay on a Galactica rendering a turret.** The synthesised `bullet09`â€“`12` are gone;
   both flagships carry 4 gun / 2 launcher / 2 defensive on real mounts.
 - **A rental surviving a relog with time on the clock.** Counter cards for the four rental guids
   plus the return-slot counter exist now, so the expiry write finally lands somewhere.
@@ -30,22 +30,47 @@ Still to see:
 - **The "perform any action to enter the sector" overlay lifting** after 10 seconds or the first
   stick input, even when the CompleteJump handshake loses its race against the join queue.
 
+## Deployed 5 Aug, unflown
+
+A batch that closed the standing "Next" list. None of it has been seen in a client yet.
+
+- **Outpost Mode** (patch 0025). The carriers' role ability, buyable again for merits and tuning
+  kits. Engage and the carrier is an immobile fortress: no movement, no FTL, half turn rate, more
+  armour and hull regeneration, at 550 power to enter and 15 a second to hold. **Check:** fit it in
+  a carrier's role bay, press it, watch the fortress transformation and the speed pin to zero;
+  confirm the galaxy map refuses a jump; let the power run out and confirm it releases itself;
+  die or dock while fortified and confirm the ship comes back normal.
+- **Every player hull spawns armed** - 86 generated configs, so `spawn viper`, `spawn dreadnought`
+  and the stealth hulls fight instead of drifting. **Check:** spawn a few, confirm no "UNARMED" in
+  the reply and no `ZERO armed slots` warning in the log.
+- **Locked systems grey out their jump button** (patch 0026) instead of offering a jump the server
+  then refuses. **Check:** as Colonial, look at a Cylon-locked system on the galaxy map.
+- **Comets** are live in sector 10. The card set was one view short: the CLIENT depends on a
+  Missile card at the comet guid and it was never emitted, so a comet would have been invisible
+  while still killing anything it touched. **Check:** fly Tannhauser, or use `spawn_comet`.
+- **The flagship auto-return was already fixed and running** - the two-phase hand-back has been in
+  the committed tree since 4 Aug. What was stale was the patch baseline, seven files behind, which
+  was quietly dropping that work from the patch set. Repaired.
+
 ## Next
 
-### Flagship auto-return
+### Verify the batch above in a client
 
-`CapitalRentalExpiry` is written and reviewed but has its `@Scheduled` annotation removed. Its
-header lists the three defects that keep it off: it docks pilots who are not flying the rental, it
-swaps ships from the scheduler thread while the sector thread still ticks that ship, and it rewrites
-the player's sector id before the ship drains. Re-enable only when all three are genuinely fixed.
+Nothing above is proven until it flies. The checks are listed per item.
 
-### Arm spawned player hulls beyond the capitals
+### Comets beyond sector 10
 
-The `spawn` console command arms NPCs from ShipConfigTemplates. The six capitals have them; every
-other player hull spawns unarmed, says so in its spawn reply, and logs a `ZERO armed slots`
-warning on first aggro. If sparring partners in strike or escort hulls turn out to be wanted, a
-generator loop over the hull slot tables would cover the rest — the NPC enemy families
-(`spawn raider`, `spawn viper`) are already armed in the meantime.
+The timer only runs where a sector template asks for it, and only sector 10's does (upstream's
+own). `emit-sector-templates.js` can emit a `cometSectorDesc` per generated sector; do a handful
+first and watch for per-tick sector errors before turning it on galaxy-wide, since a comet kills
+any ship it touches.
+
+### The Outpost Mode beacon half
+
+The wiki remembers Outpost Mode as a fleet jump beacon as well as a fortress: "allows all ships in
+his group to jump to the carrier". Only the fortress half ships. `RequestJumpToBeacon` is an
+explicit not-implemented stub upstream, so the beacon needs real work - the existing `GroupJump`
+machinery is the obvious vehicle.
 
 ## Balance, once the above settles
 
@@ -66,7 +91,7 @@ asteroid sat in any system but 0, 6 and 10, so belts, clusters, junk fields and 
 rather than recovered. The three upstream files are never regenerated.
 
 `galaxy.js` holds the star table and `STAGE`, the number that grows the map; `emit-sector-templates.js`
-writes the templates. They must move in the same commit — a star with no template on disk is a
+writes the templates. They must move in the same commit â€” a star with no template on disk is a
 server that does not boot.
 
 Still open here:
@@ -82,7 +107,7 @@ Still open here:
 ## Known-unfixable, documented so nobody re-investigates
 
 **Ship scrapping.** `ScrapShip` is a logged no-op upstream and `RemoveShip` has zero cases in
-`parseMessage`. Every hull is therefore `CanBeSold: false` — not a choice we made, and a live
+`parseMessage`. Every hull is therefore `CanBeSold: false` â€” not a choice we made, and a live
 footgun the day anyone wires it up, because `ContainerVisitor.sellItem` pays out on `CanBeSold`
 alone with no second gate.
 

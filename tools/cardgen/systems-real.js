@@ -2,18 +2,18 @@
  *
  * GENERATED FILE - do not hand-edit. Regenerate with tools/cardgen/gen-systems-real.js.
  *
- * The original's whole equipment catalogue: 219 level-1 ship systems, each with the ten-level
+ * The original's whole equipment catalogue: 220 level-1 ship systems, each with the ten-level
  * upgrade ladder the original shipped, against the 115 unupgradeable items we author by hand.
- * 2190 level records, 1330 ability records, 133 of the 219 systems carry an ability.
+ * 2200 level records, 1340 ability records, 134 of the 220 systems carry an ability.
  *
  * Everything here is READ from research/dumps/cards_20260729_223813.json - guids, stats, prices,
  * durability, GUI keys, atlas frames, item class, sorting. The ladders are read too, not scaled:
  * a large minority of the dump's level series are hand-tuned and not reproducible by any
  * multiplier. The generator refuses to write unless every value round-trips its own self-check.
  *
- * Per slot and tier: computer/t1=28, computer/t2=20, computer/t3=18, computer/t4=9, defensive_weapon/t4=3, engine/t1=15, engine/t2=7, engine/t3=7, engine/t4=4, gun/t1=3, gun/t4=2, hull/t1=20, hull/t2=11, hull/t3=10, hull/t4=5, launcher/t1=2, launcher/t4=2, special_weapon/t2=1, weapon/t1=15, weapon/t2=18, weapon/t3=19
+ * Per slot and tier: computer/t1=28, computer/t2=20, computer/t3=18, computer/t4=9, defensive_weapon/t4=3, engine/t1=15, engine/t2=7, engine/t3=7, engine/t4=4, gun/t1=3, gun/t4=2, hull/t1=20, hull/t2=11, hull/t3=10, hull/t4=5, launcher/t1=2, launcher/t4=2, role/t4=1, special_weapon/t2=1, weapon/t1=15, weapon/t2=18, weapon/t3=19
  *
- * 15 candidates were dropped - see systems-dropped.json for the guid, key and reason of each.
+ * 14 candidates were dropped - see systems-dropped.json for the guid, key and reason of each.
  *
  * SHAPE. Each record:
  *   sys/slot/tier/key/frame   the level-1 card guid, its slot, its tier, its GUI key and atlas frame
@@ -34,7 +34,7 @@
  *   buy/up/sell               {currencyGuid: amount}. up is never empty and is never synthesised.
  *   ab{}                      that level's ability: guid, add (ItemBuffAdd), and radd / rmul
  *                             (RemoteBuffAdd / RemoteBuffMultiply) when non-empty.
- * ItemBuffMultiply, ToggleSystemAdd and ToggleSystemMultiply are empty on all 1330 ability
+ * ItemBuffMultiply, ToggleSystemAdd and ToggleSystemMultiply are empty on all 1340 ability
  * records, so they are not carried; write stats({}) for them. SkillHashes are not carried either:
  * the dump's are SkillCard.Hash values on a hashing scheme our Skill cards do not share, so
  * porting them would dangle 222 references. Emit [].
@@ -61,7 +61,7 @@ const FLAGS = { using: true, restrictions: true };
  * all (PlayerProtocol.java:782,842). */
 const LADDER = { levels: 10, maxLevel: 10, userUpgradeable: true };
 
-/* The (ConsumableType, ConsumableTier) pairs the 219 systems demand, derived from the dump's own
+/* The (ConsumableType, ConsumableTier) pairs the 220 systems demand, derived from the dump's own
  * ConsumableOption: Using abilities. `systems` lists the level-1 system guids that want the pair.
  * A pair with no buyable consumable behind it makes every one of those weapons silently refuse to
  * fire the moment FLAGS.using flips - the server returns early in AbilityAction.java:172 and the
@@ -3253,6 +3253,25 @@ const SYSTEMS_REAL = [
       { guid: 239259504, dur: 23775, buy: {"215278030":450000}, up: {"264733124":25000}, sell: {"215278030":450000}, ab: { guid: 2397148896, add: {"Acceleration":20,"Angle":60,"ArmorPiercing":35,"Avoidance":567,"Cooldown":25.4,"CriticalOffense":100,"DamageHigh":597,"DamageLow":597,"MaxHullPoints":200,"LifeTime":74,"MaxRange":4000,"MinRange":2250,"PowerPointCost":97,"Speed":110,"InertiaCompensation":100,"PitchAcceleration":30,"PitchMaxSpeed":30,"YawAcceleration":30,"YawMaxSpeed":30,"RollAcceleration":30,"RollMaxSpeed":30} } },
       { guid: 620983673, dur: 24900, buy: {"215278030":450000}, up: {"264733124":35000}, sell: {"215278030":575000}, ab: { guid: 2778873065, add: {"Acceleration":20,"Angle":60,"ArmorPiercing":35,"Avoidance":582,"Cooldown":24.8,"CriticalOffense":100,"DamageHigh":615,"DamageLow":615,"MaxHullPoints":200,"LifeTime":77,"MaxRange":4000,"MinRange":2250,"PowerPointCost":94,"Speed":110,"InertiaCompensation":100,"PitchAcceleration":30,"PitchMaxSpeed":30,"YawAcceleration":30,"YawMaxSpeed":30,"RollAcceleration":30,"RollMaxSpeed":30} } },
       { guid: 1002707842, dur: 26025, buy: {"215278030":450000}, up: {"264733124":50000}, sell: {"215278030":750000}, ab: { guid: 3160597234, add: {"Acceleration":20,"Angle":60,"ArmorPiercing":35,"Avoidance":597,"Cooldown":24.2,"CriticalOffense":100,"DamageHigh":634,"DamageLow":634,"MaxHullPoints":200,"LifeTime":80,"MaxRange":4000,"MinRange":2250,"PowerPointCost":91,"Speed":110,"InertiaCompensation":100,"PitchAcceleration":30,"PitchMaxSpeed":30,"YawAcceleration":30,"YawMaxSpeed":30,"RollAcceleration":30,"RollMaxSpeed":30} } },
+    ] },
+  {
+    sys: 395660941, slot: 'role', tier: 4, key: 'item_slot_capital_system_role_spawn_mode', frame: 166,
+    cls: 'Elite', unique: true, replaceableOnly: true, trashable: false, indestructible: false, maxPerShip: 0,
+    views: ["ToggleSystemAdd","ToggleSystemMultiply","Cooldown","BuffCost","BuffCostPerSecond","Durability"],
+    price: {"category":"System","itemType":"Computer","sortingNames":["standard"],"sortingWeight":841,"faction":"Neutral","canBeSold":false},
+    restrictions: [], dumpRestrictions: [], ourRestrictions: [],
+    ability: {"key":"item_slot_capital_system_role_spawn_mode","frame":166,"actionType":"Fortify","overwriteActionType":"None","launch":"Manual","affect":"Ignore","targetTiers":["Any"],"abilityGroupId":80147350,"consumableType":26008,"consumableTier":0,"consumableOption":"NotUsing","dumpConsumableOption":"NotUsing","guiBuffAtlas":"GUI/Inventory/items_atlas","guiBuffIndex":9,"onByDefault":false,"effectTypeBlacklist":[]},
+    levels: [
+      { guid: 395660941, dur: 30000, buy: {"130920111":16000,"264733124":32000}, up: {"130920111":16000,"254909109":32}, sell: {}, ab: { guid: 395660941, add: {"Cooldown":300,"PowerPointCost":550,"PpCostPerSec":15}, tadd: {"ArmorValue":5,"HullRecovery":5}, tmul: {"MetaPropulsion":0,"FtlRange":0,"MetaManeuverability":0.5} } },
+      { guid: 626050917, dur: 30000, buy: {"130920111":16000,"264733124":32000}, up: {"130920111":16000,"254909109":32}, sell: {}, ab: { guid: 626050917, add: {"Cooldown":285,"PowerPointCost":535,"PpCostPerSec":15}, tadd: {"ArmorValue":6.5,"HullRecovery":7}, tmul: {"MetaPropulsion":0,"FtlRange":0,"MetaManeuverability":0.5} } },
+      { guid: 626536679, dur: 30000, buy: {"130920111":16000,"264733124":32000}, up: {"130920111":16000,"254909109":32}, sell: {}, ab: { guid: 626536679, add: {"Cooldown":262.5,"PowerPointCost":512.5,"PpCostPerSec":15}, tadd: {"ArmorValue":8.75,"HullRecovery":10}, tmul: {"MetaPropulsion":0,"FtlRange":0,"MetaManeuverability":0.5} } },
+      { guid: 3548232593, dur: 30000, buy: {"130920111":16000,"264733124":32000}, up: {"130920111":16000,"254909109":32}, sell: {}, ab: { guid: 3548232593, add: {"Cooldown":255,"PowerPointCost":505,"PpCostPerSec":15}, tadd: {"ArmorValue":9.5,"HullRecovery":11}, tmul: {"MetaPropulsion":0,"FtlRange":0,"MetaManeuverability":0.5} } },
+      { guid: 2233408528, dur: 30000, buy: {"130920111":16000,"264733124":32000}, up: {"130920111":16000,"254909109":32}, sell: {}, ab: { guid: 2233408528, add: {"Cooldown":247.5,"PowerPointCost":497.5,"PpCostPerSec":15}, tadd: {"ArmorValue":10.25,"HullRecovery":12}, tmul: {"MetaPropulsion":0,"FtlRange":0,"MetaManeuverability":0.5} } },
+      { guid: 1434222056, dur: 30000, buy: {"130920111":16000,"264733124":32000}, up: {"130920111":16000,"254909109":32}, sell: {}, ab: { guid: 1434222056, add: {"Cooldown":240,"PowerPointCost":490,"PpCostPerSec":15}, tadd: {"ArmorValue":11,"HullRecovery":13}, tmul: {"MetaPropulsion":0,"FtlRange":0,"MetaManeuverability":0.5} } },
+      { guid: 1170108486, dur: 30000, buy: {"130920111":16000,"264733124":32000}, up: {"130920111":16000,"254909109":32}, sell: {}, ab: { guid: 1170108486, add: {"Cooldown":177,"PowerPointCost":427,"PpCostPerSec":15}, tadd: {"ArmorValue":17.3,"HullRecovery":21.4}, tmul: {"MetaPropulsion":0,"FtlRange":0,"MetaManeuverability":0.5} } },
+      { guid: 4055594025, dur: 30000, buy: {"130920111":16000,"264733124":32000}, up: {"130920111":16000,"254909109":32}, sell: {}, ab: { guid: 4055594025, add: {"Cooldown":168,"PowerPointCost":418,"PpCostPerSec":15}, tadd: {"ArmorValue":18.2,"HullRecovery":22.6}, tmul: {"MetaPropulsion":0,"FtlRange":0,"MetaManeuverability":0.5} } },
+      { guid: 504156171, dur: 30000, buy: {"130920111":16000,"264733124":32000}, up: {"130920111":16000,"254909109":32}, sell: {}, ab: { guid: 504156171, add: {"Cooldown":159,"PowerPointCost":409,"PpCostPerSec":15}, tadd: {"ArmorValue":19.1,"HullRecovery":23.8}, tmul: {"MetaPropulsion":0,"FtlRange":0,"MetaManeuverability":0.5} } },
+      { guid: 1651842504, dur: 30000, buy: {"130920111":16000,"264733124":32000}, up: {"130920111":16000,"264733124":32000}, sell: {}, ab: { guid: 1651842504, add: {"Cooldown":150,"PowerPointCost":400,"PpCostPerSec":15}, tadd: {"ArmorValue":20,"HullRecovery":25}, tmul: {"MetaPropulsion":0,"FtlRange":0,"MetaManeuverability":0.5} } },
     ] },
   {
     sys: 2858586174, slot: 'special_weapon', tier: 2, key: 'item_slot_escort_system_assault_launcher_nuclear_missile_anti_carrier', frame: 244,

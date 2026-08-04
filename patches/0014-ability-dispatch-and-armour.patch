@@ -26,7 +26,7 @@ index 1cf5cb0..61e3437 100644
                  new FlareChanceAlgorithmV1(),
                  new HackDurationAlgorithmV1()
 diff --git a/src/main/java/io/github/luigeneric/core/sector/management/abilities/AbilityActionFactory.java b/src/main/java/io/github/luigeneric/core/sector/management/abilities/AbilityActionFactory.java
-index 2d7eb29..21c0f7e 100644
+index 2d7eb29..c911329 100644
 --- a/src/main/java/io/github/luigeneric/core/sector/management/abilities/AbilityActionFactory.java
 +++ b/src/main/java/io/github/luigeneric/core/sector/management/abilities/AbilityActionFactory.java
 @@ -10,6 +10,7 @@ import io.github.luigeneric.core.sector.management.damage.DamageMediator;
@@ -87,6 +87,19 @@ index 2d7eb29..21c0f7e 100644
              case FireMining ->
              {
                  return new FireMiningAction(castingShip, castingSlot, targetSpaceObjects, isAutocastAbility,
+@@ -94,6 +127,12 @@ public class AbilityActionFactory
+             {
+                 return new PointDefenseAction(castingShip, castingSlot, targetSpaceObjects, isAutocastAbility, ctx, sectorAlgorithms, damageMediator);
+             }
++            // Outpost Mode. Also what un-drops the card family: gen-systems-real.js reads the
++            // case arms in this file to decide which dump systems are safe to emit.
++            case Fortify ->
++            {
++                return new FortifyAction(castingShip, castingSlot, targetSpaceObjects, isAutocastAbility, ctx);
++            }
+             default -> throw new IllegalArgumentException("AbilityActionType " + type + " not implemented!");
+         }
+     }
 diff --git a/src/main/java/io/github/luigeneric/core/sector/management/abilities/actions/FireCannonAction.java b/src/main/java/io/github/luigeneric/core/sector/management/abilities/actions/FireCannonAction.java
 index 8531583..cf91158 100644
 --- a/src/main/java/io/github/luigeneric/core/sector/management/abilities/actions/FireCannonAction.java

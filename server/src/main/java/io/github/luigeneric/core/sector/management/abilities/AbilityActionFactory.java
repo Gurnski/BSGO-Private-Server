@@ -127,6 +127,12 @@ public class AbilityActionFactory
             {
                 return new PointDefenseAction(castingShip, castingSlot, targetSpaceObjects, isAutocastAbility, ctx, sectorAlgorithms, damageMediator);
             }
+            // Outpost Mode. Also what un-drops the card family: gen-systems-real.js reads the
+            // case arms in this file to decide which dump systems are safe to emit.
+            case Fortify ->
+            {
+                return new FortifyAction(castingShip, castingSlot, targetSpaceObjects, isAutocastAbility, ctx);
+            }
             default -> throw new IllegalArgumentException("AbilityActionType " + type + " not implemented!");
         }
     }

@@ -745,7 +745,7 @@ index 76d27dc..6e99f09 100644
      }
  
 diff --git a/src/main/java/io/github/luigeneric/core/spaceentities/statsinfo/stats/SpaceSubscribeInfo.java b/src/main/java/io/github/luigeneric/core/spaceentities/statsinfo/stats/SpaceSubscribeInfo.java
-index 69e527e..9f14f44 100644
+index 69e527e..a2e354d 100644
 --- a/src/main/java/io/github/luigeneric/core/spaceentities/statsinfo/stats/SpaceSubscribeInfo.java
 +++ b/src/main/java/io/github/luigeneric/core/spaceentities/statsinfo/stats/SpaceSubscribeInfo.java
 @@ -223,6 +223,14 @@ public class SpaceSubscribeInfo
@@ -763,3 +763,23 @@ index 69e527e..9f14f44 100644
  
      public void setSkillBook(final SkillBook skillBook)
      {
+@@ -350,6 +358,19 @@ public class SpaceSubscribeInfo
+         this.applyStats();
+     }
+ 
++    /**
++     * Fan a toggle-ability on/off notice out to every subscriber, so the caster's toolbar button
++     * lights up and onlookers get the buff icon. Separate from the modifier fan-out above: a
++     * toggle's STATS travel as a ShipModifier, but the button state is its own wire update.
++     */
++    public void sendToggleBuff(final int slotID, final long abilityGuid, final boolean on)
++    {
++        for (final BasePropertyBuffer sub : this.subscribers.values())
++        {
++            sub.onToggleBuff(slotID, abilityGuid, on);
++        }
++    }
++
+     public void removeModifiers(final Set<Long> toRemoveModifiers)
+     {
+         final Optional<ShipModifiers> optModifiers = this.getShipModifiers();

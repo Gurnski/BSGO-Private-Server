@@ -1,0 +1,453 @@
+diff --git a/src/main/java/io/github/luigeneric/core/protocols/player/handlers/ChangeFactionHandler.java b/src/main/java/io/github/luigeneric/core/protocols/player/handlers/ChangeFactionHandler.java
+index 2ca9edf..5941a08 100644
+--- a/src/main/java/io/github/luigeneric/core/protocols/player/handlers/ChangeFactionHandler.java
++++ b/src/main/java/io/github/luigeneric/core/protocols/player/handlers/ChangeFactionHandler.java
+@@ -15,6 +15,7 @@ import io.github.luigeneric.core.player.location.Location;
+ import io.github.luigeneric.core.protocols.ProtocolID;
+ import io.github.luigeneric.core.protocols.ProtocolMessageHandler;
+ import io.github.luigeneric.core.protocols.community.CommunityProtocol;
++import io.github.luigeneric.core.protocols.player.CapitalRental;
+ import io.github.luigeneric.core.protocols.player.CharacterServices;
+ import io.github.luigeneric.core.protocols.player.ShipCardConverter;
+ import io.github.luigeneric.core.protocols.scene.SceneProtocol;
+@@ -78,6 +79,12 @@ public class ChangeFactionHandler implements ProtocolMessageHandler
+         ShipSlotVisitor shipSlotVisitor = new ShipSlotVisitor(user, null);
+         for (final HangarShip hangarShip : hangar.getAllHangarShips())
+         {
++            /* A rented capital arrives pre-armed with systems the pilot never bought. Stripping
++             * them into the Locker here would bank 720k tylium of tier-4 hardware for the price of
++             * a faction switch; removeAllHangarShips below discards the hull either way. */
++            if (CapitalRental.isRental(hangarShip.getCardGuid()))
++                continue;
++
+             for (ShipSlot slot : hangarShip.getShipSlots().values())
+             {
+                 final ShipItem removedShipItem = slot.removeShipItem();
+@@ -86,8 +93,14 @@ public class ChangeFactionHandler implements ProtocolMessageHandler
+                 shipSlotVisitor.addShipItem(removedShipItem, user.getPlayer().getLocker());
+             }
+         }
++        /* A rental does NOT convert. The loop above deliberately leaves its systems fitted rather
++         * than banking them in the Locker, and the comment there used to claim removeAllHangarShips
++         * discarded the hull - it does not: the card list below is built first, the converter maps
++         * the capital onto the other faction's ShipList by HangarID, and the rebuild loop hands it
++         * back as a PERMANENT hull, fully armed. An hour of a Pegasus became a Basestar to keep. */
+         final List<ShipCard> shipCards = hangar.getAllHangarShips().stream()
+                 .map(HangarShip::getShipCard)
++                .filter(card -> !CapitalRental.isRental(card.getCardGuid()))
+                 .toList();
+ 
+         final ShipCardConverter shipCardConverter = new ShipCardConverter(user.getPlayer().getFaction());
+diff --git a/src/main/java/io/github/luigeneric/core/sector/management/abilities/actions/FortifyAction.java b/src/main/java/io/github/luigeneric/core/sector/management/abilities/actions/FortifyAction.java
+new file mode 100644
+index 0000000..c211d42
+--- /dev/null
++++ b/src/main/java/io/github/luigeneric/core/sector/management/abilities/actions/FortifyAction.java
+@@ -0,0 +1,156 @@
++package io.github.luigeneric.core.sector.management.abilities.actions;
++
++import io.github.luigeneric.core.player.container.ShipSlot;
++import io.github.luigeneric.core.sector.ShipModifier;
++import io.github.luigeneric.core.sector.creation.SectorContext;
++import io.github.luigeneric.core.spaceentities.PlayerShip;
++import io.github.luigeneric.core.spaceentities.Ship;
++import io.github.luigeneric.core.spaceentities.SpaceObject;
++import io.github.luigeneric.enums.Gear;
++import io.github.luigeneric.templates.cards.ShipAbilityCard;
++import io.github.luigeneric.templates.utils.ObjectStat;
++import io.github.luigeneric.templates.utils.ObjectStats;
++import lombok.extern.slf4j.Slf4j;
++
++import java.util.List;
++
++/**
++ * Outpost Mode - the carrier classes' role ability, ActionType Fortify.
++ *
++ * A toggle, not a cast: press once to become a fortress, press again to release. The card's
++ * ToggleSystem stats are the whole design and this class only has to route them -
++ * ToggleSystemMultiply {MetaPropulsion 0, FtlRange 0, MetaManeuverability 0.5} and
++ * ToggleSystemAdd {ArmorValue, HullRecovery}. They travel as an ordinary ShipModifier, which is
++ * what makes them show up in the client's buff list and, more importantly, what makes
++ * applyStats() fold them into the live stat block the movement sim and the damage calculator
++ * already read every tick. Nothing else needs teaching.
++ *
++ * MetaPropulsion and MetaManeuverability are the CARD's names for "engines" and "steering"; the
++ * server's movement stats are Speed/BoostSpeed and the three rotation speeds, so they are mapped
++ * here rather than plumbed as new stats nothing else reads.
++ *
++ * The upkeep drain lives in FortifyUpkeepTimer, and the cleanup that must survive death, docking
++ * and disconnection lives in SpaceObjectRemover - a modifier on a HangarShip's stats outlives the
++ * PlayerShip that carried it, so releasing it in exactly one place beats releasing it in five.
++ */
++@Slf4j
++public class FortifyAction extends AbilityAction
++{
++    public FortifyAction(final Ship castingShip,
++                         final ShipSlot castingSlot,
++                         final List<SpaceObject> targetSpaceObjects,
++                         final boolean isAutoCastAbility,
++                         final SectorContext ctx)
++    {
++        super(castingShip, castingSlot, targetSpaceObjects, isAutoCastAbility, ctx);
++    }
++
++    /* Toggle-off deliberately bypasses preFun. Releasing must never be blocked by the 300-second
++     * cooldown or by the power the ability costs to ENGAGE - a carrier that cannot un-fortify
++     * because it is broke or on cooldown is a carrier the player has lost for five minutes. */
++    @Override
++    public void process()
++    {
++        if (!(castingShip instanceof PlayerShip))
++        {
++            log.warn("Fortify cast by a non-player ship {} - only players carry role slots",
++                    castingShip.getObjectID());
++            return;
++        }
++
++        if (castingShip.getSpaceObjectState().getIsFortified())
++        {
++            unfortify(castingShip);
++            return;
++        }
++        super.process();
++    }
++
++    @Override
++    protected boolean internalProcess()
++    {
++        final ShipAbilityCard card = ability.getShipAbilityCard();
++        final ShipModifier modifier = ShipModifier.create(ability, system, startTimeStamp, castingShip.getPlayerId());
++
++        /* ShipModifiers.checkTimeout unboxes Duration on EVERY modifier every tick, so a modifier
++         * without one NPEs the timeout timer. A toggle has no duration by nature; a year stands in
++         * for "until released", and the release paths are what actually end it. */
++        modifier.getItemBuffAdd().setStat(ObjectStat.Duration, 31_536_000f);
++
++        final ObjectStats toggleMultiply = card.getGetToggleSystemMultiply();
++        final ObjectStats toggleAdd = card.getToggleSystemAdd();
++        final ObjectStats modifierMultiply = modifier.getRemoteBuffMultiply();
++
++        if (toggleMultiply.containsStat(ObjectStat.MetaPropulsion))
++        {
++            final float propulsion = toggleMultiply.getStat(ObjectStat.MetaPropulsion);
++            modifierMultiply.setStat(ObjectStat.Speed, propulsion);
++            modifierMultiply.setStat(ObjectStat.BoostSpeed, propulsion);
++        }
++        if (toggleMultiply.containsStat(ObjectStat.MetaManeuverability))
++        {
++            final float maneuverability = toggleMultiply.getStat(ObjectStat.MetaManeuverability);
++            modifierMultiply.setStat(ObjectStat.TurnSpeed, maneuverability);
++            modifierMultiply.setStat(ObjectStat.RollMaxSpeed, maneuverability);
++        }
++        /* FtlRange 0 is what refuses the jump: GameProtocol's jump path measures the hop against
++         * this stat, so zero fails every distance without a fortify-specific branch anywhere. */
++        if (toggleMultiply.containsStat(ObjectStat.FtlRange))
++        {
++            modifierMultiply.setStat(ObjectStat.FtlRange, toggleMultiply.getStat(ObjectStat.FtlRange));
++        }
++        modifier.getRemoteBuffAdd().setStats(toggleAdd);
++
++        casterStats.addModifier(modifier);
++
++        /* Zero the throttle as well as the stat. The multiplier caps what the hull MAY do; the
++         * throttle is what it is currently asking for, and an unzeroed throttle leaves the sim
++         * trying to accelerate against a zero ceiling. The hull still coasts down at its own
++         * deceleration, which is the settling-into-position the fortress animation wants. */
++        final var movementOptions = castingShip.getMovementController().getMovementOptions();
++        movementOptions.setGear(Gear.Regular);
++        movementOptions.setSpeedAndThrottle(0f);
++        castingShip.getMovementController().setMovementOptionsNeedUpdate();
++
++        castingShip.getSpaceObjectState().setFortified(true);
++        casterStats.sendToggleBuff(system.getServerID(), card.getCardGuid(), true);
++
++        log.info("Fortify ON for player {} ({})", castingShip.getPlayerId(), castingShip.getObjectID());
++        return true;
++    }
++
++    /**
++     * Release a fortified ship. Static and public because every path that takes a ship away from
++     * its pilot - death, docking, jumping out, disconnecting - has to run it, and they all live
++     * in SpaceObjectRemover rather than here.
++     */
++    public static void unfortify(final Ship ship)
++    {
++        final var stats = ship.getSpaceSubscribeInfo();
++        stats.getModifiers().ifPresent(modifiers ->
++        {
++            final var fortifyModifiers = modifiers.getOfType(io.github.luigeneric.templates.utils.AbilityActionType.Fortify);
++            if (fortifyModifiers.isEmpty())
++                return;
++
++            final var ids = new java.util.HashSet<Long>();
++            fortifyModifiers.forEach(mod -> ids.add(mod.getServerID()));
++            /* removeModifiers re-runs applyStats, which restores Speed, FtlRange and the armour
++             * bonus in one step, and tells every subscriber to drop the buff icon. */
++            stats.removeModifiers(ids);
++
++            // Unlight the toolbar button on whichever slot carries the ability.
++            fortifyModifiers.forEach(mod ->
++                    stats.sendToggleBuff(mod.getShipSystem().getServerID(),
++                            mod.getShipAbility().getShipAbilityCard().getCardGuid(), false));
++        });
++
++        if (ship.getSpaceObjectState().getIsFortified())
++        {
++            ship.getSpaceObjectState().setFortified(false);
++            log.info("Fortify OFF for player {} ({})", ship.getPlayerId(), ship.getObjectID());
++        }
++        /* Throttle stays where it is - at zero. The pilot throttles back up themselves, which the
++         * sim now allows because the Speed ceiling came back with the modifier removal. */
++    }
++}
+diff --git a/src/main/java/io/github/luigeneric/core/sector/timers/FortifyUpkeepTimer.java b/src/main/java/io/github/luigeneric/core/sector/timers/FortifyUpkeepTimer.java
+new file mode 100644
+index 0000000..18060d4
+--- /dev/null
++++ b/src/main/java/io/github/luigeneric/core/sector/timers/FortifyUpkeepTimer.java
+@@ -0,0 +1,63 @@
++package io.github.luigeneric.core.sector.timers;
++
++import io.github.luigeneric.core.sector.Tick;
++import io.github.luigeneric.core.sector.management.SectorSpaceObjects;
++import io.github.luigeneric.core.sector.management.abilities.actions.FortifyAction;
++import io.github.luigeneric.core.spaceentities.PlayerShip;
++import io.github.luigeneric.core.spaceentities.SpaceObject;
++import io.github.luigeneric.enums.SpaceEntityType;
++import io.github.luigeneric.templates.utils.AbilityActionType;
++import io.github.luigeneric.templates.utils.ObjectStat;
++import lombok.extern.slf4j.Slf4j;
++
++/**
++ * Outpost Mode's running cost. The ability charges 550 power to engage and then PpCostPerSec every
++ * second it stays engaged, which is the whole reason a carrier cannot simply live as a fortress:
++ * a ship that runs its reserves dry drops out of the mode on its own.
++ *
++ * Runs once a second like the other cost timers. Reading the rate off the live modifier rather
++ * than the card means an upgraded system charges its own upgraded rate with no table here.
++ */
++@Slf4j
++public class FortifyUpkeepTimer extends DelayedTimer
++{
++    public FortifyUpkeepTimer(final Tick tick, final SectorSpaceObjects sectorSpaceObjects, final long delayedTicks)
++    {
++        super(tick, sectorSpaceObjects, delayedTicks);
++    }
++
++    @Override
++    protected void delayedUpdate()
++    {
++        for (final SpaceObject spaceObject : sectorSpaceObjects.getSpaceObjectsOfEntityType(SpaceEntityType.Player))
++        {
++            if (spaceObject.isRemoved() || !spaceObject.getSpaceObjectState().getIsFortified())
++                continue;
++            if (!(spaceObject instanceof PlayerShip playerShip))
++                continue;
++
++            final var stats = playerShip.getSpaceSubscribeInfo();
++            final float costPerSecond = stats.getModifiers()
++                    .flatMap(mods -> mods.getOfTypeStream(AbilityActionType.Fortify).findFirst())
++                    .map(mod -> mod.getItemBuffAdd().getStatOrDefault(ObjectStat.PpCostPerSec))
++                    .orElse(0f);
++
++            /* No modifier, or a free one: the state bit and the modifier have come apart, which
++             * should not happen - release rather than leave a fortress nothing is paying for. */
++            if (costPerSecond <= 0f)
++            {
++                log.warn("fortified ship {} has no upkeep-bearing Fortify modifier - releasing",
++                        playerShip.getObjectID());
++                FortifyAction.unfortify(playerShip);
++                continue;
++            }
++
++            if (stats.getPp() < costPerSecond)
++            {
++                FortifyAction.unfortify(playerShip);
++                continue;
++            }
++            stats.setPp(stats.getPp() - costPerSecond);
++        }
++    }
++}
+diff --git a/src/main/java/io/github/luigeneric/core/spaceentities/bindings/SpaceObjectState.java b/src/main/java/io/github/luigeneric/core/spaceentities/bindings/SpaceObjectState.java
+index 5726bd1..228494d 100644
+--- a/src/main/java/io/github/luigeneric/core/spaceentities/bindings/SpaceObjectState.java
++++ b/src/main/java/io/github/luigeneric/core/spaceentities/bindings/SpaceObjectState.java
+@@ -155,6 +155,29 @@ public class SpaceObjectState implements IProtocolWrite
+ 
+     }
+ 
++    public boolean getIsFortified()
++    {
++        return isFortified;
++    }
++
++    /* Outpost Mode. The client keys the ENTIRE fortress presentation off this one bit - the
++     * Fortress mesh swap, engines off, the transformation sound - via the state broadcast
++     * SpaceObjectStateTimer already sends whenever changed flips. The server side that makes the
++     * bit mean something (stat modifier, upkeep drain, jump refusal) lives in FortifyAction. */
++    public void setFortified(final boolean fortified)
++    {
++        lock.lock();
++        try
++        {
++            changed = true;
++            isFortified = fortified;
++        }
++        finally
++        {
++            lock.unlock();
++        }
++    }
++
+     public boolean isChanged()
+     {
+         lock.lock();
+diff --git a/src/main/java/io/github/luigeneric/core/spaceentities/statsinfo/buffer/BasePropertyBuffer.java b/src/main/java/io/github/luigeneric/core/spaceentities/statsinfo/buffer/BasePropertyBuffer.java
+index 5f8c409..9df7b3e 100644
+--- a/src/main/java/io/github/luigeneric/core/spaceentities/statsinfo/buffer/BasePropertyBuffer.java
++++ b/src/main/java/io/github/luigeneric/core/spaceentities/statsinfo/buffer/BasePropertyBuffer.java
+@@ -79,6 +79,26 @@ public abstract class BasePropertyBuffer implements IProtocolWrite, ISpaceInfoSu
+         }
+     }
+ 
++    /**
++     * Queue a toggle-ability on/off notice for this subscriber. Called from the ability action,
++     * not from a stat change, because a toggle is not a stat: the client's toolbar state is
++     * driven by this update alone (see ToggleBuffUpdate).
++     */
++    public void onToggleBuff(final int slotID, final long abilityGuid, final boolean on)
++    {
++        lock.lock();
++        try
++        {
++            this.addUpdate(new ToggleBuffUpdate(
++                    on ? SpaceUpdateType.AddToggleBuff : SpaceUpdateType.RemoveToggleBuff,
++                    slotID, abilityGuid));
++        }
++        finally
++        {
++            lock.unlock();
++        }
++    }
++
+     public boolean isUpdated()
+     {
+         lock.lock();
+diff --git a/src/main/java/io/github/luigeneric/core/spaceentities/statsinfo/buffer/propertyupdates/ToggleBuffUpdate.java b/src/main/java/io/github/luigeneric/core/spaceentities/statsinfo/buffer/propertyupdates/ToggleBuffUpdate.java
+new file mode 100644
+index 0000000..8f43394
+--- /dev/null
++++ b/src/main/java/io/github/luigeneric/core/spaceentities/statsinfo/buffer/propertyupdates/ToggleBuffUpdate.java
+@@ -0,0 +1,68 @@
++package io.github.luigeneric.core.spaceentities.statsinfo.buffer.propertyupdates;
++
++
++import io.github.luigeneric.binaryreaderwriter.BgoProtocolWriter;
++import io.github.luigeneric.core.spaceentities.statsinfo.buffer.SpaceUpdateType;
++
++/**
++ * Tells a client that a toggle ability turned on or off. The client keys its toolbar state off
++ * this and nothing else: SpaceSubscribeInfo.Read routes AddToggleBuff(14)/RemoveToggleBuff(15) to
++ * OnAddToggleBuff/OnRemoveToggleBuff, and MyShipStats sets slot.Ability.ToggleAbilityActivated
++ * from there - which is what lights (or unlights) the button. Without this update a toggled
++ * ability works server-side while the button stays dark, and the player cannot tell it is on.
++ *
++ * Wire shape is the client's: type byte, slot id as ONE byte, ability guid as a uint32.
++ */
++public class ToggleBuffUpdate extends PropertyUpdate
++{
++    private final int slotID;
++    private final long abilityGuid;
++
++    public ToggleBuffUpdate(final SpaceUpdateType spaceUpdateType, final int slotID, final long abilityGuid)
++    {
++        super(spaceUpdateType);
++        this.slotID = slotID;
++        this.abilityGuid = abilityGuid;
++    }
++
++    @Override
++    public void write(final BgoProtocolWriter bw)
++    {
++        super.write(bw);
++        bw.writeByte((byte) this.slotID);
++        bw.writeGUID(this.abilityGuid);
++    }
++
++    /* Equality is (type, slot, guid) so an on and a subsequent off never collapse into one
++     * update: BasePropertyBuffer keeps a Set and drops duplicates, and the pair must both
++     * survive a tick that carries them together. */
++    @Override
++    public boolean equals(final Object o)
++    {
++        if (this == o) return true;
++        if (o == null || getClass() != o.getClass()) return false;
++        if (!super.equals(o)) return false;
++
++        final ToggleBuffUpdate that = (ToggleBuffUpdate) o;
++        return slotID == that.slotID && abilityGuid == that.abilityGuid;
++    }
++
++    @Override
++    public int hashCode()
++    {
++        int result = super.hashCode();
++        result = 31 * result + slotID;
++        result = 31 * result + (int) (abilityGuid ^ (abilityGuid >>> 32));
++        return result;
++    }
++
++    @Override
++    public String toString()
++    {
++        return "ToggleBuffUpdate{" +
++                "slotID=" + slotID +
++                ", abilityGuid=" + abilityGuid +
++                ", spaceUpdateType=" + spaceUpdateType +
++                '}';
++    }
++}
+diff --git a/src/main/java/io/github/luigeneric/core/spaceentities/statsinfo/stats/ShipSubscribeInfo.java b/src/main/java/io/github/luigeneric/core/spaceentities/statsinfo/stats/ShipSubscribeInfo.java
+index f63fa2c..eb8ab88 100644
+--- a/src/main/java/io/github/luigeneric/core/spaceentities/statsinfo/stats/ShipSubscribeInfo.java
++++ b/src/main/java/io/github/luigeneric/core/spaceentities/statsinfo/stats/ShipSubscribeInfo.java
+@@ -18,11 +18,22 @@ import lombok.extern.slf4j.Slf4j;
+ import java.util.Map;
+ import java.util.Objects;
+ import java.util.Optional;
++import java.util.Set;
+ import java.util.concurrent.atomic.AtomicLong;
+ 
+ @Slf4j
+ public class ShipSubscribeInfo extends SpaceSubscribeInfo
+ {
++    /** Abilities whose ItemBuffAdd describes a SPAWNED OBJECT rather than the firing hull - see
++     *  applyAbilitySlotStats, where a hull speed multiplier must not reach these. */
++    private static final Set<AbilityActionType> PROJECTILE_ACTIONS = Set.of(
++            AbilityActionType.FireMissle,
++            AbilityActionType.FireTorpedo,
++            AbilityActionType.FireHeavyMissile,
++            AbilityActionType.FireLightMissile,
++            AbilityActionType.DropFlare
++    );
++
+     protected final ObjectStats statsBase;
+     protected final ObjectStats statsWithSlots;
+     protected final ShipModifiers shipModifiers;
+@@ -202,7 +213,14 @@ public class ShipSubscribeInfo extends SpaceSubscribeInfo
+             // ----- multipliers -----
+             final Map<ObjectStat, Float> best = modifiers.filterForBestRemoteBuffMultiply();
+             ObjectStats buffs = new ObjectStats(best);
+-            if (ability.getShipAbilityCard().getAbilityActionType().equals(AbilityActionType.FireMissle))
++            /* A ship-speed multiplier must never reach a PROJECTILE's flight stats. On a launcher
++             * ability these stats describe the round, not the hull, so an engine debuff used to
++             * make its missiles slower - and Outpost Mode, which multiplies Speed by ZERO, would
++             * give the round Speed 0 and divide to NaN inside MovementSimulation, killing the
++             * sector tick for everyone every frame that round exists. The carve-out was written
++             * for FireMissle alone; every launcher family needs it, which is four action types
++             * plus the flare that also spawns a moving object. */
++            if (PROJECTILE_ACTIONS.contains(ability.getShipAbilityCard().getAbilityActionType()))
+             {
+                 buffs.removeStat(ObjectStat.BoostSpeed);
+                 buffs.removeStat(ObjectStat.TurnSpeed);

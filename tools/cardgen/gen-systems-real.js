@@ -147,8 +147,18 @@ const STATION_OVERRIDES = {
   1277437130: { Angle: 360 },
 };
 
-/* Currency guids, for the price report only. Tylium and Cubits are the only two the 219 use. */
-const TYLIUM = 215278030, CUBITS = 264733124;
+/* The guid-stride checks assert that a family's ten level cards sit at a fixed arithmetic stride,
+ * which is true of every ordinary equipment chain and is a good corruption check. Outpost Mode
+ * (the carriers' role ability) does not follow it - its ten rungs were authored by hand in the
+ * original data - so the chain is walked by its own NextCard pointers instead. Verified gapless:
+ * ten rungs, Level 1..10, each pointing at the next. */
+const STRIDE_EXEMPT = new Set([395660941]);
+
+/* Currency guids, for the price report only. Tylium and Cubits buy the equipment ladder; Outpost
+ * Mode is the one system the original priced differently, in merits to buy and merits plus tuning
+ * kits to upgrade - which is what made it the expensive prestige fit players remember. */
+const TYLIUM = 215278030, CUBITS = 264733124, MERITS = 130920111, TUNING_KIT = 254909109;
+const ALLOWED_CURRENCIES = new Set([TYLIUM, CUBITS, MERITS, TUNING_KIT]);
 
 /* ------------------------------------------------------------------ EXPECTED SHAPE
  *
@@ -158,9 +168,13 @@ const TYLIUM = 215278030, CUBITS = 264733124;
  * fails rather than quietly emitting a different catalogue. Update these numbers only together
  * with the reason.
  */
+/* Moved 219 -> 220 (and every count with it) when Outpost Mode joined: AbilityActionFactory
+ * gained its Fortify arm, so the carriers' role ability is no longer a system that would throw
+ * inside the sector tick. It brings one role/t4 census row, ten level records, ten ability
+ * records and two GUI keys (its own and its ability's, which share a guid). */
 const EXPECT = {
-  kept: 219, dropped: 15, levelRecords: 2190, withAbility: 133, abilityRecords: 1330,
-  abilityGroups: 17, demandedPairs: 30, guiKeys: 352,
+  kept: 220, dropped: 14, levelRecords: 2200, withAbility: 134, abilityRecords: 1340,
+  abilityGroups: 17, demandedPairs: 30, guiKeys: 354,
   census: {
     'weapon/t1': 15, 'weapon/t2': 18, 'weapon/t3': 19,
     'computer/t1': 28, 'computer/t2': 20, 'computer/t3': 18, 'computer/t4': 9,
@@ -170,6 +184,7 @@ const EXPECT = {
     'launcher/t1': 2, 'launcher/t4': 2,
     'defensive_weapon/t4': 3,
     'special_weapon/t2': 1,
+    'role/t4': 1,
   },
 };
 
@@ -373,15 +388,18 @@ for (const c of kept) {
       const a = D.abil.get(aref.guid);
       if (!a) { fail(`level card ${g} references missing ability ${aref.guid}`); break; }
       claimPair(aref.guid, 'ShipAbility', `ability of system ${c.guid} level ${L}`);
-      claimPair(aref.guid, 'GUI', `ability of system ${c.guid} level ${L}`);
+      /* Outpost Mode's ability shares its system's guid, so the (guid, GUI) pair is already
+       * claimed by the system rung above and claiming it twice would read as a duplicate. Every
+       * other family gives its ability a guid of its own. */
+      if (aref.guid !== g)
+        claimPair(aref.guid, 'GUI', `ability of system ${c.guid} level ${L}`);
 
-      /* ItemBuffMultiply, ToggleSystemAdd and ToggleSystemMultiply are empty on all 1,330 ability
-       * level cards of the 219, so the consumer writes stats({}) for them and this module does not
-       * carry them. If a re-imported dump ever fills one, this catches it instead of silently
-       * dropping the values. */
-      for (const b of ['ItemBuffMultiply', 'ToggleSystemAdd', 'ToggleSystemMultiply'])
-        if (nonEmpty(statsOf(a[b])))
-          fail(`ability ${aref.guid} has a non-empty ${b}, which systems-real.js does not carry`);
+      /* ItemBuffMultiply is empty on all 1,330 ability level cards of the 219, so the consumer
+       * writes stats({}) for it. If a re-imported dump ever fills one, this catches it instead of
+       * silently dropping the values. The two ToggleSystem blocks ARE carried now - they are how
+       * a toggle ability (Outpost Mode) states what it does while engaged. */
+      if (nonEmpty(statsOf(a.ItemBuffMultiply)))
+        fail(`ability ${aref.guid} has a non-empty ItemBuffMultiply, which systems-real.js does not carry`);
 
       const add = Object.assign({}, statsOf(a.ItemBuffAdd));
       if (ovr) for (const [k, v] of Object.entries(ovr)) add[k] = Math.max(add[k] || 0, v);
@@ -389,9 +407,12 @@ for (const c of kept) {
       const radd = statsOf(a.RemoteBuffAdd), rmul = statsOf(a.RemoteBuffMultiply);
       if (nonEmpty(radd)) ab.radd = radd;
       if (nonEmpty(rmul)) ab.rmul = rmul;
+      const tadd = statsOf(a.ToggleSystemAdd), tmul = statsOf(a.ToggleSystemMultiply);
+      if (nonEmpty(tadd)) ab.tadd = tadd;
+      if (nonEmpty(tmul)) ab.tmul = tmul;
       rec.ab = ab;
 
-      if (L > 1) {
+      if (L > 1 && !STRIDE_EXEMPT.has(c.guid)) {
         strideSteps++;
         const prevAb = levels[L - 2].ab.guid;
         if (((prevAb + GUID_STRIDE) >>> 0) !== aref.guid) {
@@ -406,10 +427,12 @@ for (const c of kept) {
     if (L < LEVELS) {
       const next = f.NextCard && f.NextCard.guid;
       if (!next) { fail(`chain ${c.guid} has no NextCard at level ${L}`); break; }
-      strideSteps++;
-      if (((g + GUID_STRIDE) >>> 0) !== next) {
-        strideBad++;
-        fail(`system guid stride broken between levels ${L} and ${L + 1} of chain ${c.guid}`);
+      if (!STRIDE_EXEMPT.has(c.guid)) {
+        strideSteps++;
+        if (((g + GUID_STRIDE) >>> 0) !== next) {
+          strideBad++;
+          fail(`system guid stride broken between levels ${L} and ${L + 1} of chain ${c.guid}`);
+        }
       }
       g = next;
     }
@@ -549,7 +572,11 @@ const badStats = new Set();
 const eachStatBlock = fn => {
   for (const r of records) for (const l of r.levels) {
     if (l.st) fn(l.st); if (l.mu) fn(l.mu);
-    if (l.ab) { fn(l.ab.add); if (l.ab.radd) fn(l.ab.radd); if (l.ab.rmul) fn(l.ab.rmul); }
+    if (l.ab) {
+      fn(l.ab.add);
+      if (l.ab.radd) fn(l.ab.radd); if (l.ab.rmul) fn(l.ab.rmul);
+      if (l.ab.tadd) fn(l.ab.tadd); if (l.ab.tmul) fn(l.ab.tmul);
+    }
   }
 };
 const statKeys = new Set();
@@ -634,7 +661,7 @@ check('station overrides bind at level 1 and hold as a floor', ovrOK, ovrDetail.
 const badCurrency = new Set();
 for (const r of records) for (const l of r.levels)
   for (const m of [l.buy, l.up, l.sell]) for (const g of Object.keys(m))
-    if (Number(g) !== TYLIUM && Number(g) !== CUBITS) badCurrency.add(g);
+    if (!ALLOWED_CURRENCIES.has(Number(g))) badCurrency.add(g);
 check('prices use only tylium and cubits', badCurrency.size === 0,
   badCurrency.size ? [...badCurrency].join(', ') : `${levelRecords} level price sets`);
 
@@ -656,6 +683,8 @@ const lvlLine = (l) => {
     const ab = [`guid: ${l.ab.guid}`, `add: ${J(l.ab.add)}`];
     if (l.ab.radd) ab.push(`radd: ${J(l.ab.radd)}`);
     if (l.ab.rmul) ab.push(`rmul: ${J(l.ab.rmul)}`);
+    if (l.ab.tadd) ab.push(`tadd: ${J(l.ab.tadd)}`);
+    if (l.ab.tmul) ab.push(`tmul: ${J(l.ab.tmul)}`);
     bits.push(`ab: { ${ab.join(', ')} }`);
   }
   return `      { ${bits.join(', ')} },`;

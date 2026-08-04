@@ -14,6 +14,7 @@ import io.github.luigeneric.core.protocols.game.RespawnOptions;
 import io.github.luigeneric.core.sector.SectorCards;
 import io.github.luigeneric.core.sector.SectorJob;
 import io.github.luigeneric.core.sector.creation.SectorContext;
+import io.github.luigeneric.core.sector.management.abilities.actions.FortifyAction;
 import io.github.luigeneric.core.sector.objleft.*;
 import io.github.luigeneric.core.spaceentities.Missile;
 import io.github.luigeneric.core.spaceentities.PlayerShip;
@@ -281,6 +282,12 @@ public class SpaceObjectRemover implements ISpaceObjectRemover, SectorJob
             {
                 //this.userIdsInHoldForRemove.add(spaceObjectToRemove.getPlayerId());
                 final PlayerShip playerShip = (PlayerShip) spaceObjectToRemove;
+                /* Release Outpost Mode on the way out, whatever the cause. The fortify modifier
+                 * lives on the HangarShip's stats, which OUTLIVE this PlayerShip - so a carrier
+                 * that died, docked, jumped or disconnected while fortified would otherwise come
+                 * back with zero speed and no way to clear it, the state bit having been reset by
+                 * the fresh ship. This is the one place all four causes pass through. */
+                FortifyAction.unfortify(playerShip);
                 final User removedUser = ctx.users().remove(playerShip.getPlayerId());
                 //if the user is offline, handle intermediate handler
                 if (!removedUser.isConnected())

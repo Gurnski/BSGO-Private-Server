@@ -59,7 +59,7 @@ index a46d26b..692fc75 100644
          if (!isEnoughInContainer) return false;
          buyPrice.addPrice(tmpPrice);
 diff --git a/src/main/java/io/github/luigeneric/core/protocols/player/PlayerProtocol.java b/src/main/java/io/github/luigeneric/core/protocols/player/PlayerProtocol.java
-index 29669b4..f041dfa 100644
+index 29669b4..45ff85f 100644
 --- a/src/main/java/io/github/luigeneric/core/protocols/player/PlayerProtocol.java
 +++ b/src/main/java/io/github/luigeneric/core/protocols/player/PlayerProtocol.java
 @@ -3,6 +3,7 @@ package io.github.luigeneric.core.protocols.player;
@@ -70,7 +70,15 @@ index 29669b4..f041dfa 100644
  import io.github.luigeneric.core.ProtocolContext;
  import io.github.luigeneric.core.User;
  import io.github.luigeneric.core.UsersContainer;
-@@ -57,6 +58,9 @@ import io.github.luigeneric.templates.shipitems.ShipItem;
+@@ -16,6 +17,7 @@ import io.github.luigeneric.core.gameplayalgorithms.ExperienceToLevelAlgo;
+ import io.github.luigeneric.core.player.*;
+ import io.github.luigeneric.core.player.container.*;
+ import io.github.luigeneric.core.player.container.containerids.MailContainerID;
++import io.github.luigeneric.core.player.container.containerids.ShipSlotContainerID;
+ import io.github.luigeneric.core.player.container.visitors.*;
+ import io.github.luigeneric.core.player.counters.Mission;
+ import io.github.luigeneric.core.player.counters.MissionBook;
+@@ -57,6 +59,9 @@ import io.github.luigeneric.templates.shipitems.ShipItem;
  import io.github.luigeneric.templates.shipitems.ShipSystem;
  import io.github.luigeneric.templates.utils.ObjectStat;
  import io.github.luigeneric.templates.utils.ObjectStats;
@@ -80,7 +88,7 @@ index 29669b4..f041dfa 100644
  import io.github.luigeneric.templates.utils.Price;
  import jakarta.enterprise.inject.spi.CDI;
  import lombok.extern.slf4j.Slf4j;
-@@ -218,6 +222,20 @@ public class PlayerProtocol extends BgoProtocol implements StatsProtocolSubscrib
+@@ -218,6 +223,20 @@ public class PlayerProtocol extends BgoProtocol implements StatsProtocolSubscrib
                      final AvatarDescription avatarDescription = br.readDesc(AvatarDescription.class);
                      final Player player = this.user().getPlayer();
  
@@ -101,7 +109,7 @@ index 29669b4..f041dfa 100644
  
                      if (avatarDescription != null)
                      {
-@@ -1068,6 +1086,29 @@ public class PlayerProtocol extends BgoProtocol implements StatsProtocolSubscrib
+@@ -1068,6 +1087,29 @@ public class PlayerProtocol extends BgoProtocol implements StatsProtocolSubscrib
              }
          }
  
@@ -131,7 +139,7 @@ index 29669b4..f041dfa 100644
          //check buy price
          final Price buyPrice = shopItemCard.getBuyPrice();
          final ShopVisitor shopVisitor = new ShopVisitor(user(), null, ctx.rng());
-@@ -1090,6 +1131,71 @@ public class PlayerProtocol extends BgoProtocol implements StatsProtocolSubscrib
+@@ -1090,6 +1132,93 @@ public class PlayerProtocol extends BgoProtocol implements StatsProtocolSubscrib
          }
      }
  
@@ -176,14 +184,36 @@ index 29669b4..f041dfa 100644
 +            rentalRegistry.extend(player.getUserID(), newExpiry);
 +            return;
 +        }
-+        /* Where to put the pilot back when the hour runs out. Read before selectShip below moves
-+         * the active slot onto the capital. */
++        /* ONE RENTAL AT A TIME. The registry holds a single record per pilot, and the capitals sit
++         * in different hangar slots, so renting a second one while the first is live left the
++         * first hull with no record pointing at it - the sweep compares whichever hull it finds
++         * against that one record, so the older capital simply never expired. Alternating the two
++         * once an hour kept both forever for one fee. Hand the previous one back here, before the
++         * new record overwrites the old. */
++        for (final HangarShip owned : List.copyOf(player.getHangar().getAllHangarShips()))
++        {
++            if (owned.getServerId() != rentalSlot && CapitalRental.isRental(owned.getCardGuid()))
++            {
++                log.info("{} rented {} while still holding {} - taking the older capital back",
++                        user().getUserLog(), shipCard.getCardGuid(), owned.getCardGuid());
++                dropRentalHull(owned.getServerId());
++            }
++        }
++        /* Where to put the pilot back when the hour runs out. Read AFTER the older capital is
++         * gone, so a pilot who was flying it is recorded against a hull they still own rather
++         * than against the slot that just went away. */
 +        final int previousSlot = player.getHangar().hasActiveShip()
++                && !CapitalRental.isRental(player.getHangar().getActiveShip().getCardGuid())
 +                ? player.getHangar().getActiveShip().getServerId()
 +                : 0;
 +        rentalRegistry.start(player.getUserID(), newExpiry, previousSlot);
 +        player.getCounterFacade().setCounter(CapitalRental.RETURN_SLOT_COUNTER, previousSlot);
 +        final HangarShip newShip = new HangarShip(player.getUserID(), rentalSlot, shipCard.getCardGuid(), "");
++        /* Armed before the stats are applied and before the hull is announced, so the AddShip /
++         * Slots / Durability trio below carries the loadout in one go - the client's Reply.Slots
++         * is a full replacement of the ship's slot set, and it does not care whether the systems
++         * exist in the pilot's Hold or Locker. */
++        CapitalRental.arm(newShip);
 +        newShip.getShipStats().setSkillBook(player.getSkillBook());
 +        newShip.getShipStats().applyStats();
 +        newShip.getShipStats().setHp(newShip.getShipStats().getStatOrDefault(ObjectStat.MaxHullPoints));
@@ -203,10 +233,46 @@ index 29669b4..f041dfa 100644
      public void addExperience(final long exp)
      {
          if (user() == null)
-@@ -1237,6 +1343,43 @@ public class PlayerProtocol extends BgoProtocol implements StatsProtocolSubscrib
+@@ -1237,6 +1366,79 @@ public class PlayerProtocol extends BgoProtocol implements StatsProtocolSubscrib
          }
      }
  
++    /** The rented hull a ShipSlot container belongs to, or null for anything else - a non-slot
++     *  container, an unknown ship id, or a hull the pilot actually owns. */
++    private HangarShip rentalSlotHull(final IContainer container)
++    {
++        if (container == null || !(container.getContainerID() instanceof ShipSlotContainerID slotContainerID))
++            return null;
++
++        final HangarShip ship = this.user().getPlayer().getHangar().getByServerId(slotContainerID.getShipID());
++        if (ship == null || !CapitalRental.isRental(ship.getCardGuid()))
++            return null;
++
++        return ship;
++    }
++
++    /**
++     * Takes a rented hull the pilot is NOT flying out of the hangar. Deliberately without the
++     * selectShip half of returnRentalHull: an idle HangarShip has no live SpaceSubscribeInfo (only
++     * the active one is handed to a PlayerShip) and no sector job holds a reference to it, so this
++     * is safe to call from the expiry sweep's thread even while the pilot is in space in something
++     * else.
++     *
++     * @return false when the hull is the active one, which is returnRentalHull's job instead.
++     */
++    public boolean dropRentalHull(final int rentalSlot)
++    {
++        final Hangar hangar = this.user().getPlayer().getHangar();
++        if (hangar.getByServerId(rentalSlot) == null)
++            return false;
++        if (hangar.hasActiveShip() && hangar.getActiveShip().getServerId() == rentalSlot)
++            return false;
++
++        user().send(writeRemoveShip(rentalSlot));
++        hangar.removeHangarShip(rentalSlot);
++        return true;
++    }
++
 +    /**
 +     * Hands an expired capital rental back: the pilot is moved into the hull they came from and
 +     * the rental leaves the hangar on both sides.
@@ -247,7 +313,55 @@ index 29669b4..f041dfa 100644
  
      public BgoProtocolWriter writeHpAndPp(final float hp, final float pp)
      {
-@@ -1614,6 +1757,18 @@ public class PlayerProtocol extends BgoProtocol implements StatsProtocolSubscrib
+@@ -1281,6 +1483,23 @@ public class PlayerProtocol extends BgoProtocol implements StatsProtocolSubscrib
+         //from container
+         IContainer fromContainer = moveItemParser.getFrom();
+         IContainer toContainer = moveItemParser.getTo();
++
++        /* A rented capital's loadout is issued with the hull and goes back with it. Out of the
++         * slots is a tylium printer - twelve tier-4 systems, 720k at the shop's sell price, for an
++         * hour of tokens - and into them destroys the pilot's own system when the hull is handed
++         * back. ShipSlotVisitor has no active-ship or ownership check of its own, so the refusal
++         * lives here, at the one message that reaches all three of Hold, Locker and Shop. The
++         * client is resynced rather than left showing a move the server did not make. */
++        final HangarShip fromRental = rentalSlotHull(fromContainer);
++        final HangarShip rentalHull = fromRental != null ? fromRental : rentalSlotHull(toContainer);
++        if (rentalHull != null)
++        {
++            log.info("{} tried to move a system in or out of rented hull {}, refused",
++                    user().getUserLog(), rentalHull.getCardGuid());
++            user().send(writer.writeShipSlots(rentalHull));
++            return;
++        }
++
+         //ContainerVisitor visitor = new HoldVisitor(client, moveItemParser);
+         ContainerVisitor visitor = ContainerVisitorFactory.createVisitor(fromContainer.getContainerID().getContainerType(),
+                 user(), moveItemParser, ctx.rng());
+@@ -1353,6 +1572,11 @@ public class PlayerProtocol extends BgoProtocol implements StatsProtocolSubscrib
+         ShipSlotVisitor shipSlotVisitor = new ShipSlotVisitor(user(), null);
+         for (final HangarShip hangarShip : hangar.getAllHangarShips())
+         {
++            /* A rented hull's loadout was never bought, so it must not be banked in the Locker on
++             * the way through. removeAllHangarShips below discards the hull either way. */
++            if (CapitalRental.isRental(hangarShip.getCardGuid()))
++                continue;
++
+             for (ShipSlot slot : hangarShip.getShipSlots().values())
+             {
+                 final ShipItem removedShipItem = slot.removeShipItem();
+@@ -1546,6 +1770,11 @@ public class PlayerProtocol extends BgoProtocol implements StatsProtocolSubscrib
+         final Player player = this.user().getPlayer();
+         for (final HangarShip ship : player.getHangar().getAllHangarShips())
+         {
++            /* Both call sites are places the client rebuilds its hangar from scratch (login, and
++             * sendCharacter after a faction switch), so this is where a rental that came back from
++             * the database with empty bays gets its loadout again. arm() no-ops on a non-rental and
++             * on a bay that is already fitted. */
++            CapitalRental.arm(ship);
+             user().send(writer.writeShipSlots(ship));
+         }
+     }
+@@ -1614,6 +1843,18 @@ public class PlayerProtocol extends BgoProtocol implements StatsProtocolSubscrib
          return bw;
      }
  

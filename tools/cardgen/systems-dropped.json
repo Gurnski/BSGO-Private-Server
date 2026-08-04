@@ -107,13 +107,6 @@
       "slot": "launcher",
       "tier": 1,
       "reason": "ActionType None - AbilityActionFactory.create has no case for it and its default throws inside the sector tick"
-    },
-    {
-      "guid": 395660941,
-      "key": "item_slot_capital_system_role_spawn_mode",
-      "slot": "role",
-      "tier": 4,
-      "reason": "ActionType Fortify - AbilityActionFactory.create has no case for it and its default throws inside the sector tick"
     }
   ]
 }

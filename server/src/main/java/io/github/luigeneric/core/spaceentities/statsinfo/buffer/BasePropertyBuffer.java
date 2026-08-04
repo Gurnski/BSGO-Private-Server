@@ -79,6 +79,26 @@ public abstract class BasePropertyBuffer implements IProtocolWrite, ISpaceInfoSu
         }
     }
 
+    /**
+     * Queue a toggle-ability on/off notice for this subscriber. Called from the ability action,
+     * not from a stat change, because a toggle is not a stat: the client's toolbar state is
+     * driven by this update alone (see ToggleBuffUpdate).
+     */
+    public void onToggleBuff(final int slotID, final long abilityGuid, final boolean on)
+    {
+        lock.lock();
+        try
+        {
+            this.addUpdate(new ToggleBuffUpdate(
+                    on ? SpaceUpdateType.AddToggleBuff : SpaceUpdateType.RemoveToggleBuff,
+                    slotID, abilityGuid));
+        }
+        finally
+        {
+            lock.unlock();
+        }
+    }
+
     public boolean isUpdated()
     {
         lock.lock();

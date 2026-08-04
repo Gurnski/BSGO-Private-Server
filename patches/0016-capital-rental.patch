@@ -1,16 +1,18 @@
 diff --git a/src/main/java/io/github/luigeneric/core/CapitalRentalExpiry.java b/src/main/java/io/github/luigeneric/core/CapitalRentalExpiry.java
 new file mode 100644
-index 0000000..b3c53c4
+index 0000000..8b6fa94
 --- /dev/null
 +++ b/src/main/java/io/github/luigeneric/core/CapitalRentalExpiry.java
-@@ -0,0 +1,253 @@
+@@ -0,0 +1,316 @@
 +package io.github.luigeneric.core;
 +
 +import io.github.luigeneric.core.player.Hangar;
 +import io.github.luigeneric.core.player.HangarShip;
 +import io.github.luigeneric.core.player.Player;
 +import io.github.luigeneric.core.player.counters.CounterDesc;
++import io.github.luigeneric.core.player.location.CICLocation;
 +import io.github.luigeneric.core.player.location.Location;
++import io.github.luigeneric.core.player.location.OutpostLocation;
 +import io.github.luigeneric.core.protocols.ProtocolID;
 +import io.github.luigeneric.core.protocols.ProtocolRegistryWriteOnly;
 +import io.github.luigeneric.core.protocols.game.GameProtocolWriteOnly;
@@ -22,9 +24,6 @@ index 0000000..b3c53c4
 +import io.github.luigeneric.core.spaceentities.PlayerShip;
 +import io.github.luigeneric.enums.GameLocation;
 +import io.github.luigeneric.enums.RemovingCause;
-+import io.github.luigeneric.templates.cards.GalaxyMapCard;
-+import io.github.luigeneric.templates.catalogue.Catalogue;
-+import io.github.luigeneric.templates.utils.MapStarDesc;
 +import io.github.luigeneric.utils.Utils;
 +import io.quarkus.scheduler.Scheduled;
 +import jakarta.enterprise.context.ApplicationScoped;
@@ -35,14 +34,34 @@ index 0000000..b3c53c4
 +import java.util.List;
 +import java.util.Optional;
 +import java.util.Set;
++import java.util.concurrent.ConcurrentHashMap;
 +
 +/**
-+ * Takes the Pegasus/Basestar back when the rented hour is up: the pilot is docked to their home
-+ * CIC, put back in the hull they came from, and the rental leaves the hangar.
++ * Takes a rented capital back when the hour is up: the pilot is docked where they are, put back in
++ * the hull they came from, and the rental leaves the hangar.
 + *
 + * A sector timer would be the wrong hook - a rental has to run out while the pilot is standing in
 + * the CIC too, and sector timers only see ships in space. The tick is coarse because the rental
 + * lasts an hour and every tick walks every connected player.
++ *
++ * The sweep runs on the Quarkus scheduler thread, not a sector thread, and that is what shapes the
++ * whole of expireIfDue:
++ *
++ *  - A pilot who parked the capital and is flying something else is never touched in space. Their
++ *    rental is an idle HangarShip with no live SpaceSubscribeInfo, so it is simply dropped.
++ *  - A pilot who IS flying it is docked in one sweep and swapped out of the hull in a later one.
++ *    The two halves cannot be run together: an in-space PlayerShip shares the active HangarShip's
++ *    SpaceSubscribeInfo instance (SpaceObjectFactory.createPlayerShip), and selectShip clears that
++ *    object's subscriber map - which the sector thread is still reading until the dock drains.
++ *    readyForSwap gates the second half on the drain itself, not on the location flag, and on two
++ *    sweeps agreeing that it happened.
++ *  - The pilot's sectorID is never rewritten. Docking in place is what GameProtocol.dockProcedure
++ *    does; moving them to the home CIC first would make GameProtocol.getSector() resolve a sector
++ *    their PlayerShip is not in for as long as the drain takes, and the unguarded
++ *    getSectorAndPlayerShip() callers NPE into a disconnect.
++ *
++ * The hangar load in SqLiteProvider stays as the offline backstop for rentals that ran out while
++ * the player was away.
 + */
 +@Slf4j
 +@ApplicationScoped
@@ -50,39 +69,31 @@ index 0000000..b3c53c4
 +{
 +    private final UsersContainer usersContainer;
 +    private final SectorRegistry sectorRegistry;
-+    private final Catalogue catalogue;
 +    private final CapitalRentalRegistry rentalRegistry;
 +    private final GameProtocolWriteOnly gameWriter;
++    /* Users whose sector has already been seen to hold no PlayerShip for them once. SectorUsers
++     * keeps that lookup in a plain HashMap that only the sector thread mutates, so a single read
++     * from this thread can miss an entry that is genuinely there - and a miss in the wrong
++     * direction is exactly the unsafe swap this class exists to avoid. Two sweeps have to agree,
++     * which puts fifteen seconds and thousands of sector ticks between the reading and the
++     * selectShip. */
++    private final Set<Long> drainObserved = ConcurrentHashMap.newKeySet();
 +
 +    @Inject
 +    public CapitalRentalExpiry(final UsersContainer usersContainer,
 +                               final SectorRegistry sectorRegistry,
-+                               final Catalogue catalogue,
 +                               final CapitalRentalRegistry rentalRegistry)
 +    {
 +        this.usersContainer = usersContainer;
 +        this.sectorRegistry = sectorRegistry;
-+        this.catalogue = catalogue;
 +        this.rentalRegistry = rentalRegistry;
 +        this.gameWriter = ProtocolRegistryWriteOnly.game();
 +    }
 +
-+    /* DISABLED - the sweep is written but is NOT safe to run yet, so the schedule is off and this
-+     * class is inert. An adversarial review found six defects, three of them serious enough to
-+     * hurt a live pilot:
-+     *   - expireIfDue docks whoever is due WITHOUT checking they are still flying the rental, so a
-+     *     pilot who parked the Pegasus an hour ago and is mid-fight in their Viper gets ripped out
-+     *     of the sector and dropped in the home CIC;
-+     *   - selectShip is called from the Quarkus scheduler thread while the sector thread is still
-+     *     ticking that ship, and the in-space PlayerShip SHARES the HangarShip's SpaceSubscribeInfo
-+     *     instance (SpaceObjectFactory:331) - the swap clears a subscriber map that is still live;
-+     *   - pullToHomeCic rewrites location.sectorID before the ship drains from the old sector, so
-+     *     GameProtocol.getSector() resolves the wrong sector for that window and an existing
-+     *     unguarded path NPEs into a disconnect.
-+     * Re-enable only with: an active-ship check before docking, the ship swap marshalled onto the
-+     * sector thread, and the sector id left alone until the drain completes. Until then rentals end
-+     * at dock or relog, which is the behaviour that shipped before and is merely generous.
-+     * Restoring the schedule is putting @Scheduled(every = "15s") back on run(). */
++    /* 15s against an hour-long rental. The interval is also the spacing of the phased hand-back:
++     * a dock drains on the next sector tick, tens of milliseconds later, so waiting whole sweeps
++     * costs a pilot at most 30 seconds of overdue flagship and buys a very wide margin. */
++    @Scheduled(every = "15s")
 +    public void run()
 +    {
 +        final long nowSeconds = System.currentTimeMillis() / 1000L;
@@ -105,6 +116,7 @@ index 0000000..b3c53c4
 +        }
 +
 +        this.rentalRegistry.pruneExpiredOffline(connectedIds, nowSeconds);
++        this.drainObserved.retainAll(connectedIds);
 +    }
 +
 +    private void expireIfDue(final User user, final long nowSeconds)
@@ -132,6 +144,22 @@ index 0000000..b3c53c4
 +            return;
 +
 +        final int rentalSlot = rental.getServerId();
++        final PlayerProtocol playerProtocol = user.getProtocol(ProtocolID.Player);
++
++        /* The pilot is not in it. Nothing to dock, nothing to swap, no return slot to pick - just
++         * take the hull. An idle HangarShip is reachable from no sector job, so this is safe from
++         * this thread even while the pilot is mid-fight in something else. */
++        if (!hangar.hasActiveShip() || hangar.getActiveShip().getServerId() != rentalSlot)
++        {
++            if (!playerProtocol.dropRentalHull(rentalSlot))
++                return;     // vanished between findRentalHull and here; a later sweep tidies up
++
++            clearRentalRecord(player, rental.getCardGuid());
++            log.info("Capital rental expired for {}: {} taken back, pilot was not flying it",
++                    user.getUserLogSimple(), rental.getCardGuid());
++            return;
++        }
++
 +        final int returnSlot = pickReturnSlot(player, hangar, tracked, rentalSlot);
 +        if (returnSlot <= 0)
 +        {
@@ -141,82 +169,117 @@ index 0000000..b3c53c4
 +            return;
 +        }
 +
-+        if (!pullToHomeCic(user, player))
-+            return;     // still in space with a dock already in flight; the next tick finishes it
++        if (!readyForSwap(user, player))
++            return;     // docking was enqueued, or is still draining; a later sweep finishes it
 +
-+        final PlayerProtocol playerProtocol = user.getProtocol(ProtocolID.Player);
 +        if (!playerProtocol.returnRentalHull(rentalSlot, returnSlot))
 +            return;
 +
-+        player.getCounterFacade().setCounter(rental.getCardGuid(), 0);
-+        player.getCounterFacade().setCounter(CapitalRental.RETURN_SLOT_COUNTER, 0);
-+        this.rentalRegistry.clear(userId);
++        clearRentalRecord(player, rental.getCardGuid());
 +        log.info("Capital rental expired for {}: {} returned, pilot back in slot {}",
 +                user.getUserLogSimple(), rental.getCardGuid(), returnSlot);
 +    }
 +
 +    /**
-+     * Gets the pilot out of space and into their home CIC, which is where selectShip is allowed to
-+     * run and where the client rebuilds the hangar. dockProcedure is deliberately not reused: it
-+     * would have to be given the new location first, and it reads the sector off the player.
++     * Whether the ship swap can be made from this thread right now, and the place the pilot gets
++     * docked if it cannot yet.
 +     *
-+     * @return false when the move has to wait for a later tick.
++     * The barrier is the drain, not the location. A pilot is put in a room the instant the dock is
++     * enqueued - dockProcedure does the same - but their PlayerShip stays in the sector until
++     * SpaceObjectRemover.run() takes it out, and until then the sector thread is still reading the
++     * SpaceSubscribeInfo that selectShip is about to reassign. SpaceObjectRemover drops the user
++     * from the sector's user list as part of that same drain, so "no PlayerShip for this user"
++     * is exactly the signal that nothing on the sector thread can still reach it.
++     *
++     * @return true only when the pilot is in a room and two sweeps running have found no ship of
++     *         theirs left in their sector.
 +     */
-+    private boolean pullToHomeCic(final User user, final Player player)
++    private boolean readyForSwap(final User user, final Player player)
 +    {
-+        final Location location = player.getLocation();
-+        final GameLocation gameLocation = location.getGameLocation();
-+
-+        if (gameLocation == GameLocation.Space)
++        final long userId = player.getUserID();
++        final GameLocation gameLocation = player.getLocation().getGameLocation();
++        if (gameLocation != GameLocation.Space && gameLocation != GameLocation.Room)
 +        {
-+            final Optional<Sector> optSector = this.sectorRegistry.getSectorById(player.getSectorId());
-+            if (optSector.isEmpty())
-+                return false;
-+            final Sector sector = optSector.get();
-+            final Optional<PlayerShip> optPlayerShip = sector.getCtx().users()
-+                    .getPlayerShipByUserID(player.getUserID());
-+            if (optPlayerShip.isEmpty())
-+                return false;
++            // Avatar, zone, starter, mid-jump: no safe place to drop them. Try again next sweep.
++            this.drainObserved.remove(userId);
++            return false;
++        }
++
++        /* getSectorId() is untouched by anything below, so this resolves the sector the pilot's
++         * ship is actually in - during a dock that is still the sector they were flying in. */
++        final Optional<Sector> optSector = this.sectorRegistry.getSectorById(player.getSectorId());
++        final Optional<PlayerShip> optPlayerShip = optSector.flatMap(sector ->
++                sector.getCtx().users().getPlayerShipByUserID(userId));
++
++        if (optPlayerShip.isPresent())
++        {
 +            final PlayerShip playerShip = optPlayerShip.get();
++            this.drainObserved.remove(userId);
++
 +            if (playerShip.isRemoved())
++                return false;   // marked this tick, off the list on the next; the sweep comes back
++
++            /* Already in a room with a ship still listed: something else is docking them, or the
++             * drain has not run yet. Either way it is not ours to push - re-docking a docked pilot
++             * would only throw a scene reload at them. */
++            if (gameLocation != GameLocation.Space)
 +                return false;
 +
 +            /* A dock the pilot started themselves is already sitting in GameProtocol's own future,
-+             * which we cannot cancel from here. Docking on top of it would enqueue the removal
-+             * twice and its runnable would drop the location back into this sector after we moved
-+             * it. Let it land - the next tick finds the pilot in a room and finishes there. */
++             * which we cannot cancel from here. Enqueueing a second removal would only log a
++             * warning and its runnable would set the location again after ours. Let it land. */
 +            if (playerShip.getSpaceObjectState().getIsDocking())
 +                return false;
 +
-+            playerShip.getSpaceObjectState().setDocking(true);
-+            user.send(this.gameWriter.writeDockingDelay(0f));
-+            // Enqueue only; the sector thread drains it on its next tick. Safe from this thread.
-+            sector.getSpaceObjectRemover().notifyRemovingCauseAdded(playerShip, RemovingCause.Dock);
-+        }
-+        else if (gameLocation != GameLocation.Room)
-+        {
-+            // Avatar, zone, starter, mid-jump: no safe place to drop them. Try again next tick.
++            dockInPlace(user, player, optSector.get(), playerShip);
 +            return false;
 +        }
 +
-+        final long homeSectorId = GalaxyMapCard.getStartSector(player.getFaction());
-+        if (gameLocation == GameLocation.Room && location.getSectorID() == homeSectorId)
++        /* Drained, or never in space at all. In Space it is a pilot whose sector join has not
++         * produced a ship yet - not a drain, so the count starts over. */
++        if (gameLocation != GameLocation.Room)
 +        {
-+            return true;    // already standing in the home CIC, no scene reload needed
-+        }
-+
-+        final Optional<MapStarDesc> optHome = this.catalogue.galaxyMapCard().getStar(homeSectorId);
-+        if (optHome.isEmpty())
-+        {
-+            log.error("Capital rental expiry: no star for home sector {}", homeSectorId);
++            this.drainObserved.remove(userId);
 +            return false;
 +        }
-+        final MapStarDesc home = optHome.get();
-+        // Room in sector 0/6 installs CICLocation itself.
-+        location.setLocation(GameLocation.Room, home.getId(), home.getSectorGuid());
++
++        // add() is false only on the second and later sweeps that agree.
++        return !this.drainObserved.add(userId);
++    }
++
++    /**
++     * Docks the pilot where they are - same sector, CIC or outpost, exactly what
++     * GameProtocol.dockProcedure's runnable does. Two things are deliberately not done here: the
++     * sectorID is not rewritten (see the class comment), and no hull swap is attempted, because
++     * the ship this enqueues for removal is still live on the sector thread.
++     */
++    private void dockInPlace(final User user, final Player player, final Sector sector,
++                             final PlayerShip playerShip)
++    {
++        playerShip.getSpaceObjectState().setDocking(true);
++        user.send(this.gameWriter.writeDockingDelay(0f));
++        // Enqueue only; the sector thread drains it on its next tick. Safe from this thread.
++        sector.getSpaceObjectRemover().notifyRemovingCauseAdded(playerShip, RemovingCause.Dock);
++
++        final Location location = player.getLocation();
++        final long sectorId = location.getSectorID();
++        // Alpha Ceti and Tartalon are the two CICs; everything else docks to an outpost.
++        location.changeState(sectorId == 0 || sectorId == 6
++                ? new CICLocation(location)
++                : new OutpostLocation(location));
 +        final SceneProtocol sceneProtocol = user.getProtocol(ProtocolID.Scene);
 +        sceneProtocol.sendLoadNextScene();
-+        return true;
++
++        log.info("Capital rental expired for {}, docking in sector {} before the hull goes back",
++                user.getUserLogSimple(), sectorId);
++    }
++
++    private void clearRentalRecord(final Player player, final long rentalGuid)
++    {
++        player.getCounterFacade().setCounter(rentalGuid, 0);
++        player.getCounterFacade().setCounter(CapitalRental.RETURN_SLOT_COUNTER, 0);
++        this.rentalRegistry.clear(player.getUserID());
++        this.drainObserved.remove(player.getUserID());
 +    }
 +
 +    private HangarShip findRentalHull(final Hangar hangar)
@@ -259,12 +322,13 @@ index 0000000..b3c53c4
 +}
 diff --git a/src/main/java/io/github/luigeneric/core/CapitalRentalRegistry.java b/src/main/java/io/github/luigeneric/core/CapitalRentalRegistry.java
 new file mode 100644
-index 0000000..d823659
+index 0000000..80155e2
 --- /dev/null
 +++ b/src/main/java/io/github/luigeneric/core/CapitalRentalRegistry.java
-@@ -0,0 +1,63 @@
+@@ -0,0 +1,71 @@
 +package io.github.luigeneric.core;
 +
++import io.quarkus.arc.Unremovable;
 +import jakarta.enterprise.context.ApplicationScoped;
 +
 +import java.util.Map;
@@ -283,6 +347,13 @@ index 0000000..d823659
 + *
 + * Keyed by userID rather than User, so a reconnect within the hour keeps its rental.
 + */
++/* @Unremovable is load-bearing, not decoration. Quarkus prunes beans it cannot see used at BUILD
++ * time, and this one is only ever obtained through a runtime CDI.current().select() in
++ * PlayerProtocol. CapitalRentalExpiry's @Scheduled happens to keep the chain alive today, but that
++ * is coincidence: the last time the sweep was disabled the registry became build-time-unreferenced,
++ * was pruned, and every rental attempt died with UnsatisfiedResolutionException - taking the
++ * player's connection down with it. The annotation stays whatever the sweep does. */
++@Unremovable
 +@ApplicationScoped
 +public class CapitalRentalRegistry
 +{
@@ -362,10 +433,10 @@ index ae8fb9d..4e5fabd 100644
      {
          this.set(new HangarShipsUpdate(getActiveShip().getName(), getSortedGUIDs()));
 diff --git a/src/main/java/io/github/luigeneric/core/protocols/dialog/DialogProtocol.java b/src/main/java/io/github/luigeneric/core/protocols/dialog/DialogProtocol.java
-index 4ff4531..9720065 100644
+index 4ff4531..88ed640 100644
 --- a/src/main/java/io/github/luigeneric/core/protocols/dialog/DialogProtocol.java
 +++ b/src/main/java/io/github/luigeneric/core/protocols/dialog/DialogProtocol.java
-@@ -9,17 +9,130 @@ import io.github.luigeneric.core.player.Player;
+@@ -9,17 +9,144 @@ import io.github.luigeneric.core.player.Player;
  import io.github.luigeneric.core.protocols.BgoProtocol;
  import io.github.luigeneric.core.protocols.ProtocolID;
  import io.github.luigeneric.core.protocols.ProtocolRegistryWriteOnly;
@@ -482,6 +553,20 @@ index 4ff4531..9720065 100644
 +    private static final byte SAY_CONFIRM_CAPITAL = 4;
 +    private static final byte SAY_WATER = 5;
 +    private static final byte SAY_CONFIRM_WATER = 6;
++    private static final byte SAY_REQUEST_FLAGSHIP = 7;
++
++    /* The flagship request has no line of its own: the original never let anyone fly the
++     * Galactica or the Guardian, so no phrase for them was ever written. The ship NAME does
++     * exist, and the client resolves %$bgo.<key>.Name% tokens anywhere inside a phrase (the
++     * shipped lines interpolate %Rank% and %CapShipCost% the same way), so the menu entry is
++     * built around the client's own name for the hull rather than a string we invented. */
++    private static final String COL_FLAGSHIP_REQUEST =
++            "Requesting temporary command of the %$bgo.cruiser_galactica.Name%, sir. [Command Battlestar]";
++    private static final String CYL_FLAGSHIP_REQUEST =
++            "Request %$bgo.ship_basestar_guardian.Name% command access [Command Basestar]";
++
++    /** Which capital the pilot asked for, so the confirmation rents the one they chose. */
++    private long pendingCapital;
 +
 +    private enum Stage { ROOT, CONFIRM_CAPITAL, CONFIRM_WATER }
 +
@@ -496,7 +581,7 @@ index 4ff4531..9720065 100644
      public DialogProtocol(ProtocolContext ctx)
      {
          super(ProtocolID.Dialog, ctx);
-@@ -32,6 +145,42 @@ public class DialogProtocol extends BgoProtocol
+@@ -32,6 +159,42 @@ public class DialogProtocol extends BgoProtocol
          this.missionDistributor = new MissionDistributor(user().getPlayer(), ctx.galaxy(), ctx.rng());
      }
  
@@ -539,13 +624,15 @@ index 4ff4531..9720065 100644
      @Override
      public void parseMessage(final int msgType, final BgoProtocolReader br) throws IOException
      {
-@@ -44,30 +193,112 @@ public class DialogProtocol extends BgoProtocol
+@@ -44,30 +207,127 @@ public class DialogProtocol extends BgoProtocol
              case Say ->
              {
                  final byte index = br.readByte();
 -                log.warn(user().getUserLog() + "Dialog say " + index);
 -                if (index != 1)
--                {
++                log.debug(user().getUserLog() + "Dialog say " + index);
++                switch (index)
+                 {
 -                    log.warn(user().getUserLog() + "Wrong index given " + index);
 -                    return;
 -                }
@@ -556,9 +643,7 @@ index 4ff4531..9720065 100644
 -                final boolean updated = missionDistributor.updateMissionBook();
 -                log.debug("User updated missions ? {} {}", updated, player.getCounterFacade().missionBook());
 -                if (updated)
-+                log.debug(user().getUserLog() + "Dialog say " + index);
-+                switch (index)
-                 {
+-                {
 -                    PlayerProtocolWriteOnly playerProtocolWriteOnly = ProtocolRegistryWriteOnly.getProtocol(ProtocolID.Player);
 -                    user().send(playerProtocolWriteOnly.writeMissions(player.getCounterFacade().missionBook()));
 +                    case SAY_ASSIGNMENTS -> { sendAssignments(); user().send(writeStopped()); }
@@ -575,6 +660,18 @@ index 4ff4531..9720065 100644
 +                            user().send(writeStopped());
 +                            return;
 +                        }
++                        pendingCapital = CapitalRental.forFaction(user().getPlayer().getFaction(), false);
++                        stage = Stage.CONFIRM_CAPITAL;
++                        user().send(writeNpcRemark(new Remark((byte) 1, (isColonial() ? COL_RENT : CYL_RENT)[0], "")));
++                    }
++                    case SAY_REQUEST_FLAGSHIP ->
++                    {
++                        if (!npcGrantsCapital())
++                        {
++                            user().send(writeStopped());
++                            return;
++                        }
++                        pendingCapital = CapitalRental.forFaction(user().getPlayer().getFaction(), true);
 +                        stage = Stage.CONFIRM_CAPITAL;
 +                        user().send(writeNpcRemark(new Remark((byte) 1, (isColonial() ? COL_RENT : CYL_RENT)[0], "")));
 +                    }
@@ -582,7 +679,8 @@ index 4ff4531..9720065 100644
 +                    {
 +                        final Player player = user().getPlayer();
 +                        final PlayerProtocol playerProtocol = user().getProtocol(ProtocolID.Player);
-+                        final long capitalGuid = isColonial() ? CapitalRental.PEGASUS : CapitalRental.BASESTAR;
++                        final long capitalGuid = pendingCapital != 0 ? pendingCapital
++                                : CapitalRental.forFaction(player.getFaction(), false);
 +                        CDI.current().select(Catalogue.class).get()
 +                                .fetchCard(capitalGuid, CardView.Ship)
 +                                .ifPresent(card -> playerProtocol.rentCapital((ShipCard) card));
@@ -658,6 +756,8 @@ index 4ff4531..9720065 100644
 +                    if (capitalNpc)
 +                    {
 +                        remarks.add(new Remark(SAY_REQUEST_CAPITAL, root[2], ""));
++                        remarks.add(new Remark(SAY_REQUEST_FLAGSHIP,
++                                isColonial() ? COL_FLAGSHIP_REQUEST : CYL_FLAGSHIP_REQUEST, ""));
 +                    }
 +                    if (WATER_NPCS.contains(currentNpc))
 +                    {
@@ -671,7 +771,7 @@ index 4ff4531..9720065 100644
                  user().send(writePcRemarks(remarks));
              }
              case Stop ->
-@@ -81,6 +312,57 @@ public class DialogProtocol extends BgoProtocol
+@@ -81,6 +341,57 @@ public class DialogProtocol extends BgoProtocol
              }
          }
      }

@@ -18,11 +18,22 @@ import lombok.extern.slf4j.Slf4j;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 
 @Slf4j
 public class ShipSubscribeInfo extends SpaceSubscribeInfo
 {
+    /** Abilities whose ItemBuffAdd describes a SPAWNED OBJECT rather than the firing hull - see
+     *  applyAbilitySlotStats, where a hull speed multiplier must not reach these. */
+    private static final Set<AbilityActionType> PROJECTILE_ACTIONS = Set.of(
+            AbilityActionType.FireMissle,
+            AbilityActionType.FireTorpedo,
+            AbilityActionType.FireHeavyMissile,
+            AbilityActionType.FireLightMissile,
+            AbilityActionType.DropFlare
+    );
+
     protected final ObjectStats statsBase;
     protected final ObjectStats statsWithSlots;
     protected final ShipModifiers shipModifiers;
@@ -202,7 +213,14 @@ public class ShipSubscribeInfo extends SpaceSubscribeInfo
             // ----- multipliers -----
             final Map<ObjectStat, Float> best = modifiers.filterForBestRemoteBuffMultiply();
             ObjectStats buffs = new ObjectStats(best);
-            if (ability.getShipAbilityCard().getAbilityActionType().equals(AbilityActionType.FireMissle))
+            /* A ship-speed multiplier must never reach a PROJECTILE's flight stats. On a launcher
+             * ability these stats describe the round, not the hull, so an engine debuff used to
+             * make its missiles slower - and Outpost Mode, which multiplies Speed by ZERO, would
+             * give the round Speed 0 and divide to NaN inside MovementSimulation, killing the
+             * sector tick for everyone every frame that round exists. The carve-out was written
+             * for FireMissle alone; every launcher family needs it, which is four action types
+             * plus the flare that also spawns a moving object. */
+            if (PROJECTILE_ACTIONS.contains(ability.getShipAbilityCard().getAbilityActionType()))
             {
                 buffs.removeStat(ObjectStat.BoostSpeed);
                 buffs.removeStat(ObjectStat.TurnSpeed);

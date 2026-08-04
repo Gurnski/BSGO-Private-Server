@@ -2573,10 +2573,10 @@ function realSystemCards() {
         abilityCard(lv.ab.guid, a.abilityGroupId, a.actionType, a.launch, add, a.affect, {
           /* The ability's Level tracks its system's. Checked against the dump: of its 2,223
            * system-to-ability pairs, 2,214 agree and the nine that do not are all rungs of the
-           * role/t4 Spawn Mode family, which puts its ability at the SAME guid as the system and
-           * stamps Level 10 on every rung - a family we drop anyway (no Fortify arm in the
-           * factory). Nothing dispatches on this byte; the client reads it and only prints it. But
-           * a wrong one is a lie in every diagnostic that dumps the card. */
+           * role/t4 Spawn Mode family (Outpost Mode), which puts its ability at the SAME guid as
+           * the system and stamps Level 10 on every rung. We normalise it to the rung's own level.
+           * Nothing dispatches on this byte; the client reads it and only prints it. But a wrong
+           * one is a lie in every diagnostic that dumps the card. */
           Level: level,
           TargetTiers: a.targetTiers,
           ConsumableType: a.consumableType, ConsumableTier: a.consumableTier,
@@ -2596,9 +2596,18 @@ function realSystemCards() {
           // debuff and support families visibly firing and doing nothing. They vary down 43 of the
           // chains, so they are read per rung.
           RemoteBuffAdd: stats(lv.ab.radd || {}), RemoteBuffMultiply: stats(lv.ab.rmul || {}),
+          /* What a TOGGLE ability does while it is engaged, as opposed to what a cast does once.
+           * Only Outpost Mode carries these today: Multiply zeroes the engines and FTL and halves
+           * the steering, Add gives back armour and hull regeneration. The server reads them in
+           * FortifyAction; the client reads them for the tooltip. */
+          ToggleSystemAdd: stats(lv.ab.tadd || {}), ToggleSystemMultiply: stats(lv.ab.tmul || {}),
         }),
-        gui(lv.ab.guid, a.key, a.frame, '', { level }),
       );
+      /* Outpost Mode's ability shares its system's guid, and that guid already got its GUI card
+       * with the system above - emitting a second one is a duplicate (guid, view) and a build
+       * failure. Every other family gives its ability a guid of its own. */
+      if (lv.ab.guid !== lv.guid)
+        out.push(gui(lv.ab.guid, a.key, a.frame, '', { level }));
     });
   }
   return out;
@@ -2971,6 +2980,15 @@ function cometCards() {
       guiIcon: '', guiAvatarSlotTexturePath: 'GUI/Slots/avatar_comet',
       guiTexturePath: '', args: [],
     }),
+    /* THE FIFTH VIEW IS THE CLIENT'S, and it is why comets stayed switched off. Comet.Read
+     * fetches CardView.Missile at the comet's own guid and AreCardsLoaded.Depend()s on it
+     * (Comet.cs:17-18), so without this card the comet never finishes loading: no model, no
+     * particle trail, no bracket - while the server happily flies it and kills anything it
+     * touches. The server never reads this card; it only writes it. Both names are real
+     * constants of MissileExplosionView and MissileType, which is load-bearing - a name that is
+     * not makes Gson leave the field null and the writer NPEs on .value, dropping the socket of
+     * whoever asked for the comet. */
+    card(COMET_OBJECT, 'Missile', { explosionView: 'Standard', missileType: 'Normal' }),
   ];
 }
 

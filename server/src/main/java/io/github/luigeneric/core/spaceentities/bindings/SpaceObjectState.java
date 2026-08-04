@@ -155,6 +155,29 @@ public class SpaceObjectState implements IProtocolWrite
 
     }
 
+    public boolean getIsFortified()
+    {
+        return isFortified;
+    }
+
+    /* Outpost Mode. The client keys the ENTIRE fortress presentation off this one bit - the
+     * Fortress mesh swap, engines off, the transformation sound - via the state broadcast
+     * SpaceObjectStateTimer already sends whenever changed flips. The server side that makes the
+     * bit mean something (stat modifier, upkeep drain, jump refusal) lives in FortifyAction. */
+    public void setFortified(final boolean fortified)
+    {
+        lock.lock();
+        try
+        {
+            changed = true;
+            isFortified = fortified;
+        }
+        finally
+        {
+            lock.unlock();
+        }
+    }
+
     public boolean isChanged()
     {
         lock.lock();

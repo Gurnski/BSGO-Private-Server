@@ -1,15 +1,15 @@
-# BSGO Private Server
+﻿# BSGO Private Server
 
 Battlestar Galactica Online shut down in 2019 and took its game data with it. The client shipped
 with none of its own: no ship stats, no items, no sector layouts. Every card was fetched at runtime
 from a server that no longer exists, and the card database was never published. Install the client
 today and it connects to nothing, then waits forever.
 
-This repo rebuilds that data, and the server fixes needed to run it. Right now that means 12,209
+This repo rebuilds that data, and the server fixes needed to run it. Right now that means 12,250
 cards, 58 star systems, the original's full equipment catalogue, boss lairs worth bringing friends
-to, two battlestars the live game never let anyone fly, and an operator console that can spawn
-any hull in the catalogue as a fighting NPC — so a Pegasus really can slug it out with a Cylon
-outpost while you watch.
+to, two battlestars the live game never let anyone fly, the carriers' Outpost Mode, and an operator
+console that can spawn any hull in the catalogue as a fighting NPC — so a Pegasus really can slug
+it out with a Cylon outpost while you watch.
 
 It does **not** contain the game. You need your own copy of the client.
 
@@ -31,7 +31,7 @@ with fixes for the problems we hit on the way.
 
 ## What this repo adds
 
-`tools/cardgen/` generates the card catalogue the server sends to clients: 12,209 cards covering
+`tools/cardgen/` generates the card catalogue the server sends to clients: 12,250 cards covering
 58 star systems, 14 hulls per faction from the tier-1 strikes up to the Pegasus and Basestar, the
 original game's full equipment catalogue (219 systems as ten-level upgrade ladders, 175
 consumables, 97 paints), skills, missions, the shop, and every resource type. The generator checks
@@ -56,8 +56,8 @@ choices that suit a small private server:
   outposts on the map at boot and leaves 31 contested systems to capture
 - the ability arms and armour curve that make imported equipment behave, so weapons that were
   decorative now hit, consume ammunition and are reduced by armour
-- missile interception, rebuilt end to end. The client shipped the whole feature — missile
-  brackets, a select-nearest-missile key, health bars — gated on server data that never enabled
+- missile interception, rebuilt end to end. The client shipped the whole feature â€” missile
+  brackets, a select-nearest-missile key, health bars â€” gated on server data that never enabled
   it. Enemy warheads are now real targets with real hull points; strike and escort guns can
   shoot them down, capitals rely on their flak and point-defence screens, and NPC screens sweep
   incoming missiles the same way yours do
@@ -92,14 +92,14 @@ marked *deployed* landed too recently for that and are on the next flight's chec
 | Area | State |
 |---|---|
 | Login, reconnects, persistence | working |
-| Catalogue streaming (12,209 cards) | working |
+| Catalogue streaming (12,250 cards) | working |
 | Character creation | working |
 | Hangar, CIC, outpost rooms, shop | working |
 | Space: undock, fly, boost, FTL, dock | working |
 | Galaxy (58 systems, every reachable one contestable) | working |
 | Sector content (45,849 placed objects: belts, wrecks, lairs) | working |
 | Combat, damage, death, loot, XP | working |
-| Equipment (219 systems × 10 levels, 175 consumables, 97 paints) | working |
+| Equipment (219 systems Ã— 10 levels, 175 consumables, 97 paints) | working |
 | NPCs with the original's own rank names | working |
 | Boss lairs: level-120, 50,000-hull bosses with guard wings | working |
 | Ship roster (14 hulls per faction, 4 tiers) | working |
@@ -145,7 +145,7 @@ $env:JAVA_HOME = "C:\path\to\jdk-21"
 .\mvnw.cmd quarkus:dev
 ```
 
-A healthy startup logs `size: 12209` (the card count) and `LoginServerEndpoint waiting for new
+A healthy startup logs `size: 12250` (the card count) and `LoginServerEndpoint waiting for new
 connections`. Anything else, see the troubleshooting table in QUICKSTART.md.
 
 ## Editing the data
@@ -180,7 +180,7 @@ Each of these cost real debugging time, and none of them fail loudly:
 - The client does not read index 0 for avatar defaults. It hard-indexes specific positions.
 - Never edit `server/src` while the server is running under `quarkus:dev`. Dev mode watches the
   sources, and the attempted hot reload kills every sector thread while the login listener
-  survives — the server looks up but nobody can spawn in. Stage the change, stop, sync, start.
+  survives â€” the server looks up but nobody can spawn in. Stage the change, stop, sync, start.
 
 The diagnosis rule that saves the most time: an abrupt disconnect is explained in the server
 log. An infinite loading screen is explained in the client log. They almost never both have it.
@@ -200,3 +200,5 @@ game assets, and no decompiled client code. Battlestar Galactica Online and its 
 the property of their respective owners. You must own a copy of the client to use any of this.
 
 Proudly open source ~ Daniel Rea
+
+

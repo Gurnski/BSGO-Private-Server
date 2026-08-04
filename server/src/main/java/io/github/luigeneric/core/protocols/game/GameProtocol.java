@@ -940,6 +940,14 @@ public class GameProtocol extends BgoProtocol implements StatsProtocolSubscriber
                 usersToJump.add(partyMember);
             }
         }
+        /* A fortified carrier does not leave. Solo jumps are already refused - Outpost Mode
+         * multiplies FtlRange by zero and the jump path measures against it - but a group jump
+         * takes its members along without consulting anyone's range, which would have let a
+         * party leader tow the fortress out and undo the whole tradeoff. */
+        usersToJump.removeIf(userToJump -> currentSector.getCtx().users()
+                .getPlayerShipByUserID(userToJump.getPlayer().getUserID())
+                .map(ship -> ship.getSpaceObjectState().getIsFortified())
+                .orElse(false));
 
         //find the highest class
 

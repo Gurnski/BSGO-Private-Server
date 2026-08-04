@@ -25,7 +25,32 @@ public class SectorSlotData implements IProtocolWrite
     }
     public SectorSlotData()
     {
-        this(new FactionSectorSlots(100, 0, Faction.Colonial), new FactionSectorSlots(100, 0, Faction.Cylon),
+        this(true, true);
+    }
+
+    /**
+     * Slot caps that tell the truth about who may jump here.
+     *
+     * The client gates its jump button on the max slots for the player's own faction: a faction
+     * whose max is 0 gets no button and the "sector restricted" line instead. Sending everyone
+     * 100/100 - which is what the no-arg constructor did for every sector in the galaxy - meant a
+     * live jump button on systems the server then refused with a bare "sector not allowed", and
+     * no way for the pilot to tell which systems those were until they tried.
+     *
+     * The counts are otherwise unused: nothing on this server consumes or increments the current
+     * count, so 100 stands for "as many as want to come".
+     */
+    public static SectorSlotData forFactionAccess(final boolean colonialAllowed, final boolean cylonAllowed)
+    {
+        return new SectorSlotData(
+                new FactionSectorSlots(colonialAllowed ? 100 : 0, 0, Faction.Colonial),
+                new FactionSectorSlots(cylonAllowed ? 100 : 0, 0, Faction.Cylon),
+                new HashMap<>());
+    }
+    private SectorSlotData(final boolean colonialAllowed, final boolean cylonAllowed)
+    {
+        this(new FactionSectorSlots(colonialAllowed ? 100 : 0, 0, Faction.Colonial),
+                new FactionSectorSlots(cylonAllowed ? 100 : 0, 0, Faction.Cylon),
                 new HashMap<>());
     }
 

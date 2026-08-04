@@ -129,6 +129,22 @@ const GROUPS = [
    * file. */
   ['0024-sector-entry-visibility', [
     'src/main/java/io/github/luigeneric/core/spaceentities/bindings/PlayerVisibility.java']],
+  /* Outpost Mode, the carriers' role ability. The card family existed in the original data and was
+   * dropped by the generator because AbilityActionFactory had no Fortify arm; this is that arm and
+   * the toggle machinery it needs. ChangeFactionHandler rides here because faction change re-seats
+   * the hangar and this group already owns the rental/role surface it touches. */
+  ['0025-outpost-mode', [
+    'src/main/java/io/github/luigeneric/core/sector/management/abilities/actions/FortifyAction.java',
+    'src/main/java/io/github/luigeneric/core/sector/timers/FortifyUpkeepTimer.java',
+    'src/main/java/io/github/luigeneric/core/spaceentities/bindings/SpaceObjectState.java',
+    'src/main/java/io/github/luigeneric/core/spaceentities/statsinfo/buffer/BasePropertyBuffer.java',
+    'src/main/java/io/github/luigeneric/core/spaceentities/statsinfo/buffer/propertyupdates/ToggleBuffUpdate.java',
+    'src/main/java/io/github/luigeneric/core/spaceentities/statsinfo/stats/ShipSubscribeInfo.java',
+    'src/main/java/io/github/luigeneric/core/protocols/player/handlers/ChangeFactionHandler.java']],
+  // Locked sectors stop advertising a jump button the server would refuse.
+  ['0026-sector-slot-honesty', [
+    'src/main/java/io/github/luigeneric/core/sector/management/slots/SectorSlotData.java',
+    'src/main/java/io/github/luigeneric/core/sector/Sector.java']],
 ];
 
 // A brand-new source file in the baseline working tree is invisible to `git diff` until it

@@ -636,6 +636,53 @@ and `startGhostJump` are its only writers — so both gates now accept the never
 so the flaky link is countable instead of invisible. Belt half in 0006: `CompleteJump` sets its
 flag before the presence check, so the race no longer drops the message.
 
+## 0025 — Outpost Mode
+
+`FortifyAction.java`, `FortifyUpkeepTimer.java`, `SpaceObjectState.java`,
+`BasePropertyBuffer.java`, `ToggleBuffUpdate.java`, `ShipSubscribeInfo.java`,
+`ChangeFactionHandler.java` · 7 files
+
+The carriers' role ability, and the reason it was missing: the card family ships in the original
+data (guid 395660941, a ten-level ladder priced in merits and tuning kits), but
+`AbilityActionFactory` had no `Fortify` arm and its default throws — so the generator dropped the
+family rather than let a player buy a button that would abandon the sector tick on every press.
+This is that arm.
+
+Engaged, the carrier is immobile, cannot jump, turns at half rate, and gains armour and hull
+regeneration; it costs 550 power to enter and 15 per second to hold, on a five-minute cooldown.
+None of that is written here — it is all read off the card's `ToggleSystemMultiply` and
+`ToggleSystemAdd`, routed through an ordinary `ShipModifier` so `applyStats` folds it into the
+live stat block the movement sim and damage calculator already read. `MetaPropulsion` and
+`MetaManeuverability` are the card's names for engines and steering; they map to `Speed`/
+`BoostSpeed` and the rotation speeds here rather than becoming stats nothing else reads. FTL
+refusal is free: `FtlRange × 0` fails the jump path's existing range check.
+
+Three things the toggle needs beyond the stats. `ToggleBuffUpdate` is the wire message that lights
+the toolbar button — the client keys its toggle state off `AddToggleBuff`/`RemoveToggleBuff` and
+nothing else, so without it the mode works while the button stays dark. `FortifyUpkeepTimer` drains
+the per-second cost and releases the mode when reserves run out. And `SpaceObjectRemover` releases
+it on the way out of a sector, whatever the cause — the modifier lives on the *hangar* ship's stats,
+which outlive the `PlayerShip`, so a carrier that died fortified would otherwise respawn at zero
+speed with no way to clear it.
+
+Two guards ride along. Group jump now skips fortified ships: solo jumps were already refused by the
+zero FTL range, but a party leader could otherwise tow the fortress out and undo the trade. And
+`ShipSubscribeInfo`'s projectile carve-out — which existed so a hull speed buff never reached a
+missile's flight stats — widened from `FireMissle` alone to every launcher family plus flares.
+That one is load-bearing: Outpost Mode multiplies speed by **zero**, and a projectile spawned with
+`Speed 0` divides to NaN in the movement simulation and kills the sector tick for everyone.
+
+## 0026 — sector slot honesty
+
+`SectorSlotData.java`, `Sector.java` · 2 files
+
+Every sector told every client it had 100 of 100 slots free for both factions. The client gates its
+jump button on the max slots for the player's own faction, so a faction-locked system showed a live
+jump button that the server then refused with a bare "sector not allowed" — with no way to tell
+which systems those were except by trying. Sectors now derive their caps from the same lockout
+flags the jump path enforces, and a locked faction gets 0, which is what makes the client grey the
+button and print its own "sector restricted" line.
+
 ---
 
 ## Data changes that are not patches

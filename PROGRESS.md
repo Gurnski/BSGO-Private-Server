@@ -1,9 +1,9 @@
-# Progress
+﻿# Progress
 
 Where this server actually is. Anything under **Works** has been watched working in a real client,
 not merely implemented and validated.
 
-Baseline: BSGOCore `23bad98a` + 24 patches + a 12,209-card generated catalogue.
+Baseline: BSGOCore `23bad98a` + 26 patches + a 12,250-card generated catalogue.
 Client: Unity 5.1.5f1 BSGO, protocol revision 4578.
 
 ## Works
@@ -20,7 +20,7 @@ log in exactly once, and a clean shutdown threw away everyone's session.
 and Number One authorise flagships; Starbuck, Number Six and the outpost quartermasters exchange
 water for cubits at 5 water to 1 cubit, uncapped.
 
-**Catalogue.** 12,209 cards stream with no `Card should not be send because it's null!` lines and
+**Catalogue.** 12,250 cards stream with no `Card should not be send because it's null!` lines and
 no infinite loads.
 
 **Galaxy.** All 58 accessible systems, one sector template per star, 26 outposts at boot ringed by
@@ -38,11 +38,11 @@ instead of being decorative.
 **Missile targeting.** Enemy warheads show the client's own missile bracket with a live hull-point
 bar, can be clicked or Z-selected, and can be shot down. The whole feature was waiting in the
 client behind one card flag our projectile World cards had set wrong. The rest of the missile
-work — flak screens sweeping warheads on both sides, and interception gated to strike and escort
-guns — deployed 4 Aug and sits on the next flight's checklist in TODO.md.
+work â€” flak screens sweeping warheads on both sides, and interception gated to strike and escort
+guns â€” deployed 4 Aug and sits on the next flight's checklist in TODO.md.
 
-**Equipment.** The original's full catalogue — 219 ship systems as ten-level upgrade ladders, 175
-consumables, 97 paints — imported from a live-server dump. Buying, fitting and upgrading work.
+**Equipment.** The original's full catalogue â€” 219 ship systems as ten-level upgrade ladders, 175
+consumables, 97 paints â€” imported from a live-server dump. Buying, fitting and upgrading work.
 
 **NPCs.** Wings spawn by system threat and fight. They carry the original's own rank names, drawn
 from the client's locale ladders: Talented Vipers, Seasoned Glaives, Apotheon Jormungs.
@@ -57,7 +57,7 @@ original game. Colonial and Cylon counterparts share one stat block, so their pe
 drift apart; the build fails if it ever does.
 
 **The operator console.** `spawn <ship>` puts any hull in the catalogue into space as an armed,
-fighting NPC — watched live as a spawned Pegasus held station against a Cylon outpost and traded
+fighting NPC â€” watched live as a spawned Pegasus held station against a Cylon outpost and traded
 missile volleys with its platform ring. The capitals arm from six dedicated ShipConfigTemplates;
 other player hulls spawn unarmed and say so. Alongside it: `spawn_wing`, `list_ships`, god mode,
 teleports, and the resource and experience taps the GameBridge panel expects.
@@ -67,8 +67,8 @@ teleports, and the resource and experience taps the GameBridge panel expects.
 ## Partly working
 
 **Flagship rentals across a relog.** The hour is enforced while you stay connected. The relog bug
-— counters dropped at load unless a Counter card backs the guid, deleting the hull regardless of
-time remaining — was fixed 4 Aug by emitting Counter cards for the four rental guids. Awaiting the
+â€” counters dropped at load unless a Counter card backs the guid, deleting the hull regardless of
+time remaining â€” was fixed 4 Aug by emitting Counter cards for the four rental guids. Awaiting the
 relog that proves it.
 
 **Missions.** Templates load and objectives count. Full completion is untested.
@@ -84,5 +84,5 @@ keep it that way.
 
 Fourteen hulls per faction, tier 1 through the tier-4 carriers, plus four rental capitals shared
 between the two factions as matched pairs. Full table in `tools/cardgen/cards.js`; the hangar
-grid is a fixed 3×5 of tier by role, which is why the capitals appear as variant buttons on the
+grid is a fixed 3Ã—5 of tier by role, which is why the capitals appear as variant buttons on the
 carrier's cell rather than cells of their own.

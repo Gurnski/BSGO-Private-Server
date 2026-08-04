@@ -13,6 +13,9 @@ import io.github.luigeneric.core.sector.management.slots.SectorSlotData;
 import io.github.luigeneric.core.sector.management.spawn.SpawnController;
 import io.github.luigeneric.core.sector.timers.TimerUpdater;
 import io.github.luigeneric.core.sector.zone.SectorZoneManagement;
+import io.github.luigeneric.enums.Faction;
+import io.github.luigeneric.templates.cards.GalaxyMapCard;
+import io.github.luigeneric.templates.utils.MapStarDesc;
 import io.github.luigeneric.utils.Utils;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
@@ -85,7 +88,13 @@ public class Sector implements Runnable
         this.damageMediator = damageMediator;
         this.abilityCastRequestQueue = abilityCastRequestQueue;
 
-        this.sectorSlotData = new SectorSlotData();
+        /* Mirror the jump gate GameProtocol enforces (minus the per-ship distance check, which is
+         * the pilot's own FTL range and not a property of the sector), so the galaxy map greys out
+         * exactly the systems the server would refuse. */
+        final MapStarDesc star = ctx.blueprint().starDesc();
+        this.sectorSlotData = SectorSlotData.forFactionAccess(
+                star.isCanJumpColonial() && !GalaxyMapCard.isBaseSector(Faction.Cylon, star.getId()),
+                star.isCanJumpCylon() && !GalaxyMapCard.isBaseSector(Faction.Colonial, star.getId()));
         this.jumpRegistry = jumpRegistry;
         this.timerUpdater = timerUpdater;
         this.collisionUpdater = collisionUpdater;

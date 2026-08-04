@@ -364,6 +364,8 @@ public class SectorFactory
 
         timers.add(new SpaceObjectPropertiesTimer(tick, spaceObjects, Utils.timeToTicks(TimeUnit.SECONDS, 0.1f)));
         timers.add(new ShipModifierTimeoutTimer(spaceObjects));
+        // Outpost Mode's per-second power drain; releases the mode when the reserves run out.
+        timers.add(new FortifyUpkeepTimer(tick, spaceObjects, Utils.timeToTicks(TimeUnit.SECONDS, 1)));
         timers.add(new NpcStaticTimer(tick, spaceObjects, Utils.timeToTicks(TimeUnit.SECONDS, 2),
                 abilityCastRequestQueue, sectorDamageHistory, sectorCards));
         timers.add(new NpcDynamicTimer(tick, spaceObjects, Utils.timeToTicks(TimeUnit.SECONDS, 3),
@@ -372,12 +374,15 @@ public class SectorFactory
         timers.add(new LogoutTimer(tick, spaceObjects, Utils.timeToTicks(TimeUnit.SECONDS, 10f), users, remover));
         timers.add(new BoostCostTimer(tick, spaceObjects, Utils.timeToTicks(TimeUnit.SECONDS, 1), users, sectorCards.sectorCard()));
 
+        /* Comets. Switched off while the card set at guid 23 was incomplete - the client's
+         * Comet.Read depends on a Missile card there and cards.js did not emit one, so a spawned
+         * comet never finished loading client-side while the server flew it and killed anything
+         * it touched. The card ships now, so the timer runs wherever a sector template asks for
+         * it: only sector 10 today (upstream's own cometSectorDesc), which is the pilot. */
         if (sectorDesc.getCometSectorDesc().activated())
         {
-            /*
             timers.add(new CometTimer(tick, spaceObjects, Utils.timeToTicks(TimeUnit.SECONDS, sectorDesc.getCometSectorDesc().delaySeconds()),
                     factory, joinQueue, sectorDesc.getCometSectorDesc()));
-             */
         }
 
         final NotificationTimer notificationTimer = new NotificationTimer(tick, spaceObjects, Utils.timeToTicks(TimeUnit.SECONDS, 7),

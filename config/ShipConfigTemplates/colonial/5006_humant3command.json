@@ -1,0 +1,33 @@
+[
+    {
+        "id": 5006,
+        "shipGUID": 5006,
+        "level": 1,
+        "slotConfigs": [
+            {
+                "slotID": 0,
+                "itemGUID": 83889376
+            },
+            {
+                "slotID": 1,
+                "itemGUID": 3350495088
+            },
+            {
+                "slotID": 2,
+                "itemGUID": 4001980506
+            },
+            {
+                "slotID": 3,
+                "itemGUID": 2076556240
+            },
+            {
+                "slotID": 4,
+                "itemGUID": 1115144928
+            },
+            {
+                "slotID": 5,
+                "itemGUID": 3831404378
+            }
+        ]
+    }
+]

@@ -358,6 +358,19 @@ public class SpaceSubscribeInfo
         this.applyStats();
     }
 
+    /**
+     * Fan a toggle-ability on/off notice out to every subscriber, so the caster's toolbar button
+     * lights up and onlookers get the buff icon. Separate from the modifier fan-out above: a
+     * toggle's STATS travel as a ShipModifier, but the button state is its own wire update.
+     */
+    public void sendToggleBuff(final int slotID, final long abilityGuid, final boolean on)
+    {
+        for (final BasePropertyBuffer sub : this.subscribers.values())
+        {
+            sub.onToggleBuff(slotID, abilityGuid, on);
+        }
+    }
+
     public void removeModifiers(final Set<Long> toRemoveModifiers)
     {
         final Optional<ShipModifiers> optModifiers = this.getShipModifiers();

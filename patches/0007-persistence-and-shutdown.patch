@@ -80,7 +80,7 @@ index a0a0820..f3a7e0d 100644
          this.dbProviderProvider.writeGuilds(guildRegistry);
          log.info("Writing guilds finished");
 diff --git a/src/main/java/io/github/luigeneric/database/SqLiteProvider.java b/src/main/java/io/github/luigeneric/database/SqLiteProvider.java
-index 0dfb77d..71a69a7 100644
+index 0dfb77d..27b8df6 100644
 --- a/src/main/java/io/github/luigeneric/database/SqLiteProvider.java
 +++ b/src/main/java/io/github/luigeneric/database/SqLiteProvider.java
 @@ -10,6 +10,7 @@ import io.github.luigeneric.core.player.*;
@@ -139,7 +139,7 @@ index 0dfb77d..71a69a7 100644
              }
  
              final HangarInfoFetchResult hangarInfo = hangars.fetchHangar(player.getUserID());
-@@ -200,6 +219,30 @@ public class SqLiteProvider implements DbProvider
+@@ -200,6 +219,31 @@ public class SqLiteProvider implements DbProvider
              containers.fetchMails(player);
              fetchSettings(player);
              fetchCounters(player);
@@ -148,7 +148,8 @@ index 0dfb77d..71a69a7 100644
 +             * remove-ship message to do it live: an expired Pegasus/Basestar disappears with
 +             * the next login. A missing counter means never rented (including hulls bought
 +             * under the old purchase rules) and counts as expired. */
-+            for (final long rentalGuid : new long[]{ CapitalRental.PEGASUS, CapitalRental.BASESTAR })
++            for (final long rentalGuid : new long[]{ CapitalRental.PEGASUS, CapitalRental.BASESTAR,
++                    CapitalRental.GALACTICA, CapitalRental.GUARDIAN })
 +            {
 +                for (final HangarShip hangarShip : player.getHangar().getAllHangarShips())
 +                {
@@ -170,7 +171,7 @@ index 0dfb77d..71a69a7 100644
              fetchTokenCap(player);
              fetchFactors(player);
              sqLiteMissions.fetchMissionBook(player);
-@@ -372,6 +415,36 @@ public class SqLiteProvider implements DbProvider
+@@ -372,6 +416,36 @@ public class SqLiteProvider implements DbProvider
          return null;
      }
  
@@ -207,7 +208,7 @@ index 0dfb77d..71a69a7 100644
      @Override
      @SneakyThrows
      public boolean checkIfUserExists(final long userId)
-@@ -438,24 +511,39 @@ public class SqLiteProvider implements DbProvider
+@@ -438,24 +512,39 @@ public class SqLiteProvider implements DbProvider
      @Transactional
      public void bulkWritePlayerToDb(final Collection<Player> players)
      {
@@ -257,7 +258,7 @@ index 0dfb77d..71a69a7 100644
      {
          lockWrite();
          try
-@@ -715,13 +803,36 @@ public class SqLiteProvider implements DbProvider
+@@ -715,13 +804,36 @@ public class SqLiteProvider implements DbProvider
              skillsStatement.setLong(1, player.getUserID());
              try(final ResultSet resultSet = skillsStatement.executeQuery();)
              {
@@ -297,7 +298,7 @@ index 0dfb77d..71a69a7 100644
                  }
              }
          }
-@@ -776,10 +887,25 @@ public class SqLiteProvider implements DbProvider
+@@ -776,10 +888,25 @@ public class SqLiteProvider implements DbProvider
                  "(players_id, sector_id, game_locations_id, previous_game_locations_id)" +
                  " VALUES (?, ?, ?, ?)");)
          {
