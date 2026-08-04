@@ -14,8 +14,14 @@ mirrored here or added to the manifest.
 
 ## ColliderTemplates/
 
-One sphere collider per flyable prefab — 32 of them, generated from each prefab's own hardpoint
-spread by `tools/cardgen/extract-hardpoints.py` — plus eight hand-measured station colliders.
+One collider per flyable prefab, plus eight hand-measured station colliders. Strike and line
+hulls are spheres, generated from each prefab's own hardpoint spread by
+`tools/cardgen/extract-hardpoints.py`. The capitals are AABB boxes measured from the prefab
+meshes by `tools/cardgen/extract-bounds.py`, because a sphere wide enough to cover a capital
+bow-to-stern reaches far past its broadside, and the collider is what missiles detonate against:
+the Brimir's old 428 sphere stopped missiles ~260 units off the hull, the Pegasus's 1174 sphere
+~800. The extractor reproduces upstream's own basestar box to two decimals, which is how we know
+the two measurements agree on method.
 
 A missing ColliderTemplate is not a warning. `SectorJoinQueue` dereferenced it unguarded, threw,
 and the player silently never spawned into the sector — no error client-side, just a load that
@@ -43,9 +49,6 @@ disagree about how big it is.
 | `humant3defender` | Colonial | 216 |
 | `humant3fighter` | Colonial | 258 |
 | `humant3merit` | Colonial | 216 |
-| `humant4carrier` | Colonial | 428 |
-| `pegasus` | Colonial | 1174 |
-| `basestar` | Cylon | 863 |
 | `cylont1command` | Cylon | 10 |
 | `cylont1defender` | Cylon | 10 |
 | `cylont1fighter` | Cylon | 10 |
@@ -60,7 +63,19 @@ disagree about how big it is.
 | `cylont3defender` | Cylon | 216 |
 | `cylont3fighter` | Cylon | 196 |
 | `cylont3merit` | Cylon | 133 |
-| `cylont4carrier` | Cylon | 428 |
+
+The capital boxes, measured 2026-08-04 (centre offsets are in the files):
+
+| Prefab | Faction | Half-extents (x × y × z) |
+|---|---|---|
+| `humant4carrier` (Brimir) | Colonial | 163 × 92 × 384 |
+| `humant4pegasus` (file `pegasus.json`) | Colonial | 365 × 157 × 907 |
+| `cylont4carrier` (Surtur) | Cylon | 249 × 125 × 350 |
+
+The `galactica` and `basestar` boxes come with the upstream unpack (see
+`upstream-manifest.txt`) and are left alone. An old `basestar.json` sphere override (r=863)
+lived here from the first import; it never ran — the live tree kept upstream's box — and it is
+deleted rather than kept as a trap for the next fresh overlay.
 
 The station colliders are `AABB` boxes, not spheres, measured from the client prefabs
 (2026-07-31). `extract-hardpoints.py` does not produce them, so they only exist as these files:

@@ -360,7 +360,8 @@ capital-rental price in 0016 is calculated against.
 
 ## 0016 — capital rental
 
-`Hangar.java`, `DialogProtocol.java`, `CapitalRental.java` · 3 files, +393 −19
+`Hangar.java`, `DialogProtocol.java`, `CapitalRental.java`, `CounterCardType.java`,
+`CapitalRentalExpiry.java`, `CapitalRentalRegistry.java` · 6 files, +828 −20
 
 `CapitalRental.java` is a brand-new file, which made it invisible to `git diff` and it originally
 shipped in no patch — a fresh checkout built from the patch set alone would not compile.
@@ -399,6 +400,15 @@ update instead of a hardcoded 9 999 that matched nothing the server would charge
 `Hangar.removeShip` exists for the expiry: if the rented hull was active, activation falls back to
 any remaining ship so the index cannot dangle. There is no server-to-client remove-ship message, so
 expiry is enforced at hangar load (0007) where the client rebuilds its hangar anyway.
+
+**The rental clock survives a relog now.** Expiry rides in the player's counters keyed by the
+rented hull's own ship guid, but `Counters.injectOldCounters` refuses any guid without a Counter
+card and `addCounterOf` only touches pre-seeded guids — so the expiry write landed nowhere, and
+the load sweep read the missing counter as 0 and deleted every rental as expired on the first
+relog, with time still on the clock. The fix is one enum in this patch: `CounterCardType` gains
+`capital_rental_{pegasus,basestar,galactica,guardian}` at the four ship guids plus
+`capital_rental_return_slot` (234), and `cards.js` emits a Counter card per entry, which is what
+seeds the counter and lets the persisted value back in.
 
 ## 0017 — NPC combat
 
@@ -460,13 +470,20 @@ ticking, client never told. Loot now falls back to the highest player damage dea
 
 ## 0019 — collision resolution
 
-`CollisionResolution.java` · 1 file, +45 −1
+`CollisionResolution.java` · 1 file, +53 −2
 
 Missile × asteroid had no branch at all: the round fell through the whole if/else, was neither
 removed nor detonated, and carried on through the rock while the asteroid took no damage. Both are
 destroyed now, damage first so the asteroid dies by the normal path and still drops its resources.
 Static × static threw instead of being ignored — there is nothing to resolve when neither body can be
 pushed — and the warning it raised now fires once per pair rather than ten times a second.
+
+Missile × Cruiser fell through the same way: `Cruiser` is in `getShipTypes()`, so the primitive
+pass paired missiles against the sector-template gate capitals, and the resolution list then
+didn't mention them — no damage, no `Hit`, the round flew on through the hull until its lifetime
+ran out and vanished without an explosion, because the client only plays a missile explosion for
+`RemovingCause.Hit`. Cruisers are in the list now. Guns always damaged them through the ability
+path; missiles were the odd one out.
 
 ## 0020 — debug console
 
@@ -487,6 +504,13 @@ feature — missile HUD brackets, a select-nearest-missile keybinding (Z), healt
 stats subscription, an explicit `Missile` ability-target flag — all gated on server data, and the
 original data shipped with no ability group allowed to target missiles, which is also why point
 defence never intercepted anything and the missile jammer jammed nothing.
+
+One of those gates turned out to be our own card data: the four projectile World cards shipped
+`showBracketWhenInRange: false`, and `HudIndicatorInfo.HasStaticIndicator` tests exactly that
+flag before it ever reaches its per-type missile rules — so the client never created a HUD
+indicator for any missile, and the indicator is the only thing a mouse click can practically land
+on at missile sizes. The flag is true now; the client's own rules keep brackets enemy-only, so
+your own volleys stay clean.
 
 This patch carries the one file no other group owns: `ShipConsumableCard` gains a server-only
 `MissileHullPoints` field (never written to the wire), so a nuclear warhead can give its missile

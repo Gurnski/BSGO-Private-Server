@@ -77,6 +77,10 @@ const GROUPS = [
     'src/main/java/io/github/luigeneric/core/player/Hangar.java',
     'src/main/java/io/github/luigeneric/core/protocols/dialog/DialogProtocol.java',
     'src/main/java/io/github/luigeneric/core/protocols/player/CapitalRental.java',
+    // The capital_rental_* CounterCardType entries are what let the expiry counter survive a
+    // relog: Counters.injectOldCounters refuses any guid without a Counter card, and cards.js
+    // emits one card per enum entry.
+    'src/main/java/io/github/luigeneric/templates/cards/CounterCardType.java',
     // The expiry sweep and its registry. Written, reviewed, and deliberately NOT scheduled -
     // CapitalRentalExpiry's own header records the three defects that keep it switched off.
     'src/main/java/io/github/luigeneric/core/CapitalRentalExpiry.java',

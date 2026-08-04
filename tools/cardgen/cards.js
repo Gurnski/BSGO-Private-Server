@@ -944,20 +944,14 @@ const HARDPOINTS = {
     bullet06:                { hash:  64121, pos: V3(-55.444721, -0.210785, -424.557434), rot: QUAT(0, 0.707107, 0, 0.707107) },
     bullet07:                { hash:  64555, pos: V3(53.008488, -0.210754, -567.233887), rot: QUAT(0, -0.707107, 0, 0.707107) },
     bullet08:                { hash:  18078, pos: V3(-55.444736, -0.210754, -567.233887), rot: QUAT(0, 0.707107, 0, 0.707107) },
-    /* bullet09-12 are SYNTHESISED, and are the only invented transforms on this hull. THEY CANNOT
-     * BIND CLIENT-SIDE - no transform of that name exists in galactica.prefab, and Spot.FindSpots
-     * matches on name, so the four bays they carry render no turret. Read the GALACTICA block in
-     * HULL_SLOTS before touching them; moving these coordinates cannot fix it.
-     * The model ships eight real mounts in four port/starboard pairs at z = +499, +358, -425, -567, leaving
-     * an 780-unit gap amidships that carries no battery. Eight guns on the fleet flagship reads as
-     * weaker than the twelve-gun Pegasus it is meant to outclass, so two more pairs fill that gap
-     * at z = +160 and z = -180 on the hull's own flank line - same x offsets and same outward
-     * facing as every real mount, so they sit on the broadside where a battlestar's guns belong.
-     * Hashes continue the project's number-in-the-name fallback (bullet10-14 already use it). */
-    bullet09:                { hash:  21539, pos: V3(53.008600, -0.210820, 160.000000), rot: QUAT(0, -0.707107, 0, 0.707107) },
-    bullet10:                { hash:     10, pos: V3(-55.444600, -0.210820, 160.000000), rot: QUAT(0, 0.707107, 0, 0.707107) },
-    bullet11:                { hash:     11, pos: V3(53.008550, -0.210800, -180.000000), rot: QUAT(0, -0.707107, 0, 0.707107) },
-    bullet12:                { hash:     12, pos: V3(-55.444650, -0.210800, -180.000000), rot: QUAT(0, 0.707107, 0, 0.707107) },
+    /* Eight mounts is the whole table ON PURPOSE. A previous pass synthesised bullet09-12 to
+     * bring her to the Pegasus's twelve, but no transform of those names exists in
+     * galactica.prefab, Spot.FindSpots matches on name, and a spot that never binds renders no
+     * turret and no muzzle flash - four visibly dead bays amidships. Re-checked 2026-08-04 by
+     * dumping every Transform in the galactica bundle: besides bullet01-08 it contains only
+     * body meshes, LOD containers and the engine glowball, all at the origin. There is nothing
+     * to bind a ninth bay to, so the hull carries eight and the Guardian drops to eight with it
+     * - see the flagship block in HULL_SLOTS. */
   },
   cylont1fighter: {    // Raider
     bullet01:                { hash:  49813, pos: V3(-1.161417, -0.310141, 2.245296), rot: QUAT() },
@@ -1392,58 +1386,39 @@ const HULL_SLOTS = {
    * (ship_commandtoken_{pegasus,basestar}_paperdoll_layouts), leaving 12 and 13 free rather than
    * filled with invented module slots. */
   humant4pegasus:     [[0, 'gun', 'bullet01', 1], [1, 'gun', 'bullet02', 1], [2, 'gun', 'bullet03', 1], [3, 'launcher', 'bullet04', 1], [4, 'launcher', 'bullet05', 1], [5, 'launcher', 'bullet06', 1], [6, 'launcher', 'bullet07', 1], [7, 'gun', 'bullet08', 1], [8, 'gun', 'bullet09', 1], [9, 'gun', 'bullet10', 1], [10, 'defensive_weapon', 'bullet11', 1], [11, 'defensive_weapon', 'bullet12', 1]],
-  /* THE TWO FLAGSHIPS - twelve batteries each, 6 gun / 4 launcher / 2 defensive, matching the
-   * Pegasus and Basestar so the flagship is not the lighter-armed ship. The split is IDENTICAL on
-   * both because these two share FLAGSHIP_FLIGHT by reference and a 12-vs-8 battery would undo in
-   * armament exactly the parity that stat block exists to guarantee. This file settled the same
-   * question once already on the Basestar row below: "a Cylon capital with a different weapon count
-   * to its Colonial counterpart would be the surprise".
+  /* THE TWO FLAGSHIPS - EIGHT batteries each, 4 gun / 2 launcher / 2 defensive, identical on
+   * both because they share FLAGSHIP_FLIGHT by reference and armament parity is the whole point
+   * of that stat block.
    *
-   * GUARDIAN. Twelve real locators, all twelve slotted, all twelve bind. Types are the prefab's own
-   * (see HARDPOINTS): bullet02/03/08/09 are the 'Gun' mounts, bullet11/12 the 'Point Defense' pair,
-   * and the launcher locators supply the rest.
-   *
-   * GALACTICA - AND THE ONE KNOWN DEFECT ON THIS HULL. galactica.prefab carries EIGHT bullet
-   * locators, not twelve; bullet09/10/11/12 in HARDPOINTS.galactica are synthesised and are the
-   * only invented transforms on any capital. Re-checked 2026-08-03 against galactica.prefab,
-   * galactica_lowres.prefab and every other galactica-family asset in the client: there is no
-   * twelve-mount Galactica anywhere, so this cannot be fixed the way the Pegasus was.
-   * The consequence is silent and VISUAL ONLY. Spot.FindSpots matches ObjectPointName against
+   * Eight, not the Pegasus's twelve, because galactica.prefab HAS eight mounts. A previous pass
+   * synthesised bullet09-12 to reach twelve, but Spot.FindSpots matches ObjectPointName against
    * transform names by exact equality and drops misses without a log line, so those four descs
-   * produce no Spot -> GetObjectPoint returns null -> Modules.BuildModules hits `continue` ->
-   * no turret model, no muzzle flash, no tracer on four of the twelve bays. Damage still resolves:
-   * the server reads the card's own localPosition for the arc check and missile spawn origin, and
-   * those sit on the hull's real flank line. The loss is symmetric (both phantom pairs are complete
-   * port/starboard pairs), so the ship looks bald amidships rather than lopsided.
-   * Do NOT "fix" this by moving the coordinates. Spot binds to the prefab transform and Position/
-   * Rotation return transform.position/rotation (Spot.cs:26-28), so no value in HARDPOINTS can move
-   * a turret on screen - only the NAME matters client-side.
-   * The only two real options are (a) leave it, which is what we do, and keep 12-vs-12 parity, or
-   * (b) drop BOTH flagships to eight bays, which restores every turret model at the cost of a third
-   * of the flagship battery on both factions. That is a balance call, not a data call, so it is not
-   * being made here.
+   * produced no Spot -> GetObjectPoint returned null -> Modules.BuildModules hit `continue` ->
+   * no turret model, no muzzle flash, no tracer on four of the twelve bays. Re-checked 2026-08-04
+   * by dumping every Transform in the galactica bundle: there is nothing else to bind to (see
+   * HARDPOINTS.galactica), and no value in HARDPOINTS can move a turret on screen - only the NAME
+   * matters client-side. So the choice was four permanently bald bays or eight real ones, and the
+   * Guardian drops with her because a Cylon flagship out-gunning its Colonial counterpart by four
+   * batteries would undo the parity. The flagships now carry fewer tubes than the twelve-bay
+   * Pegasus pair and out-hit them per bay on the FLAGSHIP stat block instead; whether that trade
+   * is balanced is a play question, flagged in TODO.md under Balance.
    *
-   * Type split on the Galactica is by geometry, bow to stern - no backup models, no
-   * _cannon/_launcher/_defensive suffixes, no wiki loadout: the bow pair throws missiles, the middle
-   * pairs are the cannon battery, and the stern pair is the point-defence screen over the engines.
-   * Point defence aft is the debatable call - the Pegasus mounts it on the centre line and this hull
-   * has none - but the alternative is a flagship with no close-in defence at all.
+   * Type split on the Galactica is by geometry, bow to stern: the bow pair throws missiles, the
+   * middle pairs are the cannon battery. Point defence goes FORE AND AFT, never as a pair -
+   * bullet07/08 are both at z = -567, and putting the two defensive bays there left every flak
+   * burst coming out of the stern with the bow undefended, which is exactly how it looked in
+   * flight. bullet01 (z = +499) and bullet07 (z = -567) are the hull's own extremes, matching the
+   * Pegasus, whose real prefab puts its pair at +528 and -508.
    *
-   * MaxCountPerShip ON THE CAPITAL WEAPONS COVERS THIS SPLIT and was re-checked against the emitted
-   * catalogue: 6031 gun cap 6 vs 6 gun bays, 6034 launcher cap 4 vs 4 launcher bays, 6032/6033 cap 2
-   * vs 2 defensive bays. Change the split here and those caps have to move with it, or the extra
-   * bays are permanently unfillable.
+   * MaxCountPerShip ON THE CAPITAL WEAPONS: the caps stay at the Pegasus pair's 6 gun / 4
+   * launcher / 2 defensive, which the twelve-bay hulls still need; a cap above a hull's bay count
+   * is harmless, a cap below it makes bays unfillable. 4 <= 6, 2 <= 4, 2 <= 2, all fine.
    *
    * SLOT 12 IS THE PAINT BAY on both. The two command-token paperdolls define big-layout ids 0-13
    * at level 1 and 0-12 at level 2, so 12 is the only id that is safe at BOTH levels; 13 would be a
    * NullReferenceException on any level-2 card. These hulls can never reach level 2 (rentalOnly
    * forces nextShipCardGuid 0), but a bay that is only safe by accident is not worth the saving. */
-  /* Point defence goes FORE AND AFT, never as a pair. bullet07/08 are both at z = -567, so putting
-   * the two defensive bays there left every flak burst coming out of the stern and the bow
-   * undefended - which is exactly how it looked in flight. bullet01 (z = +499) and bullet07
-   * (z = -567) are the hull's own extremes, matching the Pegasus, whose real prefab puts its pair
-   * at +528 and -508. The 6/4/2 split is unchanged, so parity with the Guardian holds. */
-  galactica:          [[0, 'launcher', 'bullet02', 1], [1, 'launcher', 'bullet03', 1], [2, 'launcher', 'bullet09', 1], [3, 'launcher', 'bullet10', 1], [4, 'gun', 'bullet04', 1], [5, 'gun', 'bullet05', 1], [6, 'gun', 'bullet06', 1], [7, 'gun', 'bullet08', 1], [8, 'gun', 'bullet11', 1], [9, 'gun', 'bullet12', 1], [10, 'defensive_weapon', 'bullet01', 1], [11, 'defensive_weapon', 'bullet07', 1], [12, 'ship_paint', 'undefined', 1]],
+  galactica:          [[0, 'launcher', 'bullet02', 1], [1, 'launcher', 'bullet03', 1], [2, 'gun', 'bullet04', 1], [3, 'gun', 'bullet05', 1], [4, 'gun', 'bullet06', 1], [5, 'gun', 'bullet08', 1], [6, 'defensive_weapon', 'bullet01', 1], [7, 'defensive_weapon', 'bullet07', 1], [12, 'ship_paint', 'undefined', 1]],
   cylont1fighter:     [[0, 'weapon', 'bullet01', 1], [1, 'weapon', 'bullet03', 1], [2, 'weapon', 'elitebullet04', 1], [12, 'weapon', 'bullet02', 2]],
   cylont2fighter:     [[0, 'weapon', 'bullet01', 1], [1, 'weapon', 'bullet04', 1], [2, 'weapon', 'elitebullet06', 1], [3, 'weapon', 'bullet03', 1], [12, 'weapon', 'bullet02', 2], [13, 'weapon', 'elitebullet05', 2]],
   cylont3fighter:     [[12, 'weapon', 'bullet02', 1], [13, 'weapon', 'bullet05', 1], [0, 'weapon', 'bullet01', 1], [1, 'weapon', 'bullet06', 1], [2, 'weapon', 'elitebullet07', 1], [3, 'weapon', 'bullet03', 1], [4, 'weapon', 'bullet04', 1], [5, 'weapon', 'elitebullet08', 1]],
@@ -1463,11 +1438,13 @@ const HULL_SLOTS = {
    * there is no attested loadout to check it against. The geometry is identical though, and a
    * Cylon capital with a different weapon count to its Colonial counterpart would be the surprise. */
   basestar:           [[0, 'gun', 'bullet01', 1], [1, 'gun', 'bullet02', 1], [2, 'gun', 'bullet03', 1], [3, 'launcher', 'bullet04', 1], [4, 'launcher', 'bullet05', 1], [5, 'launcher', 'bullet06', 1], [6, 'launcher', 'bullet07', 1], [7, 'gun', 'bullet08', 1], [8, 'gun', 'bullet09', 1], [9, 'gun', 'bullet10', 1], [10, 'defensive_weapon', 'bullet11', 1], [11, 'defensive_weapon', 'bullet12', 1]],
-  // Guardian Basestar - the Galactica's matched pair. See the block above the galactica row.
-  /* All twelve real mounts, classed by the turret models parked on them in the prefab's own
-   * 'Missiles Backup' container: launchers on 01/04/05/06, guns on 02/03/08/09, point defence
-   * on 11/12. bullet07/10 are the launcher pair the artists left unmodelled - mirrors of 05/06. */
-  cylont4wing_guardian: [[0, 'launcher', 'bullet01', 1], [1, 'launcher', 'bullet04', 1], [2, 'launcher', 'bullet05', 1], [3, 'launcher', 'bullet06', 1], [4, 'gun', 'bullet02', 1], [5, 'gun', 'bullet03', 1], [6, 'gun', 'bullet08', 1], [7, 'gun', 'bullet09', 1], [8, 'gun', 'bullet07', 1], [9, 'gun', 'bullet10', 1], [10, 'defensive_weapon', 'bullet11', 1], [11, 'defensive_weapon', 'bullet12', 1], [12, 'ship_paint', 'undefined', 1]],
+  // Guardian Basestar - the Galactica's matched pair. See the flagship block above her row.
+  /* Eight of the twelve real mounts, matching the Galactica's 4/2/2 for parity. The keepers are
+   * classed by the turret models parked on them in the prefab's own 'Missiles Backup' container:
+   * guns on 02/03/08/09, point defence on 11/12, and 01/04 carry the launcher pair. The cuts are
+   * 05/06 (the other two launcher mounts) and 07/10 - the pair the artists left unmodelled, which
+   * makes them the natural first cut. */
+  cylont4wing_guardian: [[0, 'launcher', 'bullet01', 1], [1, 'launcher', 'bullet04', 1], [2, 'gun', 'bullet02', 1], [3, 'gun', 'bullet03', 1], [4, 'gun', 'bullet08', 1], [5, 'gun', 'bullet09', 1], [6, 'defensive_weapon', 'bullet11', 1], [7, 'defensive_weapon', 'bullet12', 1], [12, 'ship_paint', 'undefined', 1]],
 };
 /* LevelRequirement. The Requisition button is not rendered AT ALL when the player's level is
  * below this, so 5/10 made four of six hulls unbuyable for a fresh character. The curve is
@@ -3015,12 +2992,20 @@ function checkMissileGuids(byName) {
 
 function projectileCards(guid, key, prefabName, radius, frame, avatar, explosionView, missileType) {
   return [
-    // The client overrides this prefab from faction+tier+type, and the server builds an explicit
-    // collider rather than looking one up - so this only has to be a real, non-null ASCII string.
+    /* The client overrides this prefab from faction+tier+type, and the server builds an explicit
+     * collider rather than looking one up - so prefabName only has to be a real, non-null ASCII
+     * string. showBracketWhenInRange is the gate HudIndicatorInfo.HasStaticIndicator tests before
+     * any of its per-type rules: false means the client never creates a HUD indicator for the
+     * object, and on a 3-unit projectile that indicator is the only thing a mouse click can
+     * practically land on (TargetSelector's other path is a physics ray against the model). False
+     * here is what made missiles unclickable on every hull. True hands control back to the
+     * client's own missile rules, which are already enemy-only - HasStaticIndicator checks
+     * PlayerRelation and WasSpawnedByMe for SpaceEntityType.Missile - so your own volleys stay
+     * bracket-free, and enemy warheads get the dedicated missile bracket plus a health bar. */
     card(guid, 'World', {
       prefabName, lodCount: 1, radius,
       spots: [], systemMapTexutres: '', frameIndex: 0, secondaryFrameIndex: 0,
-      targetable: true, showBracketWhenInRange: false, forceShowOnMap: false,
+      targetable: true, showBracketWhenInRange: true, forceShowOnMap: false,
     }),
     // These objects are targetable, so a dead key would print on the HUD bracket. All four keys
     // resolve .name in the client's locale bundle.

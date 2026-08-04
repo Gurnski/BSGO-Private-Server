@@ -106,7 +106,24 @@ public enum CounterCardType
     outposts_damage_dealt(232),
     outposts_damage_received(233),
 
-    drones_killed(260734533);
+    drones_killed(260734533),
+
+    /* Capital rental expiry, keyed by the rented hull's OWN ship guid - that is the whole
+     * persistence scheme (see CapitalRental), so these guids are the ship guids and must never
+     * drift from them. Counters.injectOldCounters refuses any guid without a Counter card and
+     * addCounterOf only touches pre-seeded guids, so before these entries existed the expiry
+     * write landed nowhere and SqLiteProvider's login sweep read the missing counter as 0 -
+     * i.e. every rental was deleted as expired on the first relog, with time still on the
+     * clock. cards.js emits one Counter card per entry in this enum, so listing them here IS
+     * what emits the cards. */
+    capital_rental_pegasus(5017),
+    capital_rental_basestar(5117),
+    capital_rental_galactica(5019),
+    capital_rental_guardian(5119),
+    /* The hangar slot the pilot flew before renting, so expiry can put them back in it.
+     * CapitalRental.RETURN_SLOT_COUNTER carries the same 234 and its comment names this
+     * constant; change either only together with the other. */
+    capital_rental_return_slot(234);
 
 
     public final long cardGuid;

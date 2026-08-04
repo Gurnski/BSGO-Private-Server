@@ -731,14 +731,20 @@ index 4ff4531..9720065 100644
          final BgoProtocolWriter bw = newMessage();
 diff --git a/src/main/java/io/github/luigeneric/core/protocols/player/CapitalRental.java b/src/main/java/io/github/luigeneric/core/protocols/player/CapitalRental.java
 new file mode 100644
-index 0000000..90d777a
+index 0000000..3458ba1
 --- /dev/null
 +++ b/src/main/java/io/github/luigeneric/core/protocols/player/CapitalRental.java
-@@ -0,0 +1,78 @@
+@@ -0,0 +1,169 @@
 +package io.github.luigeneric.core.protocols.player;
 +
 +import io.github.luigeneric.core.galaxy.Galaxy;
++import io.github.luigeneric.core.player.HangarShip;
++import io.github.luigeneric.core.player.container.ShipSlot;
++import io.github.luigeneric.core.player.container.ShipSlots;
 +import io.github.luigeneric.enums.Faction;
++import io.github.luigeneric.templates.cards.ShipSlotCard;
++import io.github.luigeneric.templates.shipitems.ShipSystem;
++import io.github.luigeneric.templates.utils.ShipSlotType;
 +
 +/**
 + * The Pegasus and Basestar are rented, never owned: 20,000 tokens buys one hour, cheaper the
@@ -751,15 +757,28 @@ index 0000000..90d777a
 + * ServerMessage.RemoveShip. The hangar load in SqLiteProvider stays as the offline backstop for
 + * rentals that ran out while the player was away.
 + *
-+ * Counters.injectOldCounters drops a counter whose guid has no Counter card, and 5017/5117 have
-+ * none yet, so the expiry write below currently lands nowhere and cannot survive a restart. The
-+ * live authority is therefore CapitalRentalRegistry; the counter write stays because it starts
-+ * working the moment the Counter cards are emitted.
++ * Counters.injectOldCounters drops a counter whose guid has no Counter card, so the expiry only
++ * survives a relog because CounterCardType carries capital_rental_* entries at these same guids
++ * and cards.js emits a Counter card per entry. CapitalRentalRegistry remains the live in-memory
++ * authority; the counter is what makes the clock outlive a restart.
 + */
 +public final class CapitalRental
 +{
 +    public static final long PEGASUS = 5017L;
 +    public static final long BASESTAR = 5117L;
++    /* The fleet flagships - a step above the Pegasus/Basestar pair and, unlike them, never
++     * flyable in the original. They rent exactly the same way; isRental below is what keeps them
++     * off the purchase path, since a rental hull ships with an empty BuyPrice. */
++    public static final long GALACTICA = 5019L;
++    public static final long GUARDIAN = 5119L;
++
++    /** The hourly capital for a faction: index 0 is the Pegasus tier, index 1 the flagship. */
++    public static long forFaction(final Faction faction, final boolean flagship)
++    {
++        if (faction == Faction.Colonial)
++            return flagship ? GALACTICA : PEGASUS;
++        return flagship ? GUARDIAN : BASESTAR;
++    }
 +    /** Shop items-tab passes; buying one starts the rental instead of delivering an item. */
 +    public static final long PASS_PEGASUS = 5020L;
 +    public static final long PASS_BASESTAR = 5120L;
@@ -774,10 +793,10 @@ index 0000000..90d777a
 +    public static final long BASE_PRICE = 20_000L;
 +    public static final long FLOOR_PRICE = 2_000L;
 +    public static final long DURATION_SECONDS = 3600L;
-+    /* The hangar slot the pilot flew before the rental, so expiry can put them back in it. Kept
-+     * as a raw guid rather than a CounterCardType constant because the enum entry (and the
-+     * Counter card behind it) is an integrator step; 234 is free in the emitted card set and
-+     * must match capital_rental_return_slot when that lands. */
++    /* The hangar slot the pilot flew before the rental, so expiry can put them back in it.
++     * CounterCardType.capital_rental_return_slot carries the same 234; change either only
++     * together with the other. Kept literal because javac inlines static final primitives and
++     * this file is meant to be the only use site. */
 +    public static final long RETURN_SLOT_COUNTER = 234L;
 +
 +    private CapitalRental()
@@ -786,7 +805,8 @@ index 0000000..90d777a
 +
 +    public static boolean isRental(final long shipGuid)
 +    {
-+        return shipGuid == PEGASUS || shipGuid == BASESTAR;
++        return shipGuid == PEGASUS || shipGuid == BASESTAR
++                || shipGuid == GALACTICA || shipGuid == GUARDIAN;
 +    }
 +
 +    public static boolean isPass(final long itemGuid)
@@ -797,6 +817,77 @@ index 0000000..90d777a
 +    public static long capitalForPass(final long passGuid)
 +    {
 +        return passGuid == PASS_PEGASUS ? PEGASUS : BASESTAR;
++    }
++
++    /* The stock loadout. A rental is an hour of a battlestar, not an hour of a hull the pilot then
++     * has to find 720k tylium of tier-4 hardware for, so it arrives armed. These four are the only
++     * tier-4 systems whose SlotType matches a capital bay; all are Neutral, so the same three arm
++     * both factions and the Colonial/Cylon pair stays identical without a second table.
++     * Private on purpose: javac inlines static final primitives at the use site, and keeping the
++     * only use sites in this file means changing a guid can never need a clean build. */
++    private static final long CAPSHIP_CANNON = 6031L;
++    private static final long CAPSHIP_POINT_DEFENCE = 6032L;
++    private static final long CAPSHIP_LAUNCHER = 6034L;
++
++    /** 0 for a bay that gets nothing - the flagships' paint slot, and anything added later. */
++    private static long systemForSlot(final ShipSlotType slotType)
++    {
++        return switch (slotType)
++        {
++            case gun -> CAPSHIP_CANNON;
++            case launcher -> CAPSHIP_LAUNCHER;
++            /* Flak (6033) is deliberately left on the shelf: it is the paid alternative to point
++             * defence and is the only reason the two defensive bays are a choice at all. */
++            case defensive_weapon -> CAPSHIP_POINT_DEFENCE;
++            default -> 0L;
++        };
++    }
++
++    /**
++     * Fills a rented capital's empty weapon bays. The HangarShip constructor has already built one
++     * empty ShipSlot per ShipSlotCard, so the slots are fetched and filled rather than added - that
++     * keeps the ShipSlots map keyed by slotId, which is what the client and ShipBindings both index
++     * by. ShipSlot.addShipItem preserves the slot's serverID and builds the ShipAbility from the
++     * system's first ability card; without that ability the bay fires nothing and gets no turret.
++     *
++     * No consumable is seeded. All four capital ability cards (71002031-34) carry
++     * ConsumableOption NotUsing, so AbilityAction.checkConsumablesSatisfied short-circuits before
++     * it ever reads the Hold and FireMissileAction falls back to the built-in round. Seeding one
++     * would only make the client draw an ammo counter for rounds nothing spends.
++     *
++     * Arming the HangarShip arms the ship in space too: SpaceObjectFactory.createPlayerShip hands
++     * the active HangarShip's SpaceSubscribeInfo straight to the PlayerShip, and that instance
++     * holds this same ShipSlots object.
++     *
++     * Idempotent - an already-fitted bay is left alone, so this is safe to re-run on a hull whose
++     * loadout came back from the database.
++     */
++    public static void arm(final HangarShip hangarShip)
++    {
++        if (!isRental(hangarShip.getCardGuid()))
++            return;
++
++        final ShipSlots slots = hangarShip.getShipSlots();
++        for (final ShipSlotCard slotCard : hangarShip.getShipCard().getShipSlotCards())
++        {
++            final long systemGuid = systemForSlot(slotCard.getShipSlotType());
++            if (systemGuid == 0)
++                continue;
++
++            // null when the hull's level is below the slot card's - not the case for the capitals,
++            // but HangarShip drops such slots and getSlot is the only honest way to find out.
++            final ShipSlot slot = slots.getSlot(slotCard.getSlotId());
++            if (slot == null)
++                continue;
++
++            final ShipSystem fitted = slot.getShipSystem();
++            if (fitted != null && fitted.getShipSystemCard() != null)
++                continue;
++
++            slot.addShipItem(ShipSystem.fromGUID(systemGuid));
++        }
++        // Slot systems can carry StaticBuffs/MultiplyBuffs; re-run before max HP/PP are read.
++        hangarShip.getShipStats().applyStats();
 +    }
 +
 +    public static long priceFor(final Faction faction, final Galaxy galaxy)
@@ -813,3 +904,33 @@ index 0000000..90d777a
 +        return Math.max(FLOOR_PRICE, Math.round(price));
 +    }
 +}
+diff --git a/src/main/java/io/github/luigeneric/templates/cards/CounterCardType.java b/src/main/java/io/github/luigeneric/templates/cards/CounterCardType.java
+index 969d8e4..80b1151 100644
+--- a/src/main/java/io/github/luigeneric/templates/cards/CounterCardType.java
++++ b/src/main/java/io/github/luigeneric/templates/cards/CounterCardType.java
+@@ -106,7 +106,24 @@ public enum CounterCardType
+     outposts_damage_dealt(232),
+     outposts_damage_received(233),
+ 
+-    drones_killed(260734533);
++    drones_killed(260734533),
++
++    /* Capital rental expiry, keyed by the rented hull's OWN ship guid - that is the whole
++     * persistence scheme (see CapitalRental), so these guids are the ship guids and must never
++     * drift from them. Counters.injectOldCounters refuses any guid without a Counter card and
++     * addCounterOf only touches pre-seeded guids, so before these entries existed the expiry
++     * write landed nowhere and SqLiteProvider's login sweep read the missing counter as 0 -
++     * i.e. every rental was deleted as expired on the first relog, with time still on the
++     * clock. cards.js emits one Counter card per entry in this enum, so listing them here IS
++     * what emits the cards. */
++    capital_rental_pegasus(5017),
++    capital_rental_basestar(5117),
++    capital_rental_galactica(5019),
++    capital_rental_guardian(5119),
++    /* The hangar slot the pilot flew before renting, so expiry can put them back in it.
++     * CapitalRental.RETURN_SLOT_COUNTER carries the same 234 and its comment names this
++     * constant; change either only together with the other. */
++    capital_rental_return_slot(234);
+ 
+ 
+     public final long cardGuid;

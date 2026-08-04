@@ -1,1 +1,14 @@
-{"center":{"x":0,"y":0,"z":0},"radius":428,"prefabName":"cylont4carrier","type":"Sphere"}
+{
+	"center": {
+                "x": 0,
+                "y": -49.14,
+                "z": 11.82
+            },
+	"extents": {
+                "x": 249.02,
+                "y": 124.93,
+                "z": 350.42
+            },
+    "prefabName": "cylont4carrier",
+    "type": "AABB"
+}

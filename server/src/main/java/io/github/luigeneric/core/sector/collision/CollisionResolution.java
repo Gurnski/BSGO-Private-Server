@@ -206,8 +206,15 @@ public class CollisionResolution
             this.damageMediator.dealDamageFromMissile(missile, other);
             remover.notifyRemovingCauseAdded(missile, RemovingCause.Hit, other);
         }
+        /* Cruiser is in getShipTypes(), so CollisionUpdater.primitiveCheck pairs missiles against
+         * the sector-template gate capitals - and then this list didn't mention them, so the pair
+         * resolved to nothing: no damage, no Hit, and the round flew on through the hull until its
+         * LifeTime ran out. The client only plays a missile explosion for RemovingCause.Hit, so
+         * from the cockpit the missile vanished mid-flight with no effect. Guns already damage
+         * Cruisers through the ability path; missiles were the odd one out. */
         else if (other.getSpaceEntityType().isOfType(SpaceEntityType.Outpost, SpaceEntityType.WeaponPlatform,
-                SpaceEntityType.Player, SpaceEntityType.BotFighter, SpaceEntityType.MiningShip, SpaceEntityType.Comet))
+                SpaceEntityType.Player, SpaceEntityType.BotFighter, SpaceEntityType.MiningShip, SpaceEntityType.Comet,
+                SpaceEntityType.Cruiser))
         {
             if (other.isRemoved())
                 return;

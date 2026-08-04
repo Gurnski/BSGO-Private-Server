@@ -2,41 +2,53 @@
 
 Ordered by what unblocks the most. Each item says what is actually wrong, not just what to build.
 
+## Fixed on 4 Aug, needs a flight to confirm
+
+None of these four has been seen working in a real client yet. Each says what to look for.
+
+### Missile brackets and clickability — was our own card data
+
+The `DetectionOuterRadius` suspicion was wrong. The client decompile shows
+`HudIndicatorInfo.HasStaticIndicator` refuses to create a HUD indicator for any object whose
+World card says `showBracketWhenInRange: false` — and our four projectile World cards said
+exactly that. No indicator means nothing for a mouse click to land on; detection radii only
+decide when an existing bracket hides. The flag is true now and the client's own rules take over:
+enemy-only brackets with the dedicated missile sprite and a health bar. Flak needs no bracket at
+all — its auto-cast sweep (`GetObjectsWithinAOE`) runs over every loaded object — so "rarely
+kills one" is cadence (the target list refreshes once per cast) and the short crossing window,
+not targeting. **Check:** an incoming NPC missile shows a bracket, is clickable, and Z (select
+nearest missile) still works.
+
+### Early missile impacts on the carriers — oversized sphere colliders
+
+Incoming missiles detonated far off the Brimir's hull because the collider was a 428-radius
+sphere on a hull whose mesh is 326 wide, 184 tall and 768 long: sized to cover the length, it
+reached ~260 units past the broadside. The Pegasus's 1174 sphere was ~800 units proud. All three
+authored capital spheres are now AABB boxes measured from the prefab meshes by
+`tools/cardgen/extract-bounds.py`, which reproduces upstream's own basestar box to two decimals.
+Also found on the way: missile × Cruiser collisions paired but never resolved (patch 0019), so
+missiles flew through the gate capitals doing nothing. **Check:** a missile fired at the Brimir
+detonates at the hull, and a missile fired at a gate basestar actually hurts it.
+
+### Flagships at eight real mounts
+
+The galactica bundle holds exactly eight bullet locators; a transform dump found nothing else
+positioned off-origin to bind a ninth bay to, so the invented `bullet09`–`12` are gone and both
+flagships now carry 4 gun / 2 launcher / 2 defensive on real mounts. The Guardian dropped with
+her to keep the pair identical; the cut mounts there are the two the artists left unmodelled plus
+one launcher pair. The flagships now mount fewer tubes than the twelve-bay Pegasus pair and lean
+on the FLAGSHIP stat block instead — that trade moves to Balance below. **Check:** every
+Galactica bay renders a turret and fires from it.
+
+### Rental clocks across relogs
+
+`CounterCardType` now carries `capital_rental_{pegasus,basestar,galactica,guardian}` at the four
+ship guids plus `capital_rental_return_slot` (234), so cards.js emits the Counter cards that let
+`Counters.injectOldCounters` keep the persisted expiry instead of dropping it and deleting the
+hull at login. The same mechanism would allow a durable water-exchange ledger if one is ever
+wanted. **Check:** rent, relog, and the hull is still there with time on the clock.
+
 ## Next
-
-### Missile interception, client side
-
-Enemy missiles carry hull points and every gun, flak and point-defence ability group carries the
-`Missile` target flag, so the server will happily let you shoot one. A player still cannot click a
-missile to select it, and flak rarely kills one in practice.
-
-The leading suspicion is that the client only draws a target bracket for objects inside
-`DetectionOuterRadius`, and a bracket that is never drawn cannot be clicked or offered to the
-auto-cast sweep that feeds flak its targets. Capitals carry different detection stats than strike
-craft, which is where it was noticed. Verify that before changing any card data.
-
-### Missile collisions on the carriers
-
-Missiles fired from a Brimir behave oddly on impact. Undiagnosed. First thing to check is the
-missile spawn point against the carrier's own 428-unit collider, since a projectile born inside its
-parent's collision sphere is a plausible cause, but that is a guess and not a diagnosis.
-
-### The Galactica's four synthesised mounts
-
-`bullet09`–`12` on the Galactica do not exist in the client's model. They were added to bring her
-armament up to the Pegasus's twelve, and the client can only bind a mount whose transform is really
-there, so those four bays likely render no turret and may fire from the ship's origin. That could
-also be feeding the carrier collision problem above.
-
-Two honest options: drop back to her eight real mounts, applying the same change to the Guardian so
-the pair stays identical, or search the bundle for other usable transforms.
-
-### Rentals that survive a relog
-
-`Counters.injectOldCounters` silently discards any counter whose guid has no Counter card, so the
-rental expiry write lands nowhere and the login path deletes the hull as expired regardless of time
-remaining. Emitting Counter cards for 5017, 5117, 5019, 5119 and 234 fixes it, and the same change
-would allow a durable water-exchange ledger if one is ever wanted.
 
 ### Flagship auto-return
 
@@ -50,7 +62,9 @@ the player's sector id before the ship drains. Re-enable only when all three are
 Hull points now span 850 on a Viper Mk II to 100,000 on a flagship, and the equipment ladder is the
 original's own rather than a tier multiplier. Nobody has timed kills across tiers with a person in
 the cockpit. The capitals are the open question: twelve capital batteries against a Viper's four
-guns may be correct for a battlestar or may be unplayable, and only play will say.
+guns may be correct for a battlestar or may be unplayable, and only play will say. The flagships
+now carry eight bays to the Pegasus pair's twelve (real mounts only, see above), so whether the
+FLAGSHIP stat block still buys the "step above" feel is part of the same question.
 
 Boss lairs pay six themed jackpots. Whether any of them is worth the fight is untested.
 

@@ -1,1 +1,14 @@
-{"center":{"x":0,"y":0,"z":0},"radius":1174,"prefabName": "humant4pegasus","type":"Sphere"}
+{
+	"center": {
+                "x": 0,
+                "y": 2.05,
+                "z": 22.34
+            },
+	"extents": {
+                "x": 365.12,
+                "y": 157.35,
+                "z": 907.48
+            },
+    "prefabName": "humant4pegasus",
+    "type": "AABB"
+}

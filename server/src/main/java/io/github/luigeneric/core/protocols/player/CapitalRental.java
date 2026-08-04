@@ -20,10 +20,10 @@ import io.github.luigeneric.templates.utils.ShipSlotType;
  * ServerMessage.RemoveShip. The hangar load in SqLiteProvider stays as the offline backstop for
  * rentals that ran out while the player was away.
  *
- * Counters.injectOldCounters drops a counter whose guid has no Counter card, and 5017/5117 have
- * none yet, so the expiry write below currently lands nowhere and cannot survive a restart. The
- * live authority is therefore CapitalRentalRegistry; the counter write stays because it starts
- * working the moment the Counter cards are emitted.
+ * Counters.injectOldCounters drops a counter whose guid has no Counter card, so the expiry only
+ * survives a relog because CounterCardType carries capital_rental_* entries at these same guids
+ * and cards.js emits a Counter card per entry. CapitalRentalRegistry remains the live in-memory
+ * authority; the counter is what makes the clock outlive a restart.
  */
 public final class CapitalRental
 {
@@ -56,10 +56,10 @@ public final class CapitalRental
     public static final long BASE_PRICE = 20_000L;
     public static final long FLOOR_PRICE = 2_000L;
     public static final long DURATION_SECONDS = 3600L;
-    /* The hangar slot the pilot flew before the rental, so expiry can put them back in it. Kept
-     * as a raw guid rather than a CounterCardType constant because the enum entry (and the
-     * Counter card behind it) is an integrator step; 234 is free in the emitted card set and
-     * must match capital_rental_return_slot when that lands. */
+    /* The hangar slot the pilot flew before the rental, so expiry can put them back in it.
+     * CounterCardType.capital_rental_return_slot carries the same 234; change either only
+     * together with the other. Kept literal because javac inlines static final primitives and
+     * this file is meant to be the only use site. */
     public static final long RETURN_SLOT_COUNTER = 234L;
 
     private CapitalRental()

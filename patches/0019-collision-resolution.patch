@@ -1,5 +1,5 @@
 diff --git a/src/main/java/io/github/luigeneric/core/sector/collision/CollisionResolution.java b/src/main/java/io/github/luigeneric/core/sector/collision/CollisionResolution.java
-index 98461c7..81b0f76 100644
+index 98461c7..36f2c7d 100644
 --- a/src/main/java/io/github/luigeneric/core/sector/collision/CollisionResolution.java
 +++ b/src/main/java/io/github/luigeneric/core/sector/collision/CollisionResolution.java
 @@ -20,7 +20,9 @@ import io.github.luigeneric.templates.utils.ObjectStat;
@@ -21,7 +21,7 @@ index 98461c7..81b0f76 100644
      public CollisionResolution(final DamageMediator damageMediator,
                                 final ISpaceObjectRemover remover)
      {
-@@ -185,6 +189,23 @@ public class CollisionResolution
+@@ -185,8 +189,32 @@ public class CollisionResolution
          {
              remover.notifyRemovingCauseAdded(missile, RemovingCause.Hit, other);
          }
@@ -42,10 +42,20 @@ index 98461c7..81b0f76 100644
 +            this.damageMediator.dealDamageFromMissile(missile, other);
 +            remover.notifyRemovingCauseAdded(missile, RemovingCause.Hit, other);
 +        }
++        /* Cruiser is in getShipTypes(), so CollisionUpdater.primitiveCheck pairs missiles against
++         * the sector-template gate capitals - and then this list didn't mention them, so the pair
++         * resolved to nothing: no damage, no Hit, and the round flew on through the hull until its
++         * LifeTime ran out. The client only plays a missile explosion for RemovingCause.Hit, so
++         * from the cockpit the missile vanished mid-flight with no effect. Guns already damage
++         * Cruisers through the ability path; missiles were the odd one out. */
          else if (other.getSpaceEntityType().isOfType(SpaceEntityType.Outpost, SpaceEntityType.WeaponPlatform,
-                 SpaceEntityType.Player, SpaceEntityType.BotFighter, SpaceEntityType.MiningShip, SpaceEntityType.Comet))
+-                SpaceEntityType.Player, SpaceEntityType.BotFighter, SpaceEntityType.MiningShip, SpaceEntityType.Comet))
++                SpaceEntityType.Player, SpaceEntityType.BotFighter, SpaceEntityType.MiningShip, SpaceEntityType.Comet,
++                SpaceEntityType.Cruiser))
          {
-@@ -225,7 +246,30 @@ public class CollisionResolution
+             if (other.isRemoved())
+                 return;
+@@ -225,7 +253,30 @@ public class CollisionResolution
          }
          else
          {
