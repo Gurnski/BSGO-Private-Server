@@ -28,10 +28,10 @@ and the player silently never spawned into the sector — no error client-side, 
 never finishes. The null-guard is in `patches/0003-sector-join-null-collider.patch`; these files
 are what make the guard unnecessary in the first place.
 
-The radii are not uniform because **the models are not a common scale and the client never
-rescales them**: a Viper is ~10 units across and a Pegasus ~1170. The same extent drives the World
-card radius and the camera zoom range, so a hull cannot end up with a collider and a camera that
-disagree about how big it is.
+The sizes are not uniform because **the models are not a common scale and the client never
+rescales them**: a Viper is ~10 units across and the Pegasus's hull is over 1,800 long. The same
+extent drives the World card radius and the camera zoom range, so a hull cannot end up with a
+collider and a camera that disagree about how big it is.
 
 | Prefab | Faction | Radius |
 |---|---|---|

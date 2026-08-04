@@ -5,24 +5,25 @@ These changes also live as one commit each on the
 which is what you actually clone and run. This file is the annotated changelog; the `patches/`
 files are the same changes as standalone diffs against pristine upstream, for review or reapply.
 
-Twenty-three patches against [BSGOCore](https://github.com/luigeneric/BSGOCore) at baseline
+Twenty-four patches against [BSGOCore](https://github.com/luigeneric/BSGOCore) at baseline
 **`23bad98a`** ("Fix PulseManeuver, fix DynamicMovementController", #10).
 
-Together they touch **47 files, +2 163 / −151**. Verified: applied in order with
+Together they touch **49 files, +2 872 / −229**. Verified: applied in order with
 `git apply --ignore-whitespace` to a clean worktree of `23bad98a`, the result is byte-identical
 (modulo CRLF) to the tree this server actually runs.
 
-**0015–0020 are back-filled documentation**, not new work. Those fifteen files were changed across
-earlier sessions and never added to `tools/mkpatches.js`, so the coverage check had been failing and
-`patches/` had gone stale for 0006, 0007, 0008, 0010, 0012 and 0013 as well. Their entries below are
-short on purpose: the reasoning for each lives in the code comments, which is where it is useful.
+**0015–0020 began as back-filled documentation** for files changed across earlier sessions and
+never added to `tools/mkpatches.js` — the coverage check had been failing, and `patches/` had gone
+stale for 0006, 0007, 0008, 0010, 0012 and 0013 as well. Several of those groups have since grown
+real new work (0016's rental persistence, 0017's NPC combat, 0020's operator console), and their
+entries below grew with them.
 
 ## Why patches and not a fork
 
 BSGOCore is AGPL-3.0 and actively developed. Patches keep our changes reviewable in isolation,
-make it obvious which are bug fixes worth sending upstream (1, 3, 5, 6, 8, 9, 12, 14, 17, 18, 19)
-and which are deployment choices that are only right for a small private server (2, 4, 11, 13, 15,
-16, 20), and let us rebase without a merge history nobody wants to read.
+make it obvious which are bug fixes worth sending upstream (1, 3, 5, 6, 8, 9, 12, 14, 17, 18, 19,
+24) and which are choices that are only right for a small private server (2, 4, 11, 13, 15, 16,
+20, 21, 22, 23), and let us rebase without a merge history nobody wants to read.
 
 ## Applying
 
@@ -89,7 +90,7 @@ A missing `ColliderTemplate` threw inside the join path.
 load that never finishes. Upstream already treats colliders as optional three lines below
 (`.filter(SpaceObject::hasCollider)`), so this mostly makes it self-consistent.
 
-See `config/ColliderTemplates/` for the eight templates that make the guard unnecessary.
+See `config/ColliderTemplates/` for the templates that make the guard unnecessary.
 
 ## 0004 — reusable sessions
 
@@ -420,7 +421,7 @@ seeds the counter and lets the persisted value back in.
 
 `SpaceObjectFactory.java`, `NpcTimer.java`, `NpcDynamicTimer.java`, `NpcStaticTimer.java`,
 `MiningShipNpcAssassinTimer.java`, `DynamicNpcSpawn.java`, `NpcBehaviourTemplates.java`,
-`AbilityCastRequestQueue.java` · 8 files, +192 −33
+`AbilityCastRequestQueue.java` · 8 files, +261 −81
 
 Also in `NpcTimer`: the kill-objective fallback now skips removed targets — without the filter,
 an assassin whose mining ship just died re-acquired the corpse every pass for the rest of its
@@ -642,7 +643,7 @@ flag before the presence check, so the race no longer drops the message.
 `ServerConfigurationUtils/` is gitignored upstream, so config cannot ship as a diff.
 
 - **`config/`** in this repo holds the hand-authored collider and loot templates. See its README.
-- **`tools/cardgen/cards.js`** generates the whole `JsonCards/` catalogue (11 696 cards). Never
+- **`tools/cardgen/cards.js`** generates the whole `JsonCards/` catalogue (12,209 cards). Never
   hand-edit those files. Most of that is the equipment import: 219 systems × 10 upgrade levels,
   with their abilities, prices and icons. The generated modules it reads —
   `systems-real.js`, `paints-real.js`, `consumables-real.js`, `hulls-real.js` — each have their own

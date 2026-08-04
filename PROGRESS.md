@@ -3,7 +3,7 @@
 Where this server actually is. Anything under **Works** has been watched working in a real client,
 not merely implemented and validated.
 
-Baseline: BSGOCore `23bad98a` + 23 patches + a 12,204-card generated catalogue.
+Baseline: BSGOCore `23bad98a` + 24 patches + a 12,209-card generated catalogue.
 Client: Unity 5.1.5f1 BSGO, protocol revision 4578.
 
 ## Works
@@ -20,7 +20,7 @@ log in exactly once, and a clean shutdown threw away everyone's session.
 and Number One authorise flagships; Starbuck, Number Six and the outpost quartermasters exchange
 water for cubits at 5 water to 1 cubit, uncapped.
 
-**Catalogue.** 12,204 cards stream with no `Card should not be send because it's null!` lines and
+**Catalogue.** 12,209 cards stream with no `Card should not be send because it's null!` lines and
 no infinite loads.
 
 **Galaxy.** All 58 accessible systems, one sector template per star, 26 outposts at boot ringed by
@@ -34,6 +34,12 @@ graveyards, scavenger stations, debris fields, and boss lairs with a gold vein a
 **Combat.** Verified end to end. Weapons fire, NPCs return fire, ships die, loot and XP arrive.
 Armour and ammunition are live: every shot consumes a round, and armour value reduces damage
 instead of being decorative.
+
+**Missile targeting.** Enemy warheads show the client's own missile bracket with a live hull-point
+bar, can be clicked or Z-selected, and can be shot down. The whole feature was waiting in the
+client behind one card flag our projectile World cards had set wrong. The rest of the missile
+work — flak screens sweeping warheads on both sides, and interception gated to strike and escort
+guns — deployed 4 Aug and sits on the next flight's checklist in TODO.md.
 
 **Equipment.** The original's full catalogue — 219 ship systems as ten-level upgrade ladders, 175
 consumables, 97 paints — imported from a live-server dump. Buying, fitting and upgrading work.
@@ -50,19 +56,20 @@ Basestar, plus the Galactica and Guardian Basestar, neither of which was ever fl
 original game. Colonial and Cylon counterparts share one stat block, so their performance cannot
 drift apart; the build fails if it ever does.
 
+**The operator console.** `spawn <ship>` puts any hull in the catalogue into space as an armed,
+fighting NPC — watched live as a spawned Pegasus held station against a Cylon outpost and traded
+missile volleys with its platform ring. The capitals arm from six dedicated ShipConfigTemplates;
+other player hulls spawn unarmed and say so. Alongside it: `spawn_wing`, `list_ships`, god mode,
+teleports, and the resource and experience taps the GameBridge panel expects.
+
 **Mining.** Asteroids carry resources and respawn, and XP scales with asteroid size.
 
 ## Partly working
 
-**Missile interception.** Enemy missiles are shootable in principle — every gun, flak and
-point-defence group carries the `Missile` target flag — and warheads carry their own hull points.
-In practice a player cannot yet click a missile to select it, and flak rarely destroys one. Current
-suspicion is that the client only draws a target bracket inside detection range, and an undrawn
-bracket cannot be clicked. Unverified.
-
-**Flagship rentals across a relog.** The hour is enforced while you stay connected. Log out and the
-hull is removed at the next login regardless of time remaining, because expiry lives in a counter
-and counters are dropped at load unless a Counter card backs the guid.
+**Flagship rentals across a relog.** The hour is enforced while you stay connected. The relog bug
+— counters dropped at load unless a Counter card backs the guid, deleting the hull regardless of
+time remaining — was fixed 4 Aug by emitting Counter cards for the four rental guids. Awaiting the
+relog that proves it.
 
 **Missions.** Templates load and objectives count. Full completion is untested.
 

@@ -58,7 +58,7 @@ node tools\cardgen\emit-sector-templates.js
 node tools\cardgen\cards.js
 ```
 
-`cards.js` must end with `validation passed - 1380 cards`. It fails the build rather than let a
+`cards.js` must end with `validation passed - 12209 cards`. It fails the build rather than let a
 bad card reach a client, because the client has no timeout on card loads — a single malformed
 card is an infinite loading screen with nothing in any log.
 
@@ -73,7 +73,7 @@ $env:JAVA_HOME = "C:\path\to\jdk-21"     # must be a JDK 21, not the system-defa
 Healthy startup looks like:
 
 ```
-size: 12204
+size: 12209
 INFO [io.gi.lu.ne.LegacyTcpLoginServerListener] LoginServerListener successfully started
 INFO [io.gi.lu.ne.LegacyTcpLoginServerListener] LoginServerEndpoint waiting for new connections
 INFO [io.quarkus] bsgo-core 1.0.0-SNAPSHOT ... started in 4.131s
@@ -112,9 +112,10 @@ loading screen → read the client's `output_log.txt`.** They almost never both 
 |---|---|
 | Client exits to desktop the instant it connects, nothing in either log | Patch `0001` not applied — the client hardcodes protocol revision 4578 and calls `Application.Quit()` on mismatch |
 | First login works, second hangs on "Loading… please wait a bit" forever | Patches `0002`/`0004` not applied — the session is consumed on connect and destroyed on disconnect |
-| `size:` line missing at boot | `ServerConfigurationUtils/` missing or misnamed (step 3) |
+| `size:` line missing at boot | `ServerConfigurationUtils/` missing or misnamed (step 2) |
 | Loading screen spins forever, server log says `Card should not be send because it's null! <guid> <view>` | A card is missing from the catalogue — the log names it |
-| Player never spawns into the sector, no error anywhere | Missing `ColliderTemplate` — the `config/` overlay was not copied (step 3) |
+| Player never spawns into the sector, no error anywhere | Missing `ColliderTemplate` — the `config/` overlay was not copied (step 2) |
+| Login works but nobody spawns into any sector; the log shows every sector thread throwing an uncaught exception at the same timestamp | A source file was edited (or `mvnw compile` ran) while the server was up — dev mode's hot reload kills the sector threads and leaves the login listener alive. Restart the server; never touch `server/src` while it runs |
 | Abrupt disconnect, server log shows `Cannot invoke "java.lang.Float.floatValue()"` | A ship card is missing a stat — patch `0006` turns the crash into a default, and `cards.js` validates the full flight-stat set |
 | `roll is NaN` every tick in the server log | Incomplete flight stats on a ship card — regenerate with `cards.js`, which validates this |
 | Progress lost after a server restart | Patch `0007` not applied — upstream's clean shutdown wrote guilds only |
