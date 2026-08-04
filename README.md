@@ -5,9 +5,11 @@ with none of its own: no ship stats, no items, no sector layouts. Every card was
 from a server that no longer exists, and the card database was never published. Install the client
 today and it connects to nothing, then waits forever.
 
-This repo rebuilds that data, and the server fixes needed to run it. Right now that means 12,204
+This repo rebuilds that data, and the server fixes needed to run it. Right now that means 12,209
 cards, 58 star systems, the original's full equipment catalogue, boss lairs worth bringing friends
-to, and two battlestars the live game never let anyone fly.
+to, two battlestars the live game never let anyone fly, and an operator console that can spawn
+any hull in the catalogue as a fighting NPC — so a Pegasus really can slug it out with a Cylon
+outpost while you watch.
 
 It does **not** contain the game. You need your own copy of the client.
 
@@ -29,7 +31,7 @@ with fixes for the problems we hit on the way.
 
 ## What this repo adds
 
-`tools/cardgen/` generates the card catalogue the server sends to clients: 12,204 cards covering
+`tools/cardgen/` generates the card catalogue the server sends to clients: 12,209 cards covering
 58 star systems, 14 hulls per faction from the tier-1 strikes up to the Pegasus and Basestar, the
 original game's full equipment catalogue (219 systems as ten-level upgrade ladders, 175
 consumables, 97 paints), skills, missions, the shop, and every resource type. The generator checks
@@ -54,12 +56,22 @@ choices that suit a small private server:
   outposts on the map at boot and leaves 31 contested systems to capture
 - the ability arms and armour curve that make imported equipment behave, so weapons that were
   decorative now hit, consume ammunition and are reduced by armour
+- missile interception, rebuilt end to end. The client shipped the whole feature — missile
+  brackets, a select-nearest-missile key, health bars — gated on server data that never enabled
+  it. Enemy warheads are now real targets with real hull points; strike and escort guns can
+  shoot them down, capitals rely on their flak and point-defence screens, and NPC screens sweep
+  incoming missiles the same way yours do
 - room NPCs, flagship rentals and the water-for-cubits exchange, all reconstructed from dialogue
   and message types the client still carries but upstream never sent
+- an operator console grown out of upstream's debug protocol: `spawn` puts any hull in the
+  catalogue into space as an armed, fighting NPC (`spawn_wing` rings up to twelve of them around
+  you), with god mode, teleports and resource taps for testing alongside
 
 `config/` holds hand-authored server config that upstream keeps out of git: collider templates
-measured from the actual ship prefabs, the loot tables including six themed boss jackpots, and the
-ship configs that arm every NPC and station. Its own README explains each.
+measured from the actual ship prefab meshes (bounding boxes for the capitals, whose old spheres
+detonated missiles hundreds of units off the hull), the loot tables including six themed boss
+jackpots, and the ship configs that arm every NPC, station and spawnable capital. Its own README
+explains each.
 
 For the rest, [QUICKSTART.md](QUICKSTART.md) covers setup and troubleshooting,
 [PROGRESS.md](PROGRESS.md) records what has actually been seen working against a real client,
@@ -73,13 +85,14 @@ instead of a raw key and prefabs resolve to real models.
 ## Status
 
 Playable end to end: log in, fit a ship, fly out, fight NPCs, kill a boss, take a battlestar out
-for an hour. [PROGRESS.md](PROGRESS.md) has the detail, and everything marked working below has
-been watched in a real client rather than merely validated.
+for an hour, or spawn one and referee. [PROGRESS.md](PROGRESS.md) has the detail. Everything
+marked *working* below has been watched in a real client rather than merely validated; the rows
+marked *deployed* landed too recently for that and are on the next flight's checklist.
 
 | Area | State |
 |---|---|
 | Login, reconnects, persistence | working |
-| Catalogue streaming (12,204 cards) | working |
+| Catalogue streaming (12,209 cards) | working |
 | Character creation | working |
 | Hangar, CIC, outpost rooms, shop | working |
 | Space: undock, fly, boost, FTL, dock | working |
@@ -93,8 +106,10 @@ been watched in a real client rather than merely validated.
 | Capital rentals: Pegasus, Basestar, Galactica, Guardian Basestar | working |
 | Water-for-cubits exchange | working |
 | Mining | working |
-| Missile interception | partial: server accepts it, missiles not yet clickable |
-| Rentals across a relog | partial: the hull is dropped at next login |
+| Missile interception: brackets, hull points, shoot-downs | working |
+| Operator console: spawn NPCs, stage capital battles, god mode | working |
+| Flak screens sweeping missiles, yours and the NPCs' | deployed |
+| Rental clocks surviving a relog | deployed |
 | Missions | partial: templates load and count, completion untested |
 | Guilds, tournaments, ship scrapping | not started |
 
@@ -130,7 +145,7 @@ $env:JAVA_HOME = "C:\path\to\jdk-21"
 .\mvnw.cmd quarkus:dev
 ```
 
-A healthy startup logs `size: 12204` (the card count) and `LoginServerEndpoint waiting for new
+A healthy startup logs `size: 12209` (the card count) and `LoginServerEndpoint waiting for new
 connections`. Anything else, see the troubleshooting table in QUICKSTART.md.
 
 ## Editing the data
@@ -163,6 +178,9 @@ Each of these cost real debugging time, and none of them fail loudly:
   spins forever. The server log names the culprit:
   `Card should not be send because it's null! <guid> <view>`
 - The client does not read index 0 for avatar defaults. It hard-indexes specific positions.
+- Never edit `server/src` while the server is running under `quarkus:dev`. Dev mode watches the
+  sources, and the attempted hot reload kills every sector thread while the login listener
+  survives — the server looks up but nobody can spawn in. Stage the change, stop, sync, start.
 
 The diagnosis rule that saves the most time: an abrupt disconnect is explained in the server
 log. An infinite loading screen is explained in the client log. They almost never both have it.
