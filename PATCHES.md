@@ -423,6 +423,18 @@ lifetime, flying at nothing and enqueueing casts the queue then discarded. And i
 whose target died kept flying its final attack vector until it happened to exit its patrol box,
 so a lair boss that fought once cruised its lair visibly tilted forever.
 
+**NPC flak sweeps see missiles now.** Flak and point defence are sweeps: a player's client hands
+them every object in range via `GetObjectsWithinAOE`, and the server action re-checks range, arc
+and hit chance per id it was given — it never looks for targets itself. The NPC path handed every
+slot exactly one id, the closest enemy ship, so NPC flak fired dutifully at hulls and never
+received a single missile id. The stations had half the fix already (an enemy-id sweep for
+Area-affect slots, missiles included) but only rebuilt it when their *target changed* — locked on
+the same capital for a whole fight, every missile launched mid-fight was invisible to their flak.
+`NpcTimer.updateWeapons` now builds the sweep list for Area casts on every weapons pass (a keyed
+put; cooldowns live on the ship system, untouched), and `NpcStaticTimer` re-registers while a
+target exists instead of skipping unchanged ones. Watching a Pegasus trade missile volleys with
+an outpost, both screens now thin the incoming salvos.
+
 Also in `NpcDynamicTimer`, the standoff rule: a bot stops at `speedZeroDistance` only if its
 target is "almost standing" (speed < 5). Against a player that clause is right — nobody wants a
 bot parked on a ship that is merely throttled down for a beat. Between two NPCs it could never be

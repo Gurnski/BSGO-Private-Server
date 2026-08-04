@@ -23,18 +23,6 @@ import java.util.stream.Collectors;
 
 public class NpcStaticTimer extends NpcTimer
 {
-    /** Object types a static defence (outpost/platform) may ever damage. Deliberately NOT
-     *  SpaceEntityType.getShipTypes(): that array includes JumpBeacon and AsteroidBot. */
-    private static final SpaceEntityType[] STATION_TARGETABLE_TYPES = {
-            SpaceEntityType.Player,
-            SpaceEntityType.BotFighter,
-            SpaceEntityType.Cruiser,
-            SpaceEntityType.MiningShip,
-            SpaceEntityType.Outpost,
-            SpaceEntityType.WeaponPlatform,
-            SpaceEntityType.Missile,
-            SpaceEntityType.Mine
-    };
     private final Map<Long, SpaceObject> lastTargets;
     public NpcStaticTimer(final Tick tick, final SectorSpaceObjects sectorSpaceObjects, final long delay,
                           final AbilityCastRequestQueue abilityCastRequestQueue,
@@ -69,9 +57,13 @@ public class NpcStaticTimer extends NpcTimer
             final SpaceObject lastTarget = lastTargets.get(npcShip.getObjectID());
             //update target, retaining the current one out to maximumAggroDistance
             final SpaceObject closest = getNextTarget(npcShip, lastTarget);
-            //if no change in target, dont update all weapons all over again!
-            //lastTarget may be null, closest aswell!
-            if ((lastTarget == null && closest == null) || closest != null && closest.equals(lastTarget))
+            /* The old "no change in target, dont update all weapons" skip starved the Area
+             * sweeps: a station locked on the same capital for minutes kept the enemy-id list
+             * from acquisition time, so every missile launched DURING the fight was invisible
+             * to its flak - which read as "outpost flak never damages missiles". Skip only the
+             * truly idle case; while a target exists, re-register every pass so the sweep list
+             * stays current (keyed put, cooldowns untouched - see NpcTimer.updateWeapons). */
+            if (lastTarget == null && closest == null)
             {
                 continue;
             }
@@ -82,54 +74,24 @@ public class NpcStaticTimer extends NpcTimer
     }
 
 
+    /* Arming and Area-sweep target lists live in NpcTimer.updateWeapons now, shared with the
+     * moving bots - the sweep logic was born here and got hoisted when the bots turned out to
+     * need it just as much. The one station-only behaviour left is deregistration: a station
+     * whose target walked away must drop its auto-casts, where a moving bot keeps chasing. */
     @Override
     protected void updateWeapons(final Ship ship, final SpaceObject closest)
     {
-        final Optional<ShipSlots> optSlots = ship.getSpaceSubscribeInfo().getShipSlots();
-        if (optSlots.isEmpty())
-            return;
-        final ShipSlots slots = optSlots.get();
-        for (final ShipSlot slot : slots.values())
+        if (closest == null)
         {
-            if (closest == null)
+            final Optional<ShipSlots> optSlots = ship.getSpaceSubscribeInfo().getShipSlots();
+            if (optSlots.isEmpty())
+                return;
+            for (final ShipSlot slot : optSlots.get().values())
             {
                 this.abilityCastRequestQueue.removeAutoCastAbility(slot.getShipSystem().getServerID(), ship.getObjectID());
             }
-            else
-            {
-                if (slot.getShipSystem().getCardGuid() != 0 &&
-                        slot.getShipAbility().getShipAbilityCard().getShipAbilityAffect() == ShipAbilityAffect.Area)
-                {
-                    final Set<Long> allObjectIDs = getAllEnemyObjectIds(ship, spaceObject -> true);
-
-                    final AbilityCastRequest abilityCastRequest = new AbilityCastRequest(
-                            ship,
-                            slot.getShipSystem().getServerID(),
-                            true,
-                            allObjectIDs);
-                    this.abilityCastRequestQueue.addAutoCastAbility(abilityCastRequest);
-                }
-                else
-                {
-                    final AbilityCastRequest abilityCastRequest = new AbilityCastRequest(
-                            ship,
-                            slot.getShipSystem().getServerID(),
-                            true,
-                            closest.getObjectID());
-                    this.abilityCastRequestQueue.addAutoCastAbility(abilityCastRequest);
-                }
-            }
+            return;
         }
-    }
-
-    private Set<Long> getAllEnemyObjectIds(final Ship me, final Predicate<SpaceObject> predicate)
-    {
-        return this.sectorSpaceObjects.values().stream()
-                .filter(obj -> obj.getSpaceEntityType().isOfType(STATION_TARGETABLE_TYPES))
-                .filter(obj -> RelationUtil.getRelation(obj, me,
-                        sectorCards.regulationCard().getTargetBracketMode()) == Relation.Enemy)
-                .filter(predicate)
-                .map(SpaceObject::getObjectID)
-                .collect(Collectors.toSet());
+        super.updateWeapons(ship, closest);
     }
 }

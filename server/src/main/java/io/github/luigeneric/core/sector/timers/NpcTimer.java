@@ -20,14 +20,32 @@ import io.github.luigeneric.core.spaceentities.PlayerShip;
 import io.github.luigeneric.core.spaceentities.Ship;
 import io.github.luigeneric.core.spaceentities.SpaceObject;
 import io.github.luigeneric.enums.SpaceEntityType;
+import io.github.luigeneric.templates.utils.ShipAbilityAffect;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
 @Slf4j
 public abstract class NpcTimer extends DelayedTimer
 {
+    /** Object types an NPC's weapons may ever be handed. Deliberately NOT
+     *  SpaceEntityType.getShipTypes(): that array includes JumpBeacon and AsteroidBot.
+     *  Missile and Mine are the entire point of the Area sweep in updateWeapons. */
+    protected static final SpaceEntityType[] NPC_TARGETABLE_TYPES = {
+            SpaceEntityType.Player,
+            SpaceEntityType.BotFighter,
+            SpaceEntityType.Cruiser,
+            SpaceEntityType.MiningShip,
+            SpaceEntityType.Outpost,
+            SpaceEntityType.WeaponPlatform,
+            SpaceEntityType.Missile,
+            SpaceEntityType.Mine
+    };
+
     protected final AbilityCastRequestQueue abilityCastRequestQueue;
     protected final SectorDamageHistory sectorDamageHistory;
     protected final SectorCards sectorCards;
@@ -69,12 +87,45 @@ public abstract class NpcTimer extends DelayedTimer
         }
         for (final ShipSlot slot : slots.values())
         {
-            this.abilityCastRequestQueue.addAutoCastAbility(new AbilityCastRequest(
-                    ship,
-                    slot.getShipSystem().getServerID(),
-                    true,
-                    closest.getObjectID()));
+            if (slot.getShipSystem().getCardGuid() == 0)
+                continue;
+            /* Flak and point defence are SWEEPS, not aimed weapons. A player's client hands
+             * them every object in range (ShipAbility.GetObjectsWithinAOE); the server-side
+             * action re-checks range, arc and hit chance per id it was given and touches
+             * nothing else. Handing an NPC's sweep only the one closest SHIP is why NPC flak
+             * never damaged a missile: the missile ids simply were not in the request. Area
+             * casts get the full enemy set instead - and they get it on EVERY weapons pass,
+             * because a missile launched mid-fight has to enter the list while the fight is
+             * still on (addAutoCastAbility is a keyed put, so re-registering is free, and
+             * cooldowns live on the ShipSystem, untouched). */
+            if (slot.getShipAbility().getShipAbilityCard().getShipAbilityAffect() == ShipAbilityAffect.Area)
+            {
+                this.abilityCastRequestQueue.addAutoCastAbility(new AbilityCastRequest(
+                        ship,
+                        slot.getShipSystem().getServerID(),
+                        true,
+                        getAllEnemyObjectIds(ship, obj -> true)));
+            }
+            else
+            {
+                this.abilityCastRequestQueue.addAutoCastAbility(new AbilityCastRequest(
+                        ship,
+                        slot.getShipSystem().getServerID(),
+                        true,
+                        closest.getObjectID()));
+            }
         }
+    }
+
+    protected Set<Long> getAllEnemyObjectIds(final Ship me, final Predicate<SpaceObject> predicate)
+    {
+        return this.sectorSpaceObjects.values().stream()
+                .filter(obj -> obj.getSpaceEntityType().isOfType(NPC_TARGETABLE_TYPES))
+                .filter(obj -> RelationUtil.getRelation(obj, me,
+                        sectorCards.regulationCard().getTargetBracketMode()) == Relation.Enemy)
+                .filter(predicate)
+                .map(SpaceObject::getObjectID)
+                .collect(Collectors.toSet());
     }
 
     protected SpaceObject getTargetFromDamageHistory(final NpcShip botFighter)
