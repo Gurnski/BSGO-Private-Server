@@ -52,12 +52,14 @@ choices that suit a small private server:
   desync
 - server-side checks against shop and avatar exploits
 - mining respawn and XP fixes, plus economy tuning
-- outpost spawning driven by the galaxy data instead of two hardcoded sector ids, which puts 26
-  outposts on the map at boot and leaves 31 contested systems to capture
+- outpost spawning driven by the galaxy data instead of two hardcoded sector ids, so 56 of the 58
+  systems can hold an outpost and 45 are contested by both factions
+- outpost control that survives a restart. Who holds what is written at shutdown and restored at
+  boot, where the galaxy used to be rebuilt from the star flags every time the server came up
 - the ability arms and armour curve that make imported equipment behave, so weapons that were
   decorative now hit, consume ammunition and are reduced by armour
-- missile interception, rebuilt end to end. The client shipped the whole feature â€” missile
-  brackets, a select-nearest-missile key, health bars â€” gated on server data that never enabled
+- missile interception, rebuilt end to end. The client shipped the whole feature — missile
+  brackets, a select-nearest-missile key, health bars — gated on server data that never enabled
   it. Enemy warheads are now real targets with real hull points; strike and escort guns can
   shoot them down, capitals rely on their flak and point-defence screens, and NPC screens sweep
   incoming missiles the same way yours do
@@ -97,9 +99,9 @@ marked *deployed* landed too recently for that and are on the next flight's chec
 | Hangar, CIC, outpost rooms, shop | working |
 | Space: undock, fly, boost, FTL, dock | working |
 | Galaxy (58 systems, every reachable one contestable) | working |
-| Sector content (45,849 placed objects: belts, wrecks, lairs) | working |
+| Sector content (46,101 placed objects: belts, wrecks, lairs) | working |
 | Combat, damage, death, loot, XP | working |
-| Equipment (219 systems Ã— 10 levels, 175 consumables, 97 paints) | working |
+| Equipment (219 systems × 10 levels, 175 consumables, 97 paints) | working |
 | NPCs with the original's own rank names | working |
 | Boss lairs: level-120, 50,000-hull bosses with guard wings | working |
 | Ship roster (14 hulls per faction, 4 tiers) | working |
@@ -180,7 +182,7 @@ Each of these cost real debugging time, and none of them fail loudly:
 - The client does not read index 0 for avatar defaults. It hard-indexes specific positions.
 - Never edit `server/src` while the server is running under `quarkus:dev`. Dev mode watches the
   sources, and the attempted hot reload kills every sector thread while the login listener
-  survives â€” the server looks up but nobody can spawn in. Stage the change, stop, sync, start.
+  survives — the server looks up but nobody can spawn in. Stage the change, stop, sync, start.
 
 The diagnosis rule that saves the most time: an abrupt disconnect is explained in the server
 log. An infinite loading screen is explained in the client log. They almost never both have it.
