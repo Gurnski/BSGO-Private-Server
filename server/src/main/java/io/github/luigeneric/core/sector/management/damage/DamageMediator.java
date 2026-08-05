@@ -103,15 +103,27 @@ public class DamageMediator
                     sendOutpostRetreatBroadcast(toObject.getFaction());
                 }
             }
-            else if (toObject.getSpaceEntityType() == SpaceEntityType.Missile && damageRecord.from() != null)
+            else if (toObject.getSpaceEntityType() == SpaceEntityType.Missile)
             {
                 /* A shot-down missile leaves with Hit, not Death. The client's ObjectLeft handler
                  * plays MissileScript.Terminate's explosion only on Hit - on Death a missile has
                  * no removal effect and silently pops out of existence (SpaceObject.OnDestroyed is
                  * an empty virtual that Missile does not override). Death is also the cause that
-                 * arms the loot/claim machinery, which a missile must never enter. The killer is
-                 * the hit object; ObjectLeftHit dereferences it, hence the null guard above. */
-                this.remover.notifyRemovingCauseAdded(toObject, RemovingCause.Hit, damageRecord.from());
+                 * arms the loot/claim machinery, which a missile must never enter.
+                 *
+                 * THE HIT OBJECT IS THE MISSILE ITSELF, not whoever shot it down. ObjectLeftHit's
+                 * second field tells the client WHAT WAS STRUCK, and it used to carry the killer -
+                 * so a missile your own flak swatted 500 m out arrived as "this missile struck YOU",
+                 * and the client duly played the impact on your hull, screen shake and all. The
+                 * warhead never touched anyone: the damage that killed it went the other way, from
+                 * the flak to the missile, and it is already accounted for by the normal damage
+                 * path. A missile that genuinely reaches a hull is removed by CollisionResolution
+                 * instead, which names the object it actually collided with - that path is the one
+                 * that should shake the screen, and it still does.
+                 *
+                 * Naming the missile keeps the detonation rendering where the missile died, which
+                 * is what a flak kill should look like, and drops the phantom impact. */
+                this.remover.notifyRemovingCauseAdded(toObject, RemovingCause.Hit, toObject);
             }
             else
             {

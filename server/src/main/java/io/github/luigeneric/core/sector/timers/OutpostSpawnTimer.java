@@ -124,6 +124,19 @@ public class OutpostSpawnTimer extends DelayedTimer
     private final Map<Faction, List<SpaceObject>> ring = new EnumMap<>(Faction.class);
     private final Map<Faction, Integer> ringLevel = new EnumMap<>(Faction.class);
 
+    /* Ring repair. A ring that has lost platforms but is not empty rebuilds after this long; the
+     * timestamp of the loss lives in ringIncompleteSince, cleared as soon as the ring is whole.
+     *
+     * The original rule was "reconcile on a level change or a full wipe, never on a partial kill",
+     * so that shooting a platform meant something. It does mean something - for ten minutes. What
+     * it also meant was that every platform ever lost was lost for the rest of the server's uptime,
+     * and losses only ever accumulate: the ring had no way back short of the control level moving,
+     * which on a quiet system it never does. Ten minutes is long enough that clearing a ring before
+     * an assault is still worth doing and the assault is not fighting fresh guns, and short enough
+     * that an operator does not log in to a week of erosion. */
+    private static final long RING_REPAIR_MILLIS = 10 * 60 * 1000L;
+    private final Map<Faction, Long> ringIncompleteSince = new EnumMap<>(Faction.class);
+
     /** A platform template is a ring member if a same-faction Outpost template sits within
      *  RING_NEAR of it. SectorFactory uses this to keep ring members out of the static spawn. */
     public static boolean isRingMember(final StaticNpcTemplate platform, final SectorDesc sectorDesc)
@@ -177,7 +190,32 @@ public class OutpostSpawnTimer extends DelayedTimer
 
         final int applied = ringLevel.getOrDefault(faction, -1);
         final int[] tiers = RING_BY_LEVEL[Math.min(level, RING_BY_LEVEL.length - 1)];
-        if (applied == level && !(current.isEmpty() && tiers.length > 0)) return;
+
+        /* Has this ring been standing short of its full complement long enough to repair?
+         * Tracked per faction and reset the moment it is whole again, so the clock measures how
+         * long the gap has EXISTED rather than how long since the last rebuild - a platform killed
+         * one minute after a repair still waits its own full interval. */
+        final int wanted = Math.min(tiers.length, slots.size());
+        final boolean understrength = current.size() < wanted;
+        final long now = tick.getTimeStamp();
+        boolean repairDue = false;
+        if (understrength)
+        {
+            final Long since = ringIncompleteSince.putIfAbsent(faction, now);
+            repairDue = since != null && now - since >= RING_REPAIR_MILLIS;
+        }
+        else
+        {
+            ringIncompleteSince.remove(faction);
+        }
+
+        if (applied == level && !(current.isEmpty() && tiers.length > 0) && !repairDue) return;
+        if (repairDue)
+        {
+            log.info("{} outpost ring in sector {} repairing: {} of {} platforms standing",
+                    faction, sectorDesc.getSectorID(), current.size(), wanted);
+            ringIncompleteSince.remove(faction);
+        }
 
         for (final SpaceObject p : current)
         {

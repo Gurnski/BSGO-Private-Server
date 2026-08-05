@@ -429,14 +429,34 @@ function buildSector(s) {
    * p75 25, max 42.9. u^1.35 over 6..42 reproduces the median (20.1) and the low skew. */
   const rockRadius = () => 6 + 36 * Math.pow(R.f(), 1.35);
 
-  /* Outposts sit on their faction's side of the sector, mirroring upstream's Tannhauser
-   * (Colonial -5105, Cylon +5055) at roughly half the half-extent. A single-owner system puts its
-   * one outpost on its owner's side just the same, so the geography reads consistently. */
-  const opX = half * 0.51;
+  /* Outposts take OPPOSITE CORNERS of the sector, each on its own faction's side.
+   *
+   * They used to sit on the x axis at +-0.51*half with z jittered inside +-0.2*half, which on a
+   * regular 10 km system put them 5.1-5.4 km apart - cramped, and the reason is that all the
+   * separation was being bought along the ONE axis that has no room to spare. The spawn corridors
+   * are boxes at 0.78..0.92*half, so an outpost's 900 m ring already came within 450 m of where the
+   * enemy undocks; pushing further out along x buys ~400 m and then the ring is inside the corridor.
+   *
+   * The z axis was the space nobody was using. Sending Colonial to (-x,-z) and Cylon to (+x,+z)
+   * takes the separation diagonally across the sector instead of across its narrow waist:
+   * ~8.1-8.7 km on a regular system, up ~60%, with the ring still 500-700 m clear of both the rim
+   * and the corridors. Nothing else has to move for it - outposts are placed FIRST, so the belts,
+   * planetoids, lairs and junk fields all route around the new keep-out on their own.
+   *
+   * The ceiling is the rim, not the corridors: ring outer edge at 0.72*half + 900 lands at 0.88 of
+   * the way out on a 10 km system. Past that the client starts calling the position empty space
+   * (SpaceLevel.cs:134) and pins the map icon to the edge.
+   *
+   * The cost, stated plainly: your own outpost is now ~3.5-4 km from your undock instead of ~1.7,
+   * because it is in the corner rather than straight ahead. The enemy's is ~8 km away instead of
+   * ~6.5. Both sides pay it symmetrically.
+   *
+   * A single-owner system puts its one outpost in its owner's corner just the same, so the
+   * geography reads consistently whether or not the system is contested. */
   s.outpostFactions.forEach(f => {
     const sign = f === 'Colonial' ? -1 : 1;
-    const x = sign * opX;
-    const z = R.range(-half * 0.2, half * 0.2);
+    const x = sign * half * R.range(0.44, 0.48);
+    const z = sign * half * R.range(0.68, 0.72);
     objects.push(outpost(f, x, 0, z));
     objects.push(...platformRing(f, platformTier(s, f), x, 0, z));
     keepOut.push({ x, z, r: RING + 500 });     // ring plus clearance for the guns
@@ -944,6 +964,32 @@ function buildSector(s) {
     for (const c of [sp.a, sp.b]) {
       if (Math.abs(c.x) > half || Math.abs(c.z) > half)
         throw new Error(`sector ${s.id}: spawn corner (${c.x},${c.z}) outside +/-${half}`);
+    }
+  }
+
+  /* No station's guns may reach the box a player materialises in. The outpost sites are the only
+   * thing in here placed by ratio rather than by rejection sampling, so they are the only thing
+   * that can drift into a corridor when someone retunes them - and the failure is invisible from
+   * the JSON: undocking players simply start dying to an outpost they cannot yet see. Asserted
+   * rather than commented for exactly that reason.
+   *
+   * SPAWN_SAFE is measured from the ring, not the outpost, because the ring is the part that
+   * shoots: platforms sit RING out from the centre and acquire at the same 3,500 m the outpost
+   * does. 1,200 m of daylight past the ring is arbitrary but generous - it is longer than the
+   * 900 m ring radius itself. */
+  const SPAWN_SAFE = 1200;
+  for (const st of objects.filter(o => o.spaceEntityType === 'Outpost')) {
+    for (const sp of spawns) {
+      const lo = { x: Math.min(sp.a.x, sp.b.x), z: Math.min(sp.a.z, sp.b.z) };
+      const hi = { x: Math.max(sp.a.x, sp.b.x), z: Math.max(sp.a.z, sp.b.z) };
+      // Distance from the outpost centre to the spawn box (0 if it is inside it).
+      const dx = Math.max(lo.x - st.position.x, 0, st.position.x - hi.x);
+      const dz = Math.max(lo.z - st.position.z, 0, st.position.z - hi.z);
+      const gap = Math.hypot(dx, dz) - RING;
+      if (gap < SPAWN_SAFE) {
+        throw new Error(`sector ${s.id}: ${st.faction} outpost ring is ${Math.round(gap)} m from the ` +
+                        `${sp.faction} spawn box (need ${SPAWN_SAFE}) - move the outposts in or the corridors out`);
+      }
     }
   }
 

@@ -14,6 +14,7 @@ import io.github.luigeneric.core.spaceentities.Ship;
 import io.github.luigeneric.core.spaceentities.SpaceObject;
 import io.github.luigeneric.enums.Faction;
 import io.github.luigeneric.enums.Gear;
+import io.github.luigeneric.enums.SpaceEntityType;
 import io.github.luigeneric.enums.WeaponFxType;
 import io.github.luigeneric.linearalgebra.base.Transform;
 import io.github.luigeneric.linearalgebra.base.Vector3;
@@ -69,6 +70,9 @@ public abstract class WeaponAction extends AbilityAction
         return this.targetSpaceObjects.size() == targetSize;
     }
 
+    /** Angle 0 means "no arc limit" to Algorithm3D.isInsideAngle - the station override below. */
+    private static final float ANGLE_UNRESTRICTED = 0f;
+
     protected boolean isShipWeaponInRange(final SpaceObject target)
     {
         final Transform casterTransform = castingShip.getMovementController().getTransform();
@@ -77,9 +81,37 @@ public abstract class WeaponAction extends AbilityAction
 
         final float minRange = this.ability.getItemBuffAdd().getStatOrDefault(ObjectStat.MinRange);
         final float maxRange = this.ability.getItemBuffAdd().getStatOrDefault(ObjectStat.MaxRange);
-        final float angle = this.ability.getItemBuffAdd().getStatOrDefault(ObjectStat.Angle);
+        final float angle = isStation(castingShip)
+                ? ANGLE_UNRESTRICTED
+                : this.ability.getItemBuffAdd().getStatOrDefault(ObjectStat.Angle);
 
         return Algorithm3D.isWeaponPositionInRange(casterTransform, spotTransform, targetPos, minRange, maxRange, angle);
+    }
+
+    /**
+     * Outposts and weapon platforms shoot in every direction; everything else obeys its firing arc.
+     * <p>
+     * An arc is a statement about a hull that can TURN. A ship whose gun will not bear swings the
+     * gun onto the target, and the arc is what makes that manoeuvre matter. A station cannot: it is
+     * pinned to one heading for its whole life, so its arcs stop being a tactical constraint and
+     * become a permanent blind spot at a fixed compass bearing - approach an outpost from the right
+     * quarter and part of its battery can never answer, no matter what either of you does.
+     * <p>
+     * The outpost battery makes that concrete. Its cannons carry Angle 180 and its point defence
+     * 360, so both already cover everything; the four missile launchers carry 90, and their
+     * hardpoints sit three to starboard and one to port. Every launcher can therefore engage a
+     * hemisphere, but only ever ONE hemisphere - a target to port drew a single launcher while
+     * three sat idle facing the wrong way, which is why an outpost never seemed to fire all four.
+     * The stations they are modelled on have traversing turrets; the mounts are where the muzzle
+     * flash renders, not the direction the gun is welded.
+     * <p>
+     * Range still applies, hit chance still applies, and nothing here touches ships - a capital's
+     * broadside is still a broadside, because a capital can turn to bring it to bear.
+     */
+    private static boolean isStation(final SpaceObject caster)
+    {
+        return caster.getSpaceEntityType() == SpaceEntityType.Outpost
+                || caster.getSpaceEntityType() == SpaceEntityType.WeaponPlatform;
     }
 
     protected boolean isHitByWeapon(final SpaceObject target)

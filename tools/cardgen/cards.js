@@ -2296,12 +2296,35 @@ const TOKEN = 130920111;   // command tokens - the capital-rental currency
  * by 65 dump cards - and they are the same weapon family restatted. Accepted deliberately.
  */
 const CAPITAL_WEAPONS = [
+  /* ANGLE 65 MAKES THIS A BROADSIDE, WHICH IS WHAT ITS MOUNTS ALREADY WERE.
+   *
+   * Angle is a DEVIATION limit, not a cone width: Algorithm3D.isInsideAngle asks whether the angle
+   * between the mount's forward and the target is <= Angle, and Vector3.angle returns 0..180. So
+   * 180 means "anywhere", and that is what this weapon carried.
+   *
+   * Every capital hull mounts all six of these abeam - bullet01/02/03 at +90 degrees yaw and
+   * bullet04/05/06 at -90 - so the guns are welded to the flanks and the arc was the only thing
+   * that could have made that matter. At 180 it did not: a capital nose-on to its target fired the
+   * full battery straight down its own centreline, which is both physically silly and the reason
+   * the event bosses hit like nothing else in the game - they never had to manoeuvre, so their
+   * whole broadside was always on target while a player was still turning.
+   *
+   * 65 gives each flank a 130-degree window centred on the beam. Abeam is the sweet spot, the bow
+   * and stern are blind, and a capital has to turn to fight - which is what NpcDynamicTimer's
+   * broadside steering now does for the NPC ones. Wide enough that a slow hull can hold a target in
+   * its arc through a turn; narrow enough that pointing at someone is the wrong thing to do.
+   *
+   * This is the whole capital family, not just the bosses - the same battery arms the player
+   * carriers and the named capitals (Brimir, Pegasus, Galactica, Surtur, Basestar, Guardian). It
+   * has to be: they share the hardpoints, so a player carrier was firing its flank guns through its
+   * own hull too. Point defence (360) and flak (90) are untouched, so a capital's close-in defensive
+   * screen still covers it while it manoeuvres. */
   { sys: 6031, ab: 71002031, slot: 'gun', key: 'capship_cannon', action: 'FireCannon',
     launch: 'Auto', max: 6, frame: 43, abFrame: 43, tyl: 250000, dur: 50000,
     views: ['Target', 'DMGHigh', 'MaxRange', 'OptimalRange', 'Accuracy', 'CriticalOffense',
             'ArmorPiercing', 'Angle', 'Cooldown', 'BuffCost'],
     st: { Accuracy: 130, DamageLow: 325, DamageHigh: 410, CriticalOffense: 100, ArmorPiercing: 40,
-          MinRange: 0, OptimalRange: 2500, MaxRange: 4100, Angle: 180,
+          MinRange: 0, OptimalRange: 2500, MaxRange: 4100, Angle: 65,
           Cooldown: 4.25, PowerPointCost: 25 } },
 
   { sys: 6032, ab: 71002032, slot: 'defensive_weapon', key: 'capship_pd', action: 'PointDefence',

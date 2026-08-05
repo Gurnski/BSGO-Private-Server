@@ -4,6 +4,8 @@ import io.github.luigeneric.core.movement.Maneuver;
 import io.github.luigeneric.core.movement.MovementOptions;
 import io.github.luigeneric.core.movement.maneuver.DirectionalManeuver;
 import io.github.luigeneric.core.movement.maneuver.DirectionalWithoutRollManeuver;
+import io.github.luigeneric.core.player.container.ShipSlot;
+import io.github.luigeneric.core.player.container.ShipSlots;
 import io.github.luigeneric.core.sector.SectorCards;
 import io.github.luigeneric.core.sector.Tick;
 import io.github.luigeneric.core.sector.management.ISpaceObjectRemover;
@@ -19,13 +21,19 @@ import io.github.luigeneric.enums.ManeuverType;
 import io.github.luigeneric.enums.RemovingCause;
 import io.github.luigeneric.enums.SpaceEntityType;
 import io.github.luigeneric.linearalgebra.base.Euler3;
+import io.github.luigeneric.linearalgebra.base.Quaternion;
+import io.github.luigeneric.linearalgebra.base.StaticVectors;
 import io.github.luigeneric.linearalgebra.base.Vector3;
 import io.github.luigeneric.templates.utils.ObjectStat;
+import io.github.luigeneric.templates.utils.SpotDesc;
 import io.github.luigeneric.utils.BgoRandom;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 @Slf4j
 public class NpcDynamicTimer extends NpcTimer
 {
@@ -138,7 +146,8 @@ public class NpcDynamicTimer extends NpcTimer
         final Vector3 botPosition = botFighterMoving.getMovementController().getPosition();
 
         final float closestDistance = closest.getMovementController().getPosition().distance(botPosition);
-        final Euler3 direction = Euler3.direction(Vector3.sub(closest.getMovementController().getPosition(), botPosition));
+        final Euler3 bearing = Euler3.direction(Vector3.sub(closest.getMovementController().getPosition(), botPosition));
+        final Euler3 direction = broadsideSteering(botFighterMoving, bearing);
         final boolean isDirectionWithRoll = tick.getValue() % 5 == 0;
         final Maneuver newManeuver = isDirectionWithRoll ? new DirectionalManeuver(direction) : new DirectionalWithoutRollManeuver(direction);
         botFighterMoving.getMovementController().setNextManeuver(newManeuver);
@@ -159,6 +168,94 @@ public class NpcDynamicTimer extends NpcTimer
 
         botFighterMoving.getMovementController().getMovementOptions().setSpeed(speed);
         botFighterMoving.getMovementController().getMovementOptions().setThrottleSpeed(speed);
+    }
+
+    /* ---------------------------------------------------------------- broadside steering
+     *
+     * A capital's guns are welded to its flanks. All six capital cannons sit abeam - three at +90
+     * degrees yaw, three at -90 - and now that they carry a real firing arc (65 degrees deviation,
+     * see CAPITAL_WEAPONS in cards.js) a hull pointed at its target has its entire main battery
+     * blind. Pure pursuit, which is what every NPC did, is therefore the one heading from which a
+     * capital cannot shoot; before the arc existed it was merely nonsense to watch, because at 180
+     * degrees the guns fired through the hull and it hit like a wall of bricks regardless.
+     *
+     * So capitals turn beam-on and circle instead. Fighters and everything else are untouched -
+     * their guns are on the nose, and pursuit is exactly right for them. */
+
+    /** Yaw offset that puts the target on the beam. */
+    private static final float BROADSIDE_YAW = 90f;
+    /** A mount this far off the nose counts as a flank gun rather than a chase gun. */
+    private static final float BROADSIDE_MOUNT_MIN_YAW = 45f;
+    /** Decided per hull, not per ship: it is a property of where the hardpoints are. */
+    private static final Map<Long, Boolean> BROADSIDE_HULLS = new ConcurrentHashMap<>();
+
+    /**
+     * Heading for this pass: the bearing to the target for a nose-armed hull, or the beam for a
+     * broadside one.
+     * <p>
+     * Which side is whichever is the shorter turn from the current heading, so a capital settles
+     * onto the nearer beam and stays there rather than flip-flopping across the target every time
+     * the geometry crosses over. The result is a slow circle at whatever range the pursuit logic
+     * below already holds, with the battery bearing throughout.
+     */
+    private Euler3 broadsideSteering(final NpcShip npcShip, final Euler3 bearing)
+    {
+        if (!isBroadsideHull(npcShip))
+            return bearing;
+
+        final float currentYaw = Euler3.fromQuaternion(npcShip.getMovementController().getRotation()).yaw();
+        final float left = normaliseDegrees(bearing.yaw() - BROADSIDE_YAW - currentYaw);
+        final float right = normaliseDegrees(bearing.yaw() + BROADSIDE_YAW - currentYaw);
+        final float chosenYaw = Math.abs(left) <= Math.abs(right)
+                ? bearing.yaw() - BROADSIDE_YAW
+                : bearing.yaw() + BROADSIDE_YAW;
+
+        /* Pitch is dropped on purpose. Rolling a capital onto its side to bring guns up at a
+         * fighter above it would be correct and looks absurd on a hull this size; the beam is a
+         * horizontal manoeuvre, and the vertical component is left to the arc's own generosity. */
+        return new Euler3(0f, normaliseDegrees(chosenYaw), 0f);
+    }
+
+    /**
+     * Whether most of this hull's fitted gun mounts point off the nose.
+     * <p>
+     * Read from the hardpoints rather than a hull list: the question is literally "are the guns on
+     * the sides", the World card already answers it, and a list of capital guids would go stale the
+     * first time someone adds one. Cached per card guid because it cannot change for a given hull.
+     */
+    private boolean isBroadsideHull(final NpcShip npcShip)
+    {
+        return BROADSIDE_HULLS.computeIfAbsent(npcShip.getShipCard().getCardGuid(), guid ->
+        {
+            final Optional<ShipSlots> optSlots = npcShip.getSpaceSubscribeInfo().getShipSlots();
+            if (optSlots.isEmpty())
+                return false;
+
+            int flank = 0;
+            int nose = 0;
+            for (final ShipSlot slot : optSlots.get().values())
+            {
+                if (slot.getShipSystem() == null || slot.getShipSystem().getCardGuid() == 0)
+                    continue;
+                final Optional<SpotDesc> optSpot =
+                        npcShip.getWorldCard().getSpot(slot.getShipSlotCard().getObjectPointServerHash());
+                if (optSpot.isEmpty())
+                    continue;
+                final Vector3 mountForward =
+                        Quaternion.mult(optSpot.get().getLocalTransform().getRotation(), StaticVectors.FORWARD);
+                if (Math.abs(Vector3.angle(StaticVectors.FORWARD, mountForward)) >= BROADSIDE_MOUNT_MIN_YAW)
+                    flank++;
+                else
+                    nose++;
+            }
+            return flank > nose;
+        });
+    }
+
+    /** Fold an angle into -180..180 so "shorter turn" comparisons mean what they say. */
+    private static float normaliseDegrees(final float degrees)
+    {
+        return ((degrees % 360f) + 540f) % 360f - 180f;
     }
 
     private boolean jumpOutNpcIfNoMoreTargets(final NpcShip botFighterMoving)
