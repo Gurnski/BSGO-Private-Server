@@ -124,17 +124,22 @@ public class OutpostSpawnTimer extends DelayedTimer
     private final Map<Faction, List<SpaceObject>> ring = new EnumMap<>(Faction.class);
     private final Map<Faction, Integer> ringLevel = new EnumMap<>(Faction.class);
 
-    /* Ring repair. A ring that has lost platforms but is not empty rebuilds after this long; the
+    /* Ring repair. A ring standing short of its full complement rebuilds after this long; the
      * timestamp of the loss lives in ringIncompleteSince, cleared as soon as the ring is whole.
      *
      * The original rule was "reconcile on a level change or a full wipe, never on a partial kill",
-     * so that shooting a platform meant something. It does mean something - for ten minutes. What
-     * it also meant was that every platform ever lost was lost for the rest of the server's uptime,
-     * and losses only ever accumulate: the ring had no way back short of the control level moving,
-     * which on a quiet system it never does. Ten minutes is long enough that clearing a ring before
-     * an assault is still worth doing and the assault is not fighting fresh guns, and short enough
-     * that an operator does not log in to a week of erosion. */
-    private static final long RING_REPAIR_MILLIS = 10 * 60 * 1000L;
+     * so that shooting a platform meant something. It does mean something - for fifteen minutes.
+     * What it also meant was that every platform ever lost was lost for the rest of the server's
+     * uptime, and losses only ever accumulate: the ring had no way back short of the control level
+     * moving, which on a quiet system it never does.
+     *
+     * A FULL wipe waits the same fifteen minutes as a partial one. It used to rebuild inside the
+     * 5-second tick - the `current.isEmpty()` clause below was an unconditional rebuild - so the
+     * harder you hit a ring the faster it came back, and clearing one outright bought you no time
+     * at all. Levelling the two is what makes clearing the ring a real opening rather than a
+     * formality. Fresh outposts are unaffected: they arrive on a control-level CHANGE, which
+     * rebuilds immediately and does not consult this clock. */
+    private static final long RING_REPAIR_MILLIS = 15 * 60 * 1000L;
     private final Map<Faction, Long> ringIncompleteSince = new EnumMap<>(Faction.class);
 
     /** A platform template is a ring member if a same-faction Outpost template sits within
@@ -209,7 +214,7 @@ public class OutpostSpawnTimer extends DelayedTimer
             ringIncompleteSince.remove(faction);
         }
 
-        if (applied == level && !(current.isEmpty() && tiers.length > 0) && !repairDue) return;
+        if (applied == level && !repairDue) return;
         if (repairDue)
         {
             log.info("{} outpost ring in sector {} repairing: {} of {} platforms standing",

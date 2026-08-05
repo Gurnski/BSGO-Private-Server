@@ -4,6 +4,7 @@ import io.github.luigeneric.core.movement.Maneuver;
 import io.github.luigeneric.core.movement.MovementOptions;
 import io.github.luigeneric.core.movement.maneuver.DirectionalManeuver;
 import io.github.luigeneric.core.movement.maneuver.DirectionalWithoutRollManeuver;
+import io.github.luigeneric.core.player.ShipAbility;
 import io.github.luigeneric.core.player.container.ShipSlot;
 import io.github.luigeneric.core.player.container.ShipSlots;
 import io.github.luigeneric.core.sector.SectorCards;
@@ -25,6 +26,7 @@ import io.github.luigeneric.linearalgebra.base.Quaternion;
 import io.github.luigeneric.linearalgebra.base.StaticVectors;
 import io.github.luigeneric.linearalgebra.base.Vector3;
 import io.github.luigeneric.templates.utils.ObjectStat;
+import io.github.luigeneric.templates.utils.ShipAbilityAffect;
 import io.github.luigeneric.templates.utils.SpotDesc;
 import io.github.luigeneric.utils.BgoRandom;
 import lombok.extern.slf4j.Slf4j;
@@ -90,6 +92,16 @@ public class NpcDynamicTimer extends NpcTimer
      */
     public void updateBotManeuver(final NpcShip npcShip)
     {
+        /* LEVELLING RUNS BEFORE THE PATROL CHECK, and that ordering is the fix.
+         *
+         * It used to sit below the `patrolObjectives.isEmpty()` return, so the one thing every
+         * out-of-combat ship needs was reachable only by ships that happen to carry a patrol box.
+         * Anything else - and, now that capitals bank hard through their broadside turns, anything
+         * that has just finished a fight - kept whatever attitude its last attack vector left it
+         * in, forever. A capital parked at 40 degrees of bank is what "spawned in sideways" looks
+         * like from another ship. */
+        levelOut(npcShip);
+
         final List<PatrolObjective> patrolObjectives = npcShip.getPatrolObjectives();
         if (patrolObjectives.isEmpty())
             return;
@@ -98,24 +110,6 @@ public class NpcDynamicTimer extends NpcTimer
         {
             log.error("inside NpcDynamicTimer: PatrolObjective was null, therefore returned out of update movement");
             return;
-        }
-
-        /* Level the ship while patrolling. Two ways a tilt used to linger: a bot resuming from
-         * Rest re-applied its FULL current facing (pitch and bank included), and a bot whose
-         * target died keeps flying its last attack vector until it happens to exit the box -
-         * with a +-700 m lair box and boss Speed 12, effectively forever. Either way a capital
-         * cruising its own lair nosed 50 degrees up reads as "spawned sideways" to anyone who
-         * arrives later. Keep the heading, drop pitch and bank; once level, the condition goes
-         * false and nothing re-broadcasts. */
-        final boolean resting = npcShip.getMovementController().getCurrentManeuver() == null ||
-                npcShip.getMovementController().getCurrentManeuver().getManeuverType() == ManeuverType.Rest;
-        final Euler3 facing = Euler3.fromQuaternion(npcShip.getMovementController().getRotation());
-        final float pitchDeg = ((facing.pitch() % 360f) + 540f) % 360f - 180f;
-        final float rollDeg = ((facing.getRoll() % 360f) + 540f) % 360f - 180f;
-        if (resting || Math.abs(pitchDeg) > 10f || Math.abs(rollDeg) > 10f)
-        {
-            npcShip.getMovementController().setNextManeuver(
-                    new DirectionalManeuver(new Euler3(0f, facing.yaw(), 0f)));
         }
 
         final MovementOptions movementOptions = npcShip.getMovementController().getMovementOptions();
@@ -170,6 +164,33 @@ public class NpcDynamicTimer extends NpcTimer
         botFighterMoving.getMovementController().getMovementOptions().setThrottleSpeed(speed);
     }
 
+    /**
+     * Bring an out-of-combat ship back to level flight, keeping its heading.
+     * <p>
+     * Two ways a tilt used to linger: a bot resuming from Rest re-applied its FULL current facing
+     * (pitch and bank included), and a bot whose target died keeps flying its last attack vector
+     * until something else moves it - with a +-700 m lair box and boss Speed 12, effectively
+     * forever. Capitals now add a third, because a broadside turn banks them a long way over and
+     * the turn stops the instant the target does.
+     * <p>
+     * Heading is deliberately preserved: yawing a ship back to some canonical bearing would look
+     * like it flinched. Pitch and bank go to zero and nothing else changes, and once level the
+     * condition goes false so nothing re-broadcasts.
+     */
+    private void levelOut(final NpcShip npcShip)
+    {
+        final boolean resting = npcShip.getMovementController().getCurrentManeuver() == null ||
+                npcShip.getMovementController().getCurrentManeuver().getManeuverType() == ManeuverType.Rest;
+        final Euler3 facing = Euler3.fromQuaternion(npcShip.getMovementController().getRotation());
+        final float pitchDeg = normaliseDegrees(facing.pitch());
+        final float rollDeg = normaliseDegrees(facing.getRoll());
+        if (resting || Math.abs(pitchDeg) > 10f || Math.abs(rollDeg) > 10f)
+        {
+            npcShip.getMovementController().setNextManeuver(
+                    new DirectionalManeuver(new Euler3(0f, facing.yaw(), 0f)));
+        }
+    }
+
     /* ---------------------------------------------------------------- broadside steering
      *
      * A capital's guns are welded to its flanks. All six capital cannons sit abeam - three at +90
@@ -184,9 +205,7 @@ public class NpcDynamicTimer extends NpcTimer
 
     /** Yaw offset that puts the target on the beam. */
     private static final float BROADSIDE_YAW = 90f;
-    /** A mount this far off the nose counts as a flank gun rather than a chase gun. */
-    private static final float BROADSIDE_MOUNT_MIN_YAW = 45f;
-    /** Decided per hull, not per ship: it is a property of where the hardpoints are. */
+    /** Decided per hull, not per ship: it is a property of the hull's guns and their mounts. */
     private static final Map<Long, Boolean> BROADSIDE_HULLS = new ConcurrentHashMap<>();
 
     /**
@@ -217,11 +236,24 @@ public class NpcDynamicTimer extends NpcTimer
     }
 
     /**
-     * Whether most of this hull's fitted gun mounts point off the nose.
+     * Whether most of this hull's main guns are BLIND straight ahead.
      * <p>
-     * Read from the hardpoints rather than a hull list: the question is literally "are the guns on
-     * the sides", the World card already answers it, and a list of capital guids would go stale the
-     * first time someone adds one. Cached per card guid because it cannot change for a given hull.
+     * This asks the firing check's own question, and that is the whole point. The first version of
+     * this asked a different one - "are most gun mounts more than 45 degrees off the nose" - which
+     * sounds equivalent and is not, because a mount's rotation is a RENDER transform: it orients
+     * the muzzle flash, and almost every hull in the game stores its guns at 90 degrees regardless
+     * of where they actually shoot. Fighters, escorts and capitals alike came back "broadside", so
+     * every NPC in the sector began circling its target instead of chasing it, and banked
+     * permanently because it never stopped turning.
+     * <p>
+     * What actually decides whether a hull must turn to fight is the mount angle MEASURED AGAINST
+     * THAT WEAPON'S OWN ARC - exactly the comparison Algorithm3D.isInsideAngle performs when the
+     * shot is taken. A fighter's guns sit at 90 degrees with a 90 degree arc and so bear dead
+     * ahead, on the boundary; a capital's sit at 90 with a 65 degree arc and cannot. Asking the
+     * question this way, the answer cannot disagree with what the guns will actually do.
+     * <p>
+     * Area weapons are excluded: flak and point defence are hemispherical sweeps that hold no
+     * opinion about which way the hull points, and counting them would drown out the main battery.
      */
     private boolean isBroadsideHull(final NpcShip npcShip)
     {
@@ -231,24 +263,33 @@ public class NpcDynamicTimer extends NpcTimer
             if (optSlots.isEmpty())
                 return false;
 
-            int flank = 0;
-            int nose = 0;
+            int bearsAhead = 0;
+            int blindAhead = 0;
             for (final ShipSlot slot : optSlots.get().values())
             {
                 if (slot.getShipSystem() == null || slot.getShipSystem().getCardGuid() == 0)
+                    continue;
+                final ShipAbility ability = slot.getShipAbility();
+                if (ability == null || ability.getShipAbilityCard() == null)
+                    continue;
+                if (ability.getShipAbilityCard().getShipAbilityAffect() == ShipAbilityAffect.Area)
                     continue;
                 final Optional<SpotDesc> optSpot =
                         npcShip.getWorldCard().getSpot(slot.getShipSlotCard().getObjectPointServerHash());
                 if (optSpot.isEmpty())
                     continue;
+
                 final Vector3 mountForward =
                         Quaternion.mult(optSpot.get().getLocalTransform().getRotation(), StaticVectors.FORWARD);
-                if (Math.abs(Vector3.angle(StaticVectors.FORWARD, mountForward)) >= BROADSIDE_MOUNT_MIN_YAW)
-                    flank++;
+                final float mountOffNose = Vector3.angle(StaticVectors.FORWARD, mountForward);
+                final float arc = ability.getItemBuffAdd().getStatOrDefault(ObjectStat.Angle);
+                // arc 0 is "no limit" to isInsideAngle, so such a gun always bears
+                if (arc == 0f || mountOffNose <= arc)
+                    bearsAhead++;
                 else
-                    nose++;
+                    blindAhead++;
             }
-            return flank > nose;
+            return blindAhead > bearsAhead;
         });
     }
 

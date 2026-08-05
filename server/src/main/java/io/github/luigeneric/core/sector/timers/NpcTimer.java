@@ -269,7 +269,6 @@ public abstract class NpcTimer extends DelayedTimer
                     }
                     return true;
                 })
-                .filter(spaceObject -> !isNpcVersusStation(against, spaceObject))
                 .filter(spaceObject ->
                 {
                     final Relation relation =
@@ -277,44 +276,5 @@ public abstract class NpcTimer extends DelayedTimer
                     return relation == Relation.Enemy;
                 })
                 .toList();
-    }
-
-    /**
-     * Whether this pairing is an NPC and an enemy station, in either order.
-     * <p>
-     * Neither may START a fight with the other. This is an ACQUISITION rule only: it is applied
-     * where auto-aggro picks a target out of the sector, and nowhere else. Retaliation is untouched
-     * - getTargetFromDamageHistory reads the damage history, so anything that shoots a station is
-     * still shot back at, and a player who opens fire on an outpost gets the full battery. Weapons
-     * are untouched too: NPC_TARGETABLE_TYPES still lists both station types, so once a station IS
-     * the target the guns fire normally.
-     * <p>
-     * The reason is attrition with nobody watching. A station acquires anything hostile that drifts
-     * into 3,500 m and holds the target out to 4,000; a roaming bot returns fire; and the ring
-     * platforms are the part that dies, because they have a fraction of the outpost's hull. Every
-     * wave of NPC spawns in a contested system was therefore grinding the ring down on a timer that
-     * runs whether or not a single player is online - and the ring only rebuilds on a control-level
-     * change, so the losses accumulated across a whole night and the operator logged in to outposts
-     * standing bare. Two NPC factions shelling each other's furniture is not the conquest mechanic
-     * doing its job; it is a background process deleting content.
-     * <p>
-     * Players are deliberately not covered. Taking an outpost apart is supposed to be something a
-     * PERSON does, and it still costs the ring exactly what it always did.
-     */
-    private static boolean isNpcVersusStation(final SpaceObject a, final SpaceObject b)
-    {
-        return (isStationType(a) && isMobileNpcType(b)) || (isMobileNpcType(a) && isStationType(b));
-    }
-
-    private static boolean isStationType(final SpaceObject obj)
-    {
-        return obj.getSpaceEntityType() == SpaceEntityType.Outpost
-                || obj.getSpaceEntityType() == SpaceEntityType.WeaponPlatform;
-    }
-
-    private static boolean isMobileNpcType(final SpaceObject obj)
-    {
-        return obj.getSpaceEntityType() == SpaceEntityType.BotFighter
-                || obj.getSpaceEntityType() == SpaceEntityType.Cruiser;
     }
 }

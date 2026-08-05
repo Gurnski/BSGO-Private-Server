@@ -172,6 +172,23 @@ const PLATFORM_LOOT = [101];
 
 const RING = 900.0;      // platform ring radius around an outpost; see the note in cards.js
 
+/* NPC wing patrol boxes, as fractions of effHalf. Module scope because two unrelated passes need
+ * the same geometry - the wings themselves, and the boss-lair siting that has to avoid them - and
+ * the lair pass runs first. See the long note at the box() builder for why the corners are what
+ * they are. */
+const WING_X = [0.22, 0.46];    // inner..outer, on the faction's own x sign
+const WING_Z = [0.20, 0.50];    // near..far, mirrored AGAINST that x sign so the wings take
+                                // opposite corners rather than sharing a z band
+
+/** The wing box for one faction sign, as a circle the lair siting can score against. */
+function wingBoxAvoidCircle(sign, effHalf) {
+  const cx = sign * effHalf * (WING_X[0] + WING_X[1]) / 2;
+  const cz = -sign * effHalf * (WING_Z[0] + WING_Z[1]) / 2;
+  const halfX = effHalf * (WING_X[1] - WING_X[0]) / 2;
+  const halfZ = effHalf * (WING_Z[1] - WING_Z[0]) / 2;
+  return { x: cx, z: cz, r: Math.hypot(halfX, halfZ) + 2500 };
+}
+
 /* PLATFORM AGGRO: 3500 acquire / 4000 leash, matching the outpost they guard.
  *
  * These were both 1200 - the wiki's stated platform range - and that is why the sentry platforms sat
@@ -592,18 +609,19 @@ function buildSector(s) {
     /* Lair siting is a three-body problem the verification pass measured the first cut losing:
      * 33 of 46 lairs sat inside the enemy wing's patrol box (perpetual NPC war at the lair,
      * guards chronically dead, claim pollution voiding the jackpot) and in 7 sectors the two
-     * bosses spawned within aggro of each other and ground each other down. So: +z band only
-     * (the wing boxes are biased -z and stop at z = 0.12*effHalf), outer-x band (wings stop at
-     * x = 0.40*effHalf), the two wing boxes join the scoring as avoid-circles, and the other
-     * faction's lair joins as a 5,000 m circle - boss auto-aggro is 2,500 m cast from a +-700 m
-     * patrol box, so 4,800 m of centre separation means the two bosses never meet. bestSpot
-     * scores rather than rejects, so a cramped sector degrades to "as far as possible" instead
-     * of failing. Corner shells may lose an out-of-bounds bite; that is the documented trade. */
+     * bosses spawned within aggro of each other and ground each other down. So: the two wing
+     * boxes join the scoring as avoid-circles, and the other faction's lair joins as a 5,000 m
+     * circle - boss auto-aggro is 2,500 m cast from a +-700 m patrol box, so 4,800 m of centre
+     * separation means the two bosses never meet. bestSpot scores rather than rejects, so a
+     * cramped sector degrades to "as far as possible" instead of failing. Corner shells may lose
+     * an out-of-bounds bite; that is the documented trade.
+     *
+     * The two avoid-circles are DERIVED from the wing geometry rather than restated. They used to
+     * be four hand-written literals that happened to match the box of the day, which is a standing
+     * invitation to move one and silently un-avoid the other: the moment the wings changed corners
+     * the lairs would have carried on dodging where the wings used to be. */
     const otherLair = lairs.length ? lairs[lairs.length - 1] : null;
-    const lairAvoid = [
-      { x: -effHalf * 0.28, z: -effHalf * 0.165, r: effHalf * 0.31 + 2500 },
-      { x:  effHalf * 0.28, z: -effHalf * 0.165, r: effHalf * 0.31 + 2500 },
-    ];
+    const lairAvoid = [-1, 1].map(wingSign => wingBoxAvoidCircle(wingSign, effHalf));
     if (otherLair) lairAvoid.push({ x: otherLair.x, z: otherLair.z, r: 5000 });
     const [cx, cz] = bestSpot(40, () => [
       sign * R.range(effHalf * 0.48, effHalf * 0.66),
@@ -881,13 +899,27 @@ function buildSector(s) {
   /* Wing boxes are effHalf-scaled and deliberately smaller than the first cut's half-scaled
    * [0.18, 0.70] x [-0.62, 0.16]: at 40 km the old box patrolled 6 km of empty space beyond the
    * content core, and at every size its x-edge sat within escort/line aggro (1,500/2,000 m) of
-   * the enemy spawn corridor, so fresh spawns were acquired before they finished orienting. The
-   * 0.40*effHalf x-edge leaves ~1,900 m to the corridor at 10 km - beyond escort aggro, a hair
-   * inside line aggro at the extreme corner - and the -z bias keeps the whole box out of the
-   * lair band in +z. */
+   * the enemy spawn corridor, so fresh spawns were acquired before they finished orienting.
+   *
+   * THE TWO WINGS NOW TAKE OPPOSITE CORNERS, and the z band is what does it. Both boxes used to
+   * share the same -z band and differ only in the sign of x, which left their nearest edges 1,600 m
+   * apart at 10 km - inside every tier's auto-aggro (1,000-2,500 m). The result was a permanent
+   * NPC-on-NPC brawl in the middle of every contested system that started at spawn and restarted
+   * on the 30-second respawn, whether or not a player was ever there. Mirroring z as well as x
+   * opens that to ~3,000 m between the nearest corners, which is outside every tier's acquisition.
+   *
+   * It also gets the wings off the outposts. Outposts sit in the (-x,-z) and (+x,+z) corners, so
+   * the wings take the two corners nobody else wants: the nearest wing edge is now ~4,500 m from
+   * the enemy outpost, comfortably outside its 3,500 m acquisition, where the old band put Cylon
+   * spawns 1,285 m from the Colonial outpost - close enough that the station opened fire on them
+   * as they arrived and the ring ground itself down unattended.
+   *
+   * x still stops short of the spawn corridors: 0.46*effHalf leaves ~1,600 m at 10 km.
+   * WING_X/WING_Z are at module scope - the boss-lair pass avoids these same boxes and runs
+   * earlier. */
   const box = (sign) => ({
-    min: vec(sign * effHalf * 0.16, -100.0, -effHalf * 0.45),
-    max: vec(sign * effHalf * 0.40, 100.0, effHalf * 0.12),
+    min: vec(sign * effHalf * WING_X[0], -100.0, -sign * effHalf * WING_Z[1]),
+    max: vec(sign * effHalf * WING_X[1], 100.0, -sign * effHalf * WING_Z[0]),
   });
   const wing = (f) => {
     const t = NPCS[f];
