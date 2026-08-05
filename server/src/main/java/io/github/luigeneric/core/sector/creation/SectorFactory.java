@@ -3,6 +3,8 @@ package io.github.luigeneric.core.sector.creation;
 import io.github.luigeneric.MicrometerRegistry;
 import io.github.luigeneric.core.LootTemplates;
 import io.github.luigeneric.core.UsersContainer;
+import io.github.luigeneric.core.database.DbProvider;
+import io.github.luigeneric.core.database.OutpostStateRecord;
 import io.github.luigeneric.core.gameplayalgorithms.UniformDamageDistribution;
 import io.github.luigeneric.core.protocols.ProtocolID;
 import io.github.luigeneric.core.protocols.ProtocolRegistryWriteOnly;
@@ -60,6 +62,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.TimeUnit;
@@ -80,6 +83,12 @@ public class SectorFactory
     private final MicrometerRegistry micrometerRegistry;
     private final GameServerParamsConfig gameServerParamsConfig;
     private final UsersContainer usersContainer;
+    private final DbProvider dbProvider;
+
+    /** The saved galaxy, read once on the first sector and reused for the other 57. Sectors are all
+     *  built back-to-back in SectorRegistry's constructor, so a per-sector query would be 58 round
+     *  trips for one small table. Null until that first read; empty after it if nothing was saved. */
+    private Map<Long, List<OutpostStateRecord>> persistedOutpostStates;
 
 
     private SectorCards extractSectorCards(final long id)
@@ -140,6 +149,12 @@ public class SectorFactory
      * CanColonialOutpost flag is true only because contested systems allow either side. If the
      * literal 47 was load-bearing for some reason we have not found, this is where it went.
      *
+     * <p>
+     * SEEDING IS THE FALLBACK, NOT THE RULE. A system the database remembers is restored to what it
+     * was, and only a system with no saved row is seeded from the flags as described above. That
+     * makes the paragraphs above the description of a FIRST boot - once the galaxy has been played
+     * and saved once, this method is mostly reading rows back.
+     *
      * @return wrapper object OutPostStates hard wired two states (there is only one op each faction)
      */
     private OutPostStates setupOutpostStates(final SectorBlueprint sectorBlueprint, final MapStarDesc starDesc, final Tick tick)
@@ -153,11 +168,48 @@ public class SectorFactory
         final int coloOpPts = (colonialMayHold && !cylonMayHold) ? 3000 : 0;
         final int cyloOpPts = (cylonMayHold && !colonialMayHold) ? 3000 : 0;
 
+        final OutpostState colonialState =
+                new OutpostState(Faction.Colonial, coloOpPts, 3600, starDesc.isCanColonialOutpost(), tick);
+        final OutpostState cylonState =
+                new OutpostState(Faction.Cylon, cyloOpPts, 3600, starDesc.isCanCylonOutpost(), tick);
+
+        restorePersisted(sectorBlueprint.sectorDesc().getSectorID(), colonialState, cylonState);
+
         return new OutPostStates(
-                new OutpostState(Faction.Colonial, coloOpPts, 3600, starDesc.isCanColonialOutpost(), tick),
-                new OutpostState(Faction.Cylon, cyloOpPts, 3600, starDesc.isCanCylonOutpost(), tick),
+                colonialState, cylonState,
                 sectorBlueprint.sectorDesc().getColonialProgressTemplate(), sectorBlueprint.sectorDesc().getCylonProgressTemplate()
         );
+    }
+
+    /**
+     * Overwrite the seeded states with whatever the last run saved for this sector.
+     * <p>
+     * Restores per faction, not per sector: a row for one side leaves the other side on its seeded
+     * value, so a half-written snapshot degrades to "the half we know" instead of blanking the
+     * system. Absent rows are the normal case on a first boot and are silent.
+     */
+    private void restorePersisted(final long sectorId, final OutpostState colonialState, final OutpostState cylonState)
+    {
+        if (this.persistedOutpostStates == null)
+        {
+            this.persistedOutpostStates = this.dbProvider.fetchOutpostStates();
+            log.info("Outpost control restored for {} sector(s)", this.persistedOutpostStates.size());
+        }
+
+        final List<OutpostStateRecord> saved = this.persistedOutpostStates.get(sectorId);
+        if (saved == null)
+            return;
+
+        for (final OutpostStateRecord record : saved)
+        {
+            switch (record.faction())
+            {
+                case Colonial -> colonialState.restore(record.opPoints(), record.dieTimeStamp());
+                case Cylon -> cylonState.restore(record.opPoints(), record.dieTimeStamp());
+                default -> log.warn("Ignoring persisted outpost state for sector {}: faction {} cannot hold outposts",
+                        sectorId, record.faction());
+            }
+        }
     }
 
     public Sector createSector(final long id)

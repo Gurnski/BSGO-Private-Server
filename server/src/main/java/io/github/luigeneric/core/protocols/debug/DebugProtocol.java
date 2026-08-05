@@ -4,6 +4,8 @@ import io.github.luigeneric.ApplicationBootstrap;
 import io.github.luigeneric.binaryreaderwriter.BgoProtocolReader;
 import io.github.luigeneric.binaryreaderwriter.BgoProtocolWriter;
 import io.github.luigeneric.core.*;
+import io.github.luigeneric.core.database.DbProvider;
+import io.github.luigeneric.core.database.OutpostStateRecord;
 import io.github.luigeneric.core.movement.maneuver.PulseManeuver;
 import io.github.luigeneric.core.movement.maneuver.TargetLaunchManeuver;
 import io.github.luigeneric.core.movement.maneuver.TeleportManeuver;
@@ -568,6 +570,30 @@ public class DebugProtocol extends BgoProtocol
                     sendEzMsg(sb.toString());
                 }, () -> sendEzMsg("npcs: not in a sector"));
             }
+            /* outpost_fill [colonial|cylon|both] [<sectorId>|all] - hand systems to a faction.
+             *
+             * The galaxy comes up with ten outposts because only ten systems are anyone's by
+             * default: OutpostSpawnTimer spawns unconditionally in the four base sectors, and
+             * SectorFactory seeds the six single-faction systems to full points. The other 46 are
+             * contested, start at zero and are meant to be earned - which is correct for a live
+             * server and useless for a private one where nobody is farming 900 points to see
+             * whether an outpost renders.
+             *
+             * So this sets points, it does not create objects. Everything downstream stays real:
+             * OutpostSpawnTimer notices within 5s and spawns through the sector's own Outpost
+             * template, the platform ring builds to the matching control level, and the drain timer
+             * starts eating the points back at the template rate. A filled system is a system some-
+             * one could have taken, not a special one.
+             *
+             * Defaults are both factions, every sector - the whole point is the one-word form. */
+            case "outpost_fill" -> outpostCommand(br, true);
+            /* outpost_clear [colonial|cylon|both] [<sectorId>|all] - the same in reverse. Base
+             * sectors keep theirs regardless; OutpostSpawnTimer.despawnOp refuses to strip them. */
+            case "outpost_clear" -> outpostCommand(br, false);
+            // outpost_status [<sectorId>] - who holds what, and what is still standing.
+            case "outpost_status" -> outpostStatus(br);
+            // outpost_save - force the snapshot to disk. fill/clear already do this for you.
+            case "outpost_save" -> saveOutpostStates(true);
             case "set_counter_by" ->
             {
                 try
@@ -1866,6 +1892,166 @@ public class DebugProtocol extends BgoProtocol
 
 
 
+
+    /* ------------------------------ outpost control ------------------------------ */
+
+    /** Full points. The clamp ceiling in OutpostState.increasePoints, and control level 8 in
+     *  OutpostSpawnTimer's ring ladder - a filled system arrives fortified. */
+    private static final int OUTPOST_POINTS_MAX = 3000;
+
+    /**
+     * Shared body of outpost_fill and outpost_clear.
+     * <p>
+     * Both arguments are optional and order-independent in practice because they cannot be
+     * confused: the faction is a word, the scope is a number or "all". Missing arguments mean
+     * "both factions, every sector", which is the form worth typing.
+     * <p>
+     * The death timestamp is zeroed either way. Filling past a lockout is the whole point of an
+     * override, and clearing WITHOUT zeroing it would leave the sector blocked for an hour on a
+     * death that never happened.
+     */
+    private void outpostCommand(final BgoProtocolReader br, final boolean fill) throws IOException
+    {
+        final String rawFaction = tryReadString(br).orElse("both").trim().toLowerCase();
+        final String rawScope = tryReadString(br).orElse("all").trim().toLowerCase();
+
+        final boolean doColonial = rawFaction.startsWith("col") || rawFaction.equals("both") || rawFaction.equals("all");
+        final boolean doCylon = rawFaction.startsWith("cyl") || rawFaction.equals("both") || rawFaction.equals("all");
+        if (!doColonial && !doCylon)
+        {
+            sendEzMsg((fill ? "outpost_fill" : "outpost_clear") + " [colonial|cylon|both] [<sectorId>|all]");
+            return;
+        }
+
+        final List<Sector> targets = resolveSectorScope(rawScope);
+        if (targets == null)
+            return;
+
+        final int points = fill ? OUTPOST_POINTS_MAX : 0;
+        int changed = 0;
+        int barred = 0;
+        for (final Sector sector : targets)
+        {
+            if (doColonial)
+            {
+                if (sector.getColonialOpState().isCanOutpost()) { sector.getColonialOpState().restore(points, 0); changed++; }
+                else barred++;
+            }
+            if (doCylon)
+            {
+                if (sector.getCylonOpState().isCanOutpost()) { sector.getCylonOpState().restore(points, 0); changed++; }
+                else barred++;
+            }
+        }
+
+        saveOutpostStates(false);
+
+        /* barred is not an error worth hiding. A blanket fill always hits the ten systems whose
+         * star flags bar one side or both - that is the map working - and an operator who sees
+         * only "changed" would go looking for a bug in the sectors that did not move. */
+        final StringBuilder sb = new StringBuilder(fill ? "outpost_fill: " : "outpost_clear: ")
+                .append(changed).append(" sector-faction(s) set to ").append(points).append(" pts");
+        if (barred > 0)
+            sb.append(", ").append(barred).append(" skipped (faction barred from those systems)");
+        sb.append(fill ? " - outposts appear within 5s" : " - outposts leave within 5s, base sectors keep theirs");
+        sendEzMsg(sb);
+        log.warn("{} outpost_{} faction={} scope={} changed={} barred={}",
+                ctx.user().getUserLog(), fill ? "fill" : "clear", rawFaction, rawScope, changed, barred);
+    }
+
+    /**
+     * "all"/blank for the galaxy, or one sector id. Returns null - and has already told the
+     * operator why - when the argument names nothing.
+     */
+    private List<Sector> resolveSectorScope(final String rawScope)
+    {
+        if (rawScope.isEmpty() || rawScope.equals("all"))
+        {
+            return sectorRegistry.getSectors().stream().filter(sector -> !sector.isZone()).toList();
+        }
+        final long sectorId;
+        try
+        {
+            sectorId = Long.parseLong(rawScope);
+        }
+        catch (final NumberFormatException notANumber)
+        {
+            sendEzMsg("scope must be a sector id or 'all', got '" + rawScope + "'");
+            return null;
+        }
+        final Optional<Sector> optSector = sectorRegistry.getSectorById(sectorId);
+        if (optSector.isEmpty())
+        {
+            sendEzMsg("no sector " + sectorId);
+            return null;
+        }
+        return List.of(optSector.get());
+    }
+
+    /**
+     * Points against reality, per sector.
+     * <p>
+     * Prints points AND the outpost objects actually in space, because the two disagree in ways
+     * worth seeing: a system just filled shows points with no outpost until the timer catches up,
+     * and a system whose template has no Outpost entry for that faction shows points that will
+     * never become one.
+     */
+    private void outpostStatus(final BgoProtocolReader br)
+    {
+        final List<Sector> targets = resolveSectorScope(tryReadString(br).orElse("all").trim().toLowerCase());
+        if (targets == null)
+            return;
+
+        final StringBuilder sb = new StringBuilder();
+        int liveOutposts = 0;
+        int listed = 0;
+        for (final Sector sector : targets)
+        {
+            final List<Outpost> outposts = sector.getCtx().spaceObjects().getSpaceObjectsOfEntityType(SpaceEntityType.Outpost);
+            liveOutposts += outposts.size();
+
+            final int coloPts = sector.getColonialOpState().getOpPoints();
+            final int cyloPts = sector.getCylonOpState().getOpPoints();
+            if (outposts.isEmpty() && coloPts == 0 && cyloPts == 0)
+                continue;
+
+            listed++;
+            sb.append("sector ").append(sector.getId())
+                    .append(": colonial ").append(coloPts).append(" pts")
+                    .append(sector.getColonialOpState().isCanOutpost() ? "" : " (barred)")
+                    .append(", cylon ").append(cyloPts).append(" pts")
+                    .append(sector.getCylonOpState().isCanOutpost() ? "" : " (barred)")
+                    .append(", live ").append(outposts.size())
+                    .append('\n');
+        }
+        sb.append("total ").append(liveOutposts).append(" outpost(s) across ")
+                .append(targets.size()).append(" sector(s), ").append(listed).append(" listed");
+        sendEzMsg(sb);
+    }
+
+    /**
+     * Snapshot outpost control to the database.
+     * <p>
+     * Called after every fill and clear rather than only at shutdown: an override is a deliberate
+     * act, and losing it to a crash - or to a dev-mode reload, which kills the process without ever
+     * reaching the shutdown save - would leave the operator retyping it and doubting whether the
+     * persistence works at all.
+     */
+    private void saveOutpostStates(final boolean announce)
+    {
+        try
+        {
+            final List<OutpostStateRecord> records = sectorRegistry.snapshotOutpostStates();
+            CDI.current().select(DbProvider.class).get().writeOutpostStates(records);
+            if (announce)
+                sendEzMsg("outpost_save: " + records.size() + " sector-faction row(s) written");
+        }
+        catch (final Exception ex)
+        {
+            log.error("Could not persist outpost states from console command", ex);
+            sendEzMsg("outpost save failed: " + ex);
+        }
+    }
 
     /** readString past the end of the console message throws; an Optional is the honest shape. */
     private Optional<String> tryReadString(final BgoProtocolReader br)

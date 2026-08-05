@@ -6,6 +6,7 @@ import io.github.luigeneric.core.player.AvatarDescription;
 import io.github.luigeneric.core.player.Player;
 
 import java.util.Collection;
+import java.util.List;
 import java.util.Map;
 
 public interface DbProvider
@@ -33,4 +34,12 @@ public interface DbProvider
     void fetchGuilds(final GuildRegistry guildRegistry);
 
     Map<Long, CounterRecord> fetchAllCounters();
+
+    /**
+     * Every persisted outpost contest, keyed by sector id. Sectors absent from the map have never
+     * been saved and fall back to the star-flag seeding in SectorFactory, which is what the whole
+     * galaxy did before this table existed.
+     */
+    Map<Long, List<OutpostStateRecord>> fetchOutpostStates();
+    void writeOutpostStates(final Collection<OutpostStateRecord> records);
 }

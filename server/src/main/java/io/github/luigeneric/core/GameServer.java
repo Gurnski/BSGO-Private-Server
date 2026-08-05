@@ -7,6 +7,7 @@ import io.github.luigeneric.binaryreaderwriter.BgoProtocolWriter;
 import io.github.luigeneric.core.community.guild.GuildRegistry;
 import io.github.luigeneric.core.community.party.PartyRegistry;
 import io.github.luigeneric.core.database.DbProvider;
+import io.github.luigeneric.core.database.OutpostStateRecord;
 import io.github.luigeneric.core.galaxy.Galaxy;
 import io.github.luigeneric.core.gameplayalgorithms.ExperienceToLevelAlgo;
 import io.github.luigeneric.core.player.Player;
@@ -170,6 +171,20 @@ public class GameServer implements IServerListenerSubscriber, UserDisconnectedSu
             }
         }
         log.warn("All onlineusers disconnected");
+
+        // Before the sectors stop, not after: the outpost states are read off live sectors, and
+        // taking the snapshot first means the numbers written are the ones the last tick produced.
+        try
+        {
+            final List<OutpostStateRecord> outpostStates = this.sectorRegistry.snapshotOutpostStates();
+            log.warn("Writing outpost control for {} sector-factions...", outpostStates.size());
+            this.dbProviderProvider.writeOutpostStates(outpostStates);
+            log.warn("Outpost control save finished");
+        }
+        catch (final Exception ex)
+        {
+            log.error("Outpost control save FAILED - the galaxy will come back seeded, not as it was", ex);
+        }
 
         log.warn("SectorRegistry stopping...");
         this.sectorRegistry.shutdown();

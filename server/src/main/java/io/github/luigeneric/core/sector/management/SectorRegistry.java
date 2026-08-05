@@ -2,9 +2,11 @@ package io.github.luigeneric.core.sector.management;
 
 
 import io.github.luigeneric.MicrometerRegistry;
+import io.github.luigeneric.core.database.OutpostStateRecord;
 import io.github.luigeneric.core.sector.Sector;
 import io.github.luigeneric.core.sector.creation.SectorFactory;
 import io.github.luigeneric.core.sector.creation.SectorRandomGenerationUtils;
+import io.github.luigeneric.enums.Faction;
 import io.github.luigeneric.enums.StaticCardGUID;
 import io.github.luigeneric.templates.cards.CardView;
 import io.github.luigeneric.templates.cards.GalaxyMapCard;
@@ -16,6 +18,7 @@ import io.quarkus.virtual.threads.VirtualThreads;
 import jakarta.enterprise.context.ApplicationScoped;
 import lombok.Getter;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -96,6 +99,35 @@ public class SectorRegistry
     public SectorFactory getSectorFactory()
     {
         return sectorFactory;
+    }
+
+    /**
+     * Every live sector's outpost contest, in the shape the database stores.
+     * <p>
+     * Both factions are written for every sector, including the ones sitting at zero. A sector that
+     * only wrote rows when someone held it could never record a system being LOST - the old row
+     * would survive and the next boot would hand the outpost back to whoever had already been
+     * driven out of it.
+     * <p>
+     * Zones are excluded: they are transient instanced sectors keyed by the same id space, and
+     * persisting one would write a row a real sector then reads back.
+     */
+    public List<OutpostStateRecord> snapshotOutpostStates()
+    {
+        final List<OutpostStateRecord> records = new ArrayList<>();
+        for (final Sector sector : this.sectorMap.values())
+        {
+            if (sector.isZone())
+                continue;
+
+            final OutpostState colonial = sector.getColonialOpState();
+            final OutpostState cylon = sector.getCylonOpState();
+            records.add(new OutpostStateRecord(sector.getId(), Faction.Colonial,
+                    colonial.getOpPoints(), colonial.getDieTimeStamp()));
+            records.add(new OutpostStateRecord(sector.getId(), Faction.Cylon,
+                    cylon.getOpPoints(), cylon.getDieTimeStamp()));
+        }
+        return records;
     }
 
 

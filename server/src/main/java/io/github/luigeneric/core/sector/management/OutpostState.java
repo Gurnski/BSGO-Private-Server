@@ -12,7 +12,12 @@ public class OutpostState
     @Getter
     private int opPoints;
     private final float secondsBlocked;
+    @Getter
     private long dieTimeStamp;
+    /** Whether this faction may hold this system at all, straight off the galaxy star flags. False
+     *  makes getDelta return 0 no matter how many points are set, so anything driving points from
+     *  outside - persistence, admin commands - has to read this to explain why nothing happened. */
+    @Getter
     private final boolean canOutpost;
     private boolean isOutPostCached;
     private final Tick tick;
@@ -59,6 +64,29 @@ public class OutpostState
         this.opPoints -= deltaDecrease;
         this.opPoints = Math.max(this.opPoints, 0);
         return false;
+    }
+
+    /**
+     * Put this contest exactly where it is told, ignoring the capture rules.
+     * <p>
+     * Every other mutator here is a move in the game - increasePoints refuses while blocked,
+     * decreasePoints floors at zero, opDied starts the lockout - which is right for the things
+     * players do and wrong for the two things that are not gameplay at all: restoring the snapshot
+     * a previous run left behind, and an operator saying "this system is held now". Both need to
+     * reproduce a state, not earn it, so both come through here.
+     * <p>
+     * canOutpost is deliberately NOT consulted. A faction barred from holding this system reads
+     * back exactly what it was given and still spawns nothing, because getDelta returns 0 for it -
+     * so a bad restore or a mistyped command is inert rather than silently rewritten, and the row
+     * that goes back to disk is the row that came off it.
+     *
+     * @param opPoints     control points; clamped to the same 0..3000 the game clamps to
+     * @param dieTimeStamp epoch millis of the last death, or 0 for "never died, take it freely"
+     */
+    public void restore(final int opPoints, final long dieTimeStamp)
+    {
+        this.opPoints = Mathf.clampSafe(opPoints, 0, 3000);
+        this.dieTimeStamp = dieTimeStamp;
     }
 
     public boolean isBlocked()

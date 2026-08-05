@@ -6,6 +6,7 @@ import io.github.luigeneric.core.MissionUpdater;
 import io.github.luigeneric.core.community.guild.GuildRegistry;
 import io.github.luigeneric.core.database.CounterRecord;
 import io.github.luigeneric.core.database.DbProvider;
+import io.github.luigeneric.core.database.OutpostStateRecord;
 import io.github.luigeneric.core.player.*;
 import io.github.luigeneric.core.player.container.ShipSlot;
 import io.github.luigeneric.core.player.container.ShipSlots;
@@ -706,6 +707,69 @@ public class SqLiteProvider implements DbProvider
             throw new RuntimeException(e);
         }
         return counterDescMap;
+    }
+
+    /**
+     * Read every saved outpost contest.
+     * <p>
+     * A failure here returns empty rather than propagating, which is the one place in this class
+     * that swallows a SQLException on purpose. This runs inside sector construction, so throwing
+     * would take the whole galaxy down over a table that is pure enrichment: with no rows the
+     * sectors seed themselves from the star flags exactly as they did before the table existed.
+     * Losing a session's conquest is a bad afternoon; failing to boot is a dead server.
+     */
+    @Override
+    public Map<Long, List<OutpostStateRecord>> fetchOutpostStates()
+    {
+        final Map<Long, List<OutpostStateRecord>> bySector = new HashMap<>();
+        try (var dbConnection = agroalDataSource.getConnection();
+             final PreparedStatement ps = dbConnection.prepareStatement(
+                     "SELECT sector_id, faction_id, op_points, die_time_stamp FROM sector_outpost_states");
+             final ResultSet rs = ps.executeQuery())
+        {
+            while (rs.next())
+            {
+                final long sectorId = rs.getLong(1);
+                final Faction faction = Faction.valueOf(rs.getInt(2));
+                if (faction == null)
+                {
+                    log.warn("Skipping outpost state for sector {}: unknown faction id {}", sectorId, rs.getInt(2));
+                    continue;
+                }
+                bySector.computeIfAbsent(sectorId, id -> new ArrayList<>())
+                        .add(new OutpostStateRecord(sectorId, faction, rs.getInt(3), rs.getLong(4)));
+            }
+        }
+        catch (final SQLException e)
+        {
+            log.error("Could not read sector_outpost_states, falling back to star-flag seeding", e);
+            return Map.of();
+        }
+        return bySector;
+    }
+
+    @Override
+    public void writeOutpostStates(final Collection<OutpostStateRecord> records)
+    {
+        try (var dbConnection = agroalDataSource.getConnection();
+             final PreparedStatement ps = dbConnection.prepareStatement(
+                     "REPLACE INTO sector_outpost_states(sector_id, faction_id, op_points, die_time_stamp)" +
+                             " VALUES (?, ?, ?, ?)"))
+        {
+            for (final OutpostStateRecord record : records)
+            {
+                ps.setLong(1, record.sectorId());
+                ps.setInt(2, record.faction().value);
+                ps.setInt(3, record.opPoints());
+                ps.setLong(4, record.dieTimeStamp());
+                ps.addBatch();
+            }
+            ps.executeBatch();
+        }
+        catch (final SQLException e)
+        {
+            log.error("Could not write sector_outpost_states - outpost control will not survive this restart", e);
+        }
     }
 
     private void writeAvatar(final AvatarDescription avatarDescription, final long userID)
